@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Refined dashboard KPI hierarchy so invested/current/profit stay primary, moved lifetime cash in/out and fees/taxes into supporting analytics, and fixed asset-module categorization to use structured account/instrument types instead of fragile name matching.
+
 - Rebuilt the analytics page into a distinct wealth cockpit with dark navigation, command hero, performance bridge, portfolio signal panel, gain/loss contributor lists, adaptive asset modules for future PF/NPS/PPF/FD/cash/ESPP/Fidelity inputs, and corrected gross-cash-in vs net-invested profit terminology.
 
 - Initialized project governance, package configuration, and test setup.

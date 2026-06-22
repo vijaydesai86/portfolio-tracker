@@ -1555,3 +1555,42 @@ textarea {
     text-align: left;
   }
 }
+
+/* main-vs-sub-analytics */
+.main-wealth-strip {
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+}
+
+.main-wealth-strip .metric-value {
+  font-size: clamp(24px, 2.6vw, 34px);
+}
+
+.sub-analytics-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(190px, 1fr));
+  gap: 12px;
+}
+
+.sub-analytics-strip .mini-insight {
+  min-height: 106px;
+  background: #f8fafc;
+  box-shadow: 0 8px 20px rgba(24, 29, 35, 0.04);
+}
+
+.sub-analytics-strip .mini-insight strong {
+  font-size: 20px;
+}
+
+@media (max-width: 980px) {
+  .main-wealth-strip,
+  .sub-analytics-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .main-wealth-strip,
+  .sub-analytics-strip {
+    grid-template-columns: 1fr;
+  }
+}

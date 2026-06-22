@@ -21,7 +21,7 @@ Portfolio Tracker is a local-first multi-asset portfolio tracker and goal planne
 - Browser CAS PDF upload with password entry, staging, and commit flow privately verified against the provided password-protected CAS PDF via Selenium/Firefox.
 - Browser INDMoney Transactions Ledger XLSX import for US stocks, dividends, taxes, stock splits, cash movements, open positions, and combined analytics.
 - Live market refresh route for AMFI mutual fund NAVs, US stock quotes, latest USD/INR, and historical USD/INR for transaction-date conversion. USD/INR now uses reachable real-provider fallbacks; NAV and stock quote failures are surfaced in the UI instead of using fake fallback data.
-- Research-driven analytics cockpit with INR net worth, gross cash in, net invested, current profit/loss, total profit/loss after fees/tax, INR XIRR with historical FX, performance bridge, allocation map, concentration signals, market-data freshness warnings, gain/loss contributors, asset-kind totals, India/US totals, source totals, and institution/AMC-style totals.
+- Research-driven analytics cockpit with main KPIs for invested amount, current value, and profit/loss; supporting cash-flow analytics for lifetime cash in, lifetime cash out, fees/taxes, and current P/L before fees; plus INR XIRR with historical FX, performance bridge, allocation map, concentration signals, market-data freshness warnings, gain/loss contributors, asset-kind totals, India/US totals, source totals, and institution/AMC-style totals.
 - Separate Holdings and Transactions workspaces with search, sorting, explicit edit mode, inline editing, category overrides, quantity/price/value edits, and transaction corrections.
 - Implemented manual CSV fallback for holdings, cash, simple ESPP contribution buckets, PPF, SSY, NPS, EPF, FD, gold, and other manual balances.
 - Importable canonical CSV fallback templates under `fixtures/importable/` covering every requested asset class.
@@ -32,7 +32,11 @@ Portfolio Tracker is a local-first multi-asset portfolio tracker and goal planne
 
 ## Performance Math
 
-The dashboard does not treat gross cash in as the only invested number. Sells, redemptions, dividends, interest, maturities, and withdrawals reduce net invested for current profit/loss. The headline model is: gross cash in, net invested, current value, current P/L, fees/tax, total P/L, and XIRR. Cash-out flows are used internally for net invested, but they are not a primary dashboard KPI.
+The dashboard does not treat lifetime cash in as the only invested number. Sells, redemptions, dividends, interest, maturities, and withdrawals reduce net invested for current profit/loss. The headline model is: invested, current value, profit/loss, and XIRR. Supporting cash-flow analytics show lifetime cash in, lifetime cash out, fees/taxes, and current P/L before fees.
+
+## Asset Module Classification
+
+Asset modules are classified from structured account/instrument types such as `mutual_fund`, `indian_stock`, `us_stock`, `epf`, `ppf`, `ssy`, `nps`, `fd`, `cash`, and `espp`. The app must not infer PF, stocks, or other modules from free-text fund names.
 
 ## Import Support Policy
 

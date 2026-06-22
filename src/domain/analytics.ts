@@ -19,6 +19,8 @@ export type HoldingInsight = {
   label: string;
   category: AssetCategory;
   assetKind: string;
+  accountType?: Account["type"];
+  instrumentType?: Instrument["type"];
   region: string;
   currency: string;
   value: number;
@@ -172,6 +174,8 @@ function buildHoldingInsight(balance: ManualBalance, backup: PortfolioBackup, mi
     label: balance.label,
     category: balance.category,
     assetKind: assetKind(instrument, account),
+    accountType: account?.type,
+    instrumentType: instrument?.type,
     region: region(instrument, account, balance.currency),
     currency: balance.currency,
     value: balance.value,

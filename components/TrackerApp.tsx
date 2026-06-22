@@ -4,6 +4,7 @@ import { AlertTriangle, Download, FileJson, LayoutDashboard, Pencil, RefreshCw, 
 import { useMemo, useState } from "react";
 import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
+import { buildReadinessModules, type ReadinessModule } from "@/src/domain/assetModules";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
 import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type CasCanonicalImport, type CasParseResult } from "@/src/importers/casText";
@@ -52,14 +53,6 @@ type DashboardSignal = {
   detail: string;
   tone: "good" | "warn" | "neutral";
   icon: "shield" | "alert" | "trend";
-};
-
-type ReadinessModule = {
-  label: string;
-  detail: string;
-  count: number;
-  value: number;
-  category: string;
 };
 
 export function TrackerApp() {
@@ -509,12 +502,17 @@ export function TrackerApp() {
               </div>
             </div>
 
-            <div className="wealth-strip">
-              <Metric label="Net Invested" value={formatMoney(performance.netInvested, backup.baseCurrency)} />
+            <div className="wealth-strip main-wealth-strip">
+              <Metric label="Invested" value={formatMoney(performance.netInvested, backup.baseCurrency)} />
               <Metric label="Current Value" value={formatMoney(performance.current, backup.baseCurrency)} />
-              <Metric label="Current P/L" value={formatMoney(performance.currentProfit, backup.baseCurrency)} />
-              <Metric label="Gross Cash In" value={formatMoney(performance.grossCashIn, backup.baseCurrency)} />
-              <Metric label="Fees / Tax" value={formatMoney(performance.feesAndTax, backup.baseCurrency)} />
+              <Metric label="Profit / Loss" value={formatMoney(performance.totalProfit, backup.baseCurrency)} />
+            </div>
+
+            <div className="sub-analytics-strip">
+              <MiniInsight label="Lifetime Cash In" value={formatMoney(performance.grossCashIn, backup.baseCurrency)} detail="buy, SIP, deposit, contribution" />
+              <MiniInsight label="Lifetime Cash Out" value={formatMoney(performance.cashOut, backup.baseCurrency)} detail="sell, redemption, dividend, interest, maturity, withdrawal" />
+              <MiniInsight label="Fees & Taxes" value={formatMoney(performance.feesAndTax, backup.baseCurrency)} detail="recorded charges and tax fields" />
+              <MiniInsight label="Current P/L Before Fees" value={formatMoney(performance.currentProfit, backup.baseCurrency)} detail="current value minus net invested" />
             </div>
 
             {(summary.missingFx.length > 0 || insights.transactionStats.missingFx.length > 0) && (
@@ -759,30 +757,6 @@ function calculateHoldingCosts(backup: PortfolioBackup): Map<string, HoldingCost
     costs.set(balance.id, { invested, profit, returnPercent: (profit / invested) * 100 });
   }
   return costs;
-}
-
-function buildReadinessModules(holdings: ReturnType<typeof calculatePortfolioInsights>["holdings"]): ReadinessModule[] {
-  const moduleDefs = [
-    { label: "Mutual Funds", detail: "CAS/CAMS/KFin statement positions", category: "Equity/Debt/Gold/Others", match: (kind: string, name: string) => /mutual fund|fund/i.test(kind + " " + name) },
-    { label: "Indian Stocks", detail: "Broker and demat equity positions", category: "Equity", match: (kind: string, name: string) => /indian stock|india stock|nse|bse/i.test(kind + " " + name) },
-    { label: "US Stocks", detail: "INDMoney, Fidelity, and other broker ledgers", category: "Equity", match: (kind: string, name: string) => /us|direct stock|fidelity|indmoney/i.test(kind + " " + name) },
-    { label: "PF / EPF", detail: "Provident fund contribution balances", category: "Debt", match: (kind: string, name: string) => /epf|pf|provident/i.test(kind + " " + name) },
-    { label: "PPF / SSY", detail: "Small savings balance modules", category: "Debt", match: (kind: string, name: string) => /ppf|ssy|sukanya/i.test(kind + " " + name) },
-    { label: "NPS", detail: "Tier I/II retirement allocations", category: "Equity/Debt/Others", match: (kind: string, name: string) => /nps|pension/i.test(kind + " " + name) },
-    { label: "FD", detail: "Fixed deposit maturity schedules", category: "Debt", match: (kind: string, name: string) => /fd|fixed deposit/i.test(kind + " " + name) },
-    { label: "Cash / ESPP", detail: "Manual cash and ESPP contribution entries", category: "Cash/Equity", match: (kind: string, name: string) => /cash|espp/i.test(kind + " " + name) }
-  ];
-
-  return moduleDefs.map((definition) => {
-    const matched = holdings.filter((holding) => definition.match(holding.assetKind, holding.label));
-    return {
-      label: definition.label,
-      detail: definition.detail,
-      category: definition.category,
-      count: matched.length,
-      value: matched.reduce((sum, holding) => sum + (holding.valueInBase ?? 0), 0)
-    };
-  });
 }
 
 function daysSince(date: string): number {

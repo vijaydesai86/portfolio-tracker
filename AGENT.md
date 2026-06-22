@@ -64,5 +64,7 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 
 ## Portfolio Analytics Rule
 
-- Dashboard profit labels must distinguish gross cash in, cash-out flows, net invested, current P/L, fees/tax, total P/L, and XIRR. Do not show "returned cash" as a headline KPI; use cash-out flows internally to derive net invested.
+- Dashboard profit labels must distinguish lifetime cash in, lifetime cash out, net invested, current P/L, fees/tax, total P/L, and XIRR. Main analytics should keep invested, current value, and profit/loss primary; supporting cash-flow analytics can show cash in/out and fees/taxes.
 - New analytics panels must remain adaptive to future asset modules: PF/EPF, PPF/SSY, NPS, FD, cash, ESPP, Indian stocks, US stocks, and mutual funds.
+
+- Asset modules must be classified from structured account/instrument types, never from free-text fund or provider names.
