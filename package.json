@@ -1,0 +1,50 @@
+{
+  "name": "portfolio-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first multi-asset portfolio tracker and goal planner.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "node scripts/selenium-smoke.mjs",
+    "cas:extract": "node scripts/extract-cas-text.mjs",
+    "test:cas:private": "vitest run tests/importers/cas-private.test.ts",
+    "test:ui:cas": "node scripts/selenium-cas-import.mjs",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "test:ind:private": "vitest run tests/importers/indmoney-private.test.ts",
+    "test:ui:ind": "node scripts/selenium-ind-import.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-table": "8.21.3",
+    "dexie": "4.2.1",
+    "lucide-react": "1.21.0",
+    "next": "16.2.9",
+    "papaparse": "5.5.3",
+    "pdfjs-dist": "6.0.227",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "read-excel-file": "9.2.0",
+    "recharts": "3.8.1",
+    "zod": "4.2.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.1",
+    "@types/node": "24.10.2",
+    "@types/papaparse": "5.3.16",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.1.2",
+    "jsdom": "27.3.0",
+    "selenium-webdriver": "4.39.0",
+    "typescript": "6.0.3",
+    "vitest": "4.1.9"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

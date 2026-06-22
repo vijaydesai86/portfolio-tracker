@@ -1,0 +1,21 @@
+node_modules/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+dist/
+# Private financial statements and extracted data must never be committed.
+*.pdf
+*.xls
+*.xlsx
+*.xlsm
+CAS_*.txt
+*CAS*.txt
+private-fixtures/
+local-fixtures/

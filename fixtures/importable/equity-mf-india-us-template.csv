@@ -1,0 +1,4 @@
+account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes
+Indian Mutual Funds,Mutual fund balance,mutual_fund,Equity,INR,0,2026-06-22,Template row - all Indian AMC schemes via CAS/manual balance
+Indian Stocks,Indian stock holding,indian_stock,Equity,INR,0,2026-06-22,Template row - NSE/BSE stock holding balance
+US Stocks,US stock holding,us_stock,Equity,USD,0,2026-06-22,Template row - Fidelity/INDMoney/other US broker balance

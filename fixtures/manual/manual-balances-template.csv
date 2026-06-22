@@ -1,0 +1,4 @@
+account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes
+Cash Wallet,Cash Wallet,cash,Cash,INR,10000,2026-06-22,example template row - replace before use
+Employer ESPP,ESPP Contribution,espp,Equity,USD,2000,2026-06-22,example template row - replace before use
+PPF,Public Provident Fund,ppf,Debt,INR,300000,2026-06-22,example template row - replace before use

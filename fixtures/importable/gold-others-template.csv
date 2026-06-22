@@ -1,0 +1,3 @@
+account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes
+Gold,Gold balance,gold,Gold,INR,0,2026-06-22,Template row - gold
+Other Assets,Other balance,other,Others,INR,0,2026-06-22,Template row - other assets

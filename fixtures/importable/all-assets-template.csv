@@ -1,0 +1,13 @@
+account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes
+Indian Mutual Funds,Mutual fund balance,mutual_fund,Equity,INR,0,2026-06-22,Template row - replace with CAS or manual MF balance
+Indian Stocks,Indian stock holding,indian_stock,Equity,INR,0,2026-06-22,Template row - replace with broker or manual stock balance
+US Stocks,US stock holding,us_stock,Equity,USD,0,2026-06-22,Template row - replace with Fidelity/INDMoney or manual US stock balance
+ESPP,ESPP contribution,espp,Equity,USD,0,2026-06-22,Template row - enter employee contribution only
+Cash,Cash balance,cash,Cash,INR,0,2026-06-22,Template row - replace with available cash
+PPF,PPF balance,ppf,Debt,INR,0,2026-06-22,Template row - replace with PPF statement balance
+SSY,SSY balance,ssy,Debt,INR,0,2026-06-22,Template row - replace with SSY statement balance
+NPS,NPS balance,nps,Debt,INR,0,2026-06-22,Template row - replace with NPS statement balance
+EPF,PF balance,epf,Debt,INR,0,2026-06-22,Template row - replace with EPFO passbook balance
+Fixed Deposits,FD balance,fd,Debt,INR,0,2026-06-22,Template row - replace with FD principal/current value
+Gold,Gold balance,gold,Gold,INR,0,2026-06-22,Template row - replace with gold ETF/SGB/physical value
+Other Assets,Other balance,other,Others,INR,0,2026-06-22,Template row - replace with other asset value
