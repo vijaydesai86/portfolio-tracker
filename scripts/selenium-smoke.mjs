@@ -24,7 +24,7 @@ try {
   await driver.get(url);
   await driver.wait(until.elementLocated(By.css("h1")), 15000);
   const title = await driver.findElement(By.css("h1")).getText();
-  if (!/Dashboard|Imports|Backup/.test(title)) {
+  if (!/Portfolio Analytics|Holdings|Transactions|Imports|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
   fs.writeFileSync(screenshotPath, await driver.takeScreenshot(), "base64");

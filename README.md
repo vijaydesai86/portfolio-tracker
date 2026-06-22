@@ -21,8 +21,8 @@ Portfolio Tracker is a local-first multi-asset portfolio tracker and goal planne
 - Browser CAS PDF upload with password entry, staging, and commit flow privately verified against the provided password-protected CAS PDF via Selenium/Firefox.
 - Browser INDMoney Transactions Ledger XLSX import for US stocks, dividends, taxes, stock splits, cash movements, open positions, and combined analytics.
 - Live market refresh route for AMFI mutual fund NAVs, US stock quotes, latest USD/INR, and historical USD/INR for transaction-date conversion. USD/INR now uses reachable real-provider fallbacks; NAV and stock quote failures are surfaced in the UI instead of using fake fallback data.
-- Dashboard analytics for linked holdings, INR allocation, INR XIRR with historical FX, invested/income/fee totals in INR, concentration, asset-kind totals, India/US totals, source totals, and institution/AMC-style totals.
-- Records workspace for searching and editing imported/manual holdings and imported transactions, including category overrides for mutual funds and other assets.
+- Analytics-first dashboard with invested amount, current value, current profit/loss, absolute return, INR XIRR with historical FX, returned cash, fees/tax, allocation charts, concentration, asset-kind totals, India/US totals, source totals, and institution/AMC-style totals.
+- Separate Holdings and Transactions workspaces with search, sorting, explicit edit mode, inline editing, category overrides, quantity/price/value edits, and transaction corrections.
 - Implemented manual CSV fallback for holdings, cash, simple ESPP contribution buckets, PPF, SSY, NPS, EPF, FD, gold, and other manual balances.
 - Importable canonical CSV fallback templates under `fixtures/importable/` covering every requested asset class.
 - Import pipeline with validation, deduplication, review-oriented error reporting, commit history, and manual-edit preservation.
