@@ -9,6 +9,8 @@ import { detectImportSource, type ImportDetection } from "@/src/importers/detect
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
 import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type CasCanonicalImport, type CasParseResult } from "@/src/importers/casText";
 import { applyCanonicalIndMoneyImport, buildCanonicalIndMoneyImport, parseIndMoneyWorkbook, type IndMoneyCanonicalImport, type IndMoneyParseResult } from "@/src/importers/indmoneyXlsx";
+import { applyCanonicalEpfoImport, buildCanonicalEpfoImport, parseEpfoPassbookText, type EpfoCanonicalImport, type EpfoPassbookParseResult } from "@/src/importers/epfoPassbook";
+import { applyCanonicalNpsImport, buildCanonicalNpsImport, parseNpsCsv, type NpsCanonicalImport, type NpsParseResult } from "@/src/importers/npsStatement";
 import { commitManualCsvImport } from "@/src/importers/importPipeline";
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
@@ -67,6 +69,10 @@ export function TrackerApp() {
   const [stagedCas, setStagedCas] = useState<CasCanonicalImport | null>(null);
   const [indParse, setIndParse] = useState<IndMoneyParseResult | null>(null);
   const [stagedInd, setStagedInd] = useState<IndMoneyCanonicalImport | null>(null);
+  const [epfoParse, setEpfoParse] = useState<EpfoPassbookParseResult | null>(null);
+  const [stagedEpfo, setStagedEpfo] = useState<EpfoCanonicalImport | null>(null);
+  const [npsParse, setNpsParse] = useState<NpsParseResult | null>(null);
+  const [stagedNps, setStagedNps] = useState<NpsCanonicalImport | null>(null);
   const [status, setStatus] = useState("Empty local portfolio. Import a manual CSV, CAS PDF, INDMoney XLSX, or restore a backup.");
   const [fxRate, setFxRate] = useState("");
   const [fxDate, setFxDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -238,6 +244,10 @@ export function TrackerApp() {
     setStagedCas(null);
     setIndParse(null);
     setStagedInd(null);
+    setEpfoParse(null);
+    setStagedEpfo(null);
+    setNpsParse(null);
+    setStagedNps(null);
     const lowerName = file.name.toLowerCase();
     const canReadText = lowerName.endsWith(".csv") || lowerName.endsWith(".json") || lowerName.endsWith(".html") || lowerName.endsWith(".txt");
     const textSample = canReadText ? (await file.text()).slice(0, 20000) : "";
@@ -248,6 +258,12 @@ export function TrackerApp() {
       setStatus(`${detection.label}: enter the PDF password and parse in browser.`);
     } else if (detection.providerId === "indmoney_export") {
       setStatus(`${detection.label}: parse the XLSX ledger in browser.`);
+    } else if (detection.providerId === "epfo_passbook") {
+      setStatus(`${detection.label}: parse the PF PDF in browser.`);
+    } else if (detection.providerId === "nps_statement" && detection.nativeInputType === "csv") {
+      setStatus(`${detection.label}: parse the NPS CSV in browser.`);
+    } else if (detection.providerId === "nps_statement") {
+      setStatus(`${detection.label}: detected, but only the verified CSV statement parser is implemented.`);
     } else if (detection.status === "implemented") {
       setStatus(`${detection.label}: implemented import path detected.`);
     } else {
@@ -313,6 +329,55 @@ export function TrackerApp() {
     }
   }
 
+  async function parseEpfoPdfInBrowser() {
+    if (!nativeFile) {
+      setErrors(["Select a PF PDF first."]);
+      return;
+    }
+    setErrors([]);
+    setStatus("Extracting PF PDF text in browser...");
+
+    try {
+      const text = await extractPdfTextInBrowser(nativeFile);
+      const parsed = parseEpfoPassbookText(text);
+      const imported = buildCanonicalEpfoImport(parsed, {
+        importId: `epfo_${Date.now()}`,
+        fileName: nativeFile.name
+      });
+      setEpfoParse(parsed);
+      setStagedEpfo(imported);
+      setErrors([...parsed.errors, ...parsed.warnings]);
+      setStatus(parsed.errors.length > 0 ? `PF parsed with ${parsed.errors.length} error(s).` : `PF staged: ${parsed.balances.length} balances and ${imported.transactions.length} contribution transactions.`);
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : "Unable to parse PF PDF"]);
+      setStatus("PF PDF import failed.");
+    }
+  }
+
+  async function parseNpsCsvInBrowser() {
+    if (!nativeFile) {
+      setErrors(["Select an NPS CSV first."]);
+      return;
+    }
+    setErrors([]);
+    setStatus("Parsing NPS CSV in browser...");
+
+    try {
+      const parsed = parseNpsCsv(await nativeFile.text());
+      const imported = buildCanonicalNpsImport(parsed, {
+        importId: `nps_${Date.now()}`,
+        fileName: nativeFile.name
+      });
+      setNpsParse(parsed);
+      setStagedNps(imported);
+      setErrors([...parsed.errors, ...parsed.warnings]);
+      setStatus(parsed.errors.length > 0 ? `NPS parsed with ${parsed.errors.length} error(s).` : `NPS staged: ${parsed.holdings.length} scheme balances and ${imported.transactions.length} transactions.`);
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : "Unable to parse NPS CSV"]);
+      setStatus("NPS CSV import failed.");
+    }
+  }
+
   async function commitStagedCas() {
     if (!stagedCas) return;
     const next = applyCanonicalCasImport(backup, stagedCas);
@@ -329,6 +394,24 @@ export function TrackerApp() {
     setErrors([]);
     setStagedInd(null);
     await refreshMarketDataFor(next, `INDMoney committed: ${stagedInd.transactions.length} transactions and ${stagedInd.manualBalances.length} balances added.`);
+  }
+
+  function commitStagedEpfo() {
+    if (!stagedEpfo) return;
+    const next = applyCanonicalEpfoImport(backup, stagedEpfo);
+    setBackup(next);
+    setErrors([]);
+    setStagedEpfo(null);
+    setStatus(`PF committed: ${stagedEpfo.manualBalances.length} balances and ${stagedEpfo.transactions.length} yearly contribution transactions added.`);
+  }
+
+  function commitStagedNps() {
+    if (!stagedNps) return;
+    const next = applyCanonicalNpsImport(backup, stagedNps);
+    setBackup(next);
+    setErrors([]);
+    setStagedNps(null);
+    setStatus(`NPS committed: ${stagedNps.manualBalances.length} scheme balances and ${stagedNps.transactions.length} transactions added.`);
   }
 
   async function refreshMarketData() {
@@ -618,7 +701,7 @@ export function TrackerApp() {
           </section>
         )}
 
-        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, nativeDetection, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, parseIndMoneyXlsxInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
+        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, nativeDetection, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
 
         {view === "backup" && (
           <section className="grid two">
@@ -642,12 +725,20 @@ function ImportsView(props: {
   setCasPassword: (value: string) => void;
   parseCasPdfInBrowser: () => void;
   parseIndMoneyXlsxInBrowser: () => void;
+  parseEpfoPdfInBrowser: () => void;
+  parseNpsCsvInBrowser: () => void;
   casParse: CasParseResult | null;
   stagedCas: CasCanonicalImport | null;
   commitStagedCas: () => void;
   indParse: IndMoneyParseResult | null;
   stagedInd: IndMoneyCanonicalImport | null;
   commitStagedIndMoney: () => void;
+  epfoParse: EpfoPassbookParseResult | null;
+  stagedEpfo: EpfoCanonicalImport | null;
+  commitStagedEpfo: () => void;
+  npsParse: NpsParseResult | null;
+  stagedNps: NpsCanonicalImport | null;
+  commitStagedNps: () => void;
   fxRate: string;
   setFxRate: (value: string) => void;
   fxDate: string;
@@ -667,8 +758,13 @@ function ImportsView(props: {
           {props.nativeDetection && <div className="detection"><div><span>Provider</span><strong>{props.nativeDetection.label}</strong></div><div><span>Status</span><strong>{props.nativeDetection.status}</strong></div><div><span>Type</span><strong>{props.nativeDetection.nativeInputType}</strong></div><div><span>Confidence</span><strong>{props.nativeDetection.confidence}</strong></div><p>{props.nativeDetection.reason}</p></div>}
           {props.nativeDetection?.providerId === "cas_pdf" && <div className="native-actions"><input type="password" placeholder="CAS PDF password" value={props.casPassword} onChange={(event) => props.setCasPassword(event.target.value)} /><button className="primary" onClick={props.parseCasPdfInBrowser}>Parse CAS PDF</button></div>}
           {props.nativeDetection?.providerId === "indmoney_export" && <div className="native-actions"><button className="primary" onClick={props.parseIndMoneyXlsxInBrowser}>Parse INDMoney XLSX</button></div>}
+          {props.nativeDetection?.providerId === "epfo_passbook" && props.nativeDetection.nativeInputType === "pdf" && <div className="native-actions"><button className="primary" onClick={props.parseEpfoPdfInBrowser}>Parse PF PDF</button></div>}
+          {props.nativeDetection?.providerId === "nps_statement" && props.nativeDetection.nativeInputType === "csv" && <div className="native-actions"><button className="primary" onClick={props.parseNpsCsvInBrowser}>Parse NPS CSV</button></div>}
+          {props.nativeDetection?.providerId === "nps_statement" && props.nativeDetection.nativeInputType !== "csv" && <p className="message">NPS file detected. The verified parser currently supports the yearly CSV statement format.</p>}
           {props.casParse && <div className="detection"><div><span>Schemes</span><strong>{props.casParse.schemes.length}</strong></div><div><span>Dated rows</span><strong>{props.casParse.datedRows}</strong></div><div><span>Financial rows</span><strong>{props.casParse.parsedFinancialRows}</strong></div><div><span>Warnings</span><strong>{props.casParse.warnings.length}</strong></div>{props.casParse.warnings.length > 0 && <p>{props.casParse.warnings.join("; ")}</p>}<button className="primary" onClick={props.commitStagedCas} disabled={!props.stagedCas || props.casParse.errors.length > 0}>Commit CAS Import</button></div>}
           {props.indParse && <div className="detection"><div><span>Rows</span><strong>{props.indParse.rows.length}</strong></div><div><span>Canonical</span><strong>{props.indParse.canonicalRows.length}</strong></div><div><span>Positions</span><strong>{props.indParse.positions.length}</strong></div><div><span>Warnings</span><strong>{props.indParse.warnings.length}</strong></div><button className="primary" onClick={props.commitStagedIndMoney} disabled={!props.stagedInd || props.indParse.errors.length > 0}>Commit INDMoney Import</button></div>}
+          {props.epfoParse && <div className="detection"><div><span>Balances</span><strong>{props.epfoParse.balances.length}</strong></div><div><span>Contributions</span><strong>{props.epfoParse.yearlyContributions.length}</strong></div><div><span>As of</span><strong>{props.epfoParse.asOfDate}</strong></div><div><span>Warnings</span><strong>{props.epfoParse.warnings.length}</strong></div><button className="primary" onClick={props.commitStagedEpfo} disabled={!props.stagedEpfo || props.epfoParse.errors.length > 0}>Commit PF Import</button></div>}
+          {props.npsParse && <div className="detection"><div><span>Schemes</span><strong>{props.npsParse.holdings.length}</strong></div><div><span>Transactions</span><strong>{props.npsParse.transactions.length}</strong></div><div><span>Tier</span><strong>{props.npsParse.accountTier}</strong></div><div><span>Warnings</span><strong>{props.npsParse.warnings.length}</strong></div><button className="primary" onClick={props.commitStagedNps} disabled={!props.stagedNps || props.npsParse.errors.length > 0}>Commit NPS Import</button></div>}
         </div>
         <div className="card"><h2>Provider Support</h2><div className="support-list">{providerImportSpecs.map((spec) => <div className="support-row" key={spec.id}><span>{spec.label}</span><strong className={`status-pill ${spec.status}`}>{spec.status}</strong></div>)}</div></div>
       </div>

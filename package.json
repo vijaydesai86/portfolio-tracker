@@ -16,7 +16,9 @@
     "test:ui:cas": "node scripts/selenium-cas-import.mjs",
     "verify": "npm run typecheck && npm test && npm run build",
     "test:ind:private": "vitest run tests/importers/indmoney-private.test.ts",
-    "test:ui:ind": "node scripts/selenium-ind-import.mjs"
+    "test:ui:ind": "node scripts/selenium-ind-import.mjs",
+    "test:pf-nps:private": "vitest run tests/importers/pf-nps-private.test.ts",
+    "test:ui:pf-nps": "node scripts/selenium-pf-nps-import.mjs"
   },
   "dependencies": {
     "@tanstack/react-table": "8.21.3",

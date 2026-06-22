@@ -71,20 +71,20 @@ export const providerImportSpecs: ProviderImportSpec[] = [
   {
     id: "epfo_passbook",
     label: "EPFO / PF passbook",
-    status: "detected_only",
+    status: "implemented",
     nativeInputTypes: ["pdf", "html"],
     assetTypes: ["epf"],
     categories: ["Debt"],
-    implementation: "Native document detection exists; parsing is blocked until reusable passbook fixtures are added."
+    implementation: "Browser PF PDF parsing, staged review, and canonical EPF/EPS balance import are implemented and privately verified against a local PF PDF."
   },
   {
     id: "nps_statement",
     label: "NPS statement",
-    status: "detected_only",
+    status: "parser_implemented",
     nativeInputTypes: ["pdf", "xlsx", "csv"],
     assetTypes: ["nps"],
     categories: ["Debt", "Equity", "Others"],
-    implementation: "Native statement detection exists; parser needs verified CRA statement fixtures."
+    implementation: "Yearly NPS CSV statement parsing, staged review, scheme balances, NAV snapshots, and transaction import are implemented and privately verified. PDF/XLSX NPS files remain detected-only until real fixtures are available."
   },
   {
     id: "bank_small_savings",

@@ -47,7 +47,7 @@ export function detectImportSource(input: ImportDetectionInput): ImportDetection
     return detection("cas_pdf", "pdf", lower.includes("consolidated account statement") ? "medium" : "low", "Looks like an Indian CAS PDF.");
   }
 
-  if ((extension === "pdf" || extension === "html") && (lower.includes("epfo") || lower.includes("employee provident fund") || lower.includes("member passbook") || fileName.includes("passbook"))) {
+  if ((extension === "pdf" || extension === "html") && (lower.includes("epfo") || lower.includes("employee provident fund") || lower.includes("member passbook") || fileName.includes("passbook") || /^epf[_-]/.test(fileName) || /^pf[_-]/.test(fileName))) {
     return detection("epfo_passbook", extension, "medium", "Looks like an EPFO/PF passbook document.");
   }
 

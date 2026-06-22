@@ -22,6 +22,8 @@ npm test
 npm run build
 npm run test:ui
 CAS_PASSWORD=your-password npm run test:ui:cas
+PF_TEXT_PATH=/tmp/private-pf.txt NPS_CSV_PATH=/path/to/private-nps.csv npm run test:pf-nps:private
+PF_PDF_PATH=/path/to/private-pf.pdf NPS_CSV_PATH=/path/to/private-nps.csv npm run test:ui:pf-nps
 ```
 
 ## Environment Notes
@@ -56,6 +58,8 @@ Current automated CAS support includes browser PDF upload, password entry, clien
 
 - CAS PDF browser import is implemented and private-file verified.
 - INDMoney Transactions Ledger XLSX browser import is implemented and private-file verified.
+- EPFO/PF yearly PDF browser import is implemented and private-file verified. The private raw PDF and extracted text must never be committed.
+- NPS yearly CSV statement browser import is implemented and private-file verified. NPS PDF/XLSX remains detected-only until real fixtures are available.
 - Live market refresh uses AMFI NAVAll for mutual funds, Stooq/Yahoo for US stock quotes, and Frankfurter/Open ER API/currency-api/Stooq for USD/INR. Never replace failed market fetches with fabricated fallback prices; manual FX import must be user-supplied real data.
 
 ## INR-First Analytics Rule

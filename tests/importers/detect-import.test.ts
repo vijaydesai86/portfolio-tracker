@@ -10,8 +10,8 @@ describe("native import source detection", () => {
       ["cas_pdf", "implemented"],
       ["fidelity_csv", "detected_only"],
       ["indmoney_export", "implemented"],
-      ["epfo_passbook", "detected_only"],
-      ["nps_statement", "detected_only"],
+      ["epfo_passbook", "implemented"],
+      ["nps_statement", "parser_implemented"],
       ["bank_small_savings", "detected_only"]
     ]);
   });
@@ -64,11 +64,11 @@ describe("native import source detection", () => {
     });
     expect(detectImportSource({ fileName: "epfo-passbook.html", textSample: "Member Passbook EPFO" })).toMatchObject({
       providerId: "epfo_passbook",
-      status: "detected_only"
+      status: "implemented"
     });
     expect(detectImportSource({ fileName: "nps-statement.pdf", textSample: "National Pension System PRAN" })).toMatchObject({
       providerId: "nps_statement",
-      status: "detected_only"
+      status: "parser_implemented"
     });
     expect(detectImportSource({ fileName: "indmoney-export.csv", textSample: "INDMoney" })).toMatchObject({
       providerId: "indmoney_export",
@@ -78,5 +78,12 @@ describe("native import source detection", () => {
       providerId: "bank_small_savings",
       status: "detected_only"
     });
+  });
+  it("detects PF yearly PDF filenames as EPFO passbook imports", () => {
+    expect(detectImportSource({ fileName: "pf-yearly.pdf" })).toMatchObject({ providerId: "epfo_passbook", nativeInputType: "pdf" });
+  });
+
+  it("detects NPS yearly CSV statements", () => {
+    expect(detectImportSource({ fileName: "nps-yearly.csv", textSample: "NPS Transaction Statement for Tier I Account\nPRAN,'############" })).toMatchObject({ providerId: "nps_statement", nativeInputType: "csv" });
   });
 });

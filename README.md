@@ -20,6 +20,8 @@ Portfolio Tracker is a local-first multi-asset portfolio tracker and goal planne
 - CAS text parser and canonical normalization privately verified against the provided password-protected CAS PDF via local `pdftotext` extraction.
 - Browser CAS PDF upload with password entry, staging, and commit flow privately verified against the provided password-protected CAS PDF via Selenium/Firefox.
 - Browser INDMoney Transactions Ledger XLSX import for US stocks, dividends, taxes, stock splits, cash movements, open positions, and combined analytics.
+- Browser EPFO/PF yearly PDF import for employee, employer, and pension balance buckets plus yearly contribution rows.
+- Browser NPS yearly CSV statement import for Tier I/II scheme holdings, NAV snapshots, scheme transactions, fees, and contributions. NPS PDF/XLSX files remain detected-only until real fixtures are available.
 - Live market refresh route for AMFI mutual fund NAVs, US stock quotes, latest USD/INR, and historical USD/INR for transaction-date conversion. USD/INR now uses reachable real-provider fallbacks; NAV and stock quote failures are surfaced in the UI instead of using fake fallback data.
 - Research-driven analytics cockpit with main KPIs for invested amount, current value, and profit/loss; supporting cash-flow analytics for lifetime cash in, lifetime cash out, fees/taxes, and current P/L before fees; plus INR XIRR with historical FX, performance bridge, allocation map, concentration signals, market-data freshness warnings, gain/loss contributors, asset-kind totals, India/US totals, source totals, and institution/AMC-style totals.
 - Separate Holdings and Transactions workspaces with search, sorting, explicit edit mode, inline editing, category overrides, quantity/price/value edits, and transaction corrections.
@@ -40,7 +42,7 @@ Asset modules are classified from structured account/instrument types such as `m
 
 ## Import Support Policy
 
-Automated provider parsing is not claimed without real, legally usable fixtures. Current parsing support is canonical JSON restore, the application-defined manual CSV fallback, browser CAS PDF import, and browser INDMoney Transactions Ledger XLSX import. Native file detection exists for Fidelity, EPFO, NPS, FD, PPF, and SSY families so the app can route files correctly while provider parsers are added test-first.
+Automated provider parsing is not claimed without real, legally usable fixtures. Current parsing support is canonical JSON restore, the application-defined manual CSV fallback, browser CAS PDF import, browser INDMoney Transactions Ledger XLSX import, browser EPFO/PF yearly PDF import, and browser NPS yearly CSV statement import. Native file detection exists for Fidelity, NPS PDF/XLSX, FD, PPF, and SSY families so the app can route files correctly while provider parsers are added test-first.
 
 See `fixtures/MANIFEST.md` for the exact list of committed importable files and `fixtures/PROVIDER_FIXTURE_AUDIT.md` for the provider fixture search log.
 
@@ -73,6 +75,8 @@ npm run test:ui
 CAS_PASSWORD=your-password npm run test:ui:cas
 IND_XLSX_PATH=/path/to/private-indmoney.xlsx npm run test:ind:private
 IND_XLSX_PATH=/path/to/private-indmoney.xlsx npm run test:ui:ind
+PF_TEXT_PATH=/tmp/private-pf.txt NPS_CSV_PATH=/path/to/private-nps.csv npm run test:pf-nps:private
+PF_PDF_PATH=/path/to/private-pf.pdf NPS_CSV_PATH=/path/to/private-nps.csv npm run test:ui:pf-nps
 ```
 
 ## Deployment
