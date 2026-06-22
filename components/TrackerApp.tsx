@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, FileJson, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Search, Table2, Upload } from "lucide-react";
+import { AlertTriangle, Download, FileJson, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, TrendingDown, TrendingUp, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
@@ -18,6 +18,14 @@ const sampleTemplate = `account_name,asset_name,asset_type,category,currency,cur
 
 const categoryOrder: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
 const chartColors = ["#2563eb", "#64748b", "#b7791f", "#7c3aed", "#0f766e", "#db2777", "#ea580c", "#0891b2"];
+const assetClassCards = [
+  { key: "Equity", title: "Equity", description: "MF, Indian stocks, US stocks, ESPP" },
+  { key: "Debt", title: "Debt", description: "Debt MF, PF, PPF, SSY, NPS debt, FD" },
+  { key: "Gold", title: "Gold", description: "Gold funds, SGB, physical/manual gold" },
+  { key: "Cash", title: "Cash", description: "Savings, broker cash, emergency funds" },
+  { key: "Others", title: "Others", description: "Hybrid, unclassified, custom assets" }
+] as const satisfies Array<{ key: AssetCategory; title: string; description: string }>;
+
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
 type View = "dashboard" | "holdings" | "transactions" | "imports" | "backup";
@@ -27,6 +35,31 @@ type HoldingCost = {
   invested: number;
   profit?: number;
   returnPercent?: number;
+};
+
+type HoldingPerformance = {
+  id: string;
+  name: string;
+  value: number;
+  profit?: number;
+  returnPercent?: number;
+  meta: string;
+};
+
+type DashboardSignal = {
+  label: string;
+  value: string;
+  detail: string;
+  tone: "good" | "warn" | "neutral";
+  icon: "shield" | "alert" | "trend";
+};
+
+type ReadinessModule = {
+  label: string;
+  detail: string;
+  count: number;
+  value: number;
+  category: string;
 };
 
 export function TrackerApp() {
@@ -57,18 +90,22 @@ export function TrackerApp() {
   const allocation = summary.allocation;
   const holdingCosts = useMemo(() => calculateHoldingCosts(backup), [backup]);
   const performance = useMemo(() => {
-    const invested = insights.transactionStats.investedBase;
+    const grossCashIn = insights.transactionStats.investedBase;
     const current = summary.netWorth;
-    const returnedCash = insights.transactionStats.incomeBase;
+    const cashOut = insights.transactionStats.incomeBase;
     const feesAndTax = insights.transactionStats.feesAndTaxesBase;
-    const profit = current + returnedCash - invested - feesAndTax;
+    const netInvested = grossCashIn - cashOut;
+    const currentProfit = current - netInvested;
+    const totalProfit = currentProfit - feesAndTax;
     return {
-      invested,
+      grossCashIn,
       current,
-      returnedCash,
+      cashOut,
       feesAndTax,
-      profit,
-      returnPercent: invested === 0 ? null : (profit / invested) * 100
+      netInvested,
+      currentProfit,
+      totalProfit,
+      absoluteReturnPercent: netInvested === 0 ? null : (totalProfit / netInvested) * 100
     };
   }, [insights.transactionStats, summary.netWorth]);
 
@@ -77,8 +114,10 @@ export function TrackerApp() {
     assetType: insights.totalsByAssetKind.slice(0, 8),
     region: insights.totalsByRegion.slice(0, 8),
     issuer: insights.totalsByIssuer.slice(0, 8),
-    category: insights.totalsByCategory.filter((item) => item.value > 0)
-  }), [allocation, insights.totalsByAssetKind, insights.totalsByCategory, insights.totalsByIssuer, insights.totalsByRegion]);
+    category: insights.totalsByCategory.filter((item) => item.value > 0),
+    institution: insights.totalsByInstitution.slice(0, 8),
+    provider: insights.totalsByProvider.slice(0, 8)
+  }), [allocation, insights.totalsByAssetKind, insights.totalsByCategory, insights.totalsByInstitution, insights.totalsByIssuer, insights.totalsByProvider, insights.totalsByRegion]);
 
   const filteredHoldings = useMemo(() => {
     const q = holdingQuery.trim().toLowerCase();
@@ -107,6 +146,66 @@ export function TrackerApp() {
   const topFiveValue = insights.holdings.slice(0, 5).reduce((sum, holding) => sum + (holding.valueInBase ?? 0), 0);
   const topFivePercent = summary.netWorth === 0 ? 0 : (topFiveValue / summary.netWorth) * 100;
   const importProviders = new Set(backup.imports.map((run) => run.provider)).size;
+  const assetClassSummary = assetClassCards.map((asset) => {
+    const bucket = allocation[asset.key];
+    const count = insights.holdings.filter((holding) => holding.category === asset.key).length;
+    return { ...asset, value: bucket.value, percent: bucket.percent, count };
+  });
+
+  const holdingPerformance = useMemo<HoldingPerformance[]>(() => insights.holdings.map((holding) => {
+    const cost = holdingCosts.get(holding.id);
+    return {
+      id: holding.id,
+      name: displayHoldingName(holding.label),
+      value: holding.valueInBase ?? 0,
+      profit: cost?.profit,
+      returnPercent: cost?.returnPercent,
+      meta: [holding.assetKind, holding.region, holding.provider].filter(Boolean).join(" · ")
+    };
+  }), [holdingCosts, insights.holdings]);
+
+  const topGainers = useMemo(() => holdingPerformance.filter((item) => item.profit !== undefined).slice().sort((a, b) => (b.profit ?? 0) - (a.profit ?? 0)).slice(0, 5), [holdingPerformance]);
+  const topLosers = useMemo(() => holdingPerformance.filter((item) => item.profit !== undefined).slice().sort((a, b) => (a.profit ?? 0) - (b.profit ?? 0)).slice(0, 5), [holdingPerformance]);
+  const totalFxIssues = new Set([...summary.missingFx, ...insights.transactionStats.missingFx]).size;
+  const staleHoldings = insights.holdings.filter((holding) => daysSince(holding.asOfDate) > 7).length;
+  const reviewCategoryCount = insights.holdings.filter((holding) => holding.category === "Others").length;
+  const performanceBridge = [
+    { name: "Gross Cash In", value: performance.grossCashIn },
+    { name: "Net Invested", value: performance.netInvested },
+    { name: "Current Value", value: performance.current },
+    { name: "Total P/L", value: performance.totalProfit }
+  ].filter((item) => item.value !== 0);
+  const dashboardSignals: DashboardSignal[] = [
+    {
+      label: "Market Data",
+      value: totalFxIssues === 0 ? "Covered" : totalFxIssues + " gap(s)",
+      detail: totalFxIssues === 0 ? "NAV, quotes, and FX are usable for INR analytics." : "Refresh or add real FX/NAV data before trusting INR totals.",
+      tone: totalFxIssues === 0 ? "good" : "warn",
+      icon: totalFxIssues === 0 ? "shield" : "alert"
+    },
+    {
+      label: "Freshness",
+      value: staleHoldings === 0 ? "Current" : staleHoldings + " stale",
+      detail: staleHoldings === 0 ? "All holdings are within the freshness window." : "Some valuations are older than 7 days.",
+      tone: staleHoldings === 0 ? "good" : "warn",
+      icon: staleHoldings === 0 ? "shield" : "alert"
+    },
+    {
+      label: "Concentration",
+      value: topFivePercent.toFixed(1) + "%",
+      detail: "Portfolio value held by the five largest positions.",
+      tone: topFivePercent > 60 ? "warn" : "neutral",
+      icon: "trend"
+    },
+    {
+      label: "Classification",
+      value: reviewCategoryCount === 0 ? "Clean" : reviewCategoryCount + " review",
+      detail: reviewCategoryCount === 0 ? "No holdings are parked in Others." : "Others is visible so hybrid/custom records can be reviewed.",
+      tone: reviewCategoryCount === 0 ? "good" : "warn",
+      icon: reviewCategoryCount === 0 ? "shield" : "alert"
+    }
+  ];
+  const readinessModules: ReadinessModule[] = buildReadinessModules(insights.holdings);
 
   function importCsv() {
     const importId = `manual_${Date.now()}`;
@@ -384,47 +483,83 @@ export function TrackerApp() {
         {errors.length > 0 && <div className="error-list global-errors">{errors.map((error) => <div key={error}>{error}</div>)}</div>}
 
         {view === "dashboard" && (
-          <section className="grid analytics-page">
-            <div className="portfolio-hero card">
-              <div className="hero-main">
-                <span>Total Portfolio Value</span>
-                <strong>{formatMoney(performance.current, backup.baseCurrency)}</strong>
-                <small>{insights.holdings.length} holdings · {backup.transactions.length} transactions · {importProviders} data source(s)</small>
+          <section className="analytics-command">
+            <div className="command-hero">
+              <div className="hero-ledger">
+                <span className="eyebrow">INR wealth cockpit</span>
+                <h2>{formatMoney(performance.current, backup.baseCurrency)}</h2>
+                <p>{insights.holdings.length} holdings, {backup.transactions.length} transactions, {importProviders} source(s). Built to expand into PF, NPS, PPF, SSY, FD, cash, ESPP, Indian stocks, US stocks, and mutual funds without changing the dashboard model.</p>
+                <div className="hero-meta-row">
+                  <span>{backup.baseCurrency} base</span>
+                  <span>{summary.missingFx.length === 0 ? "FX covered" : summary.missingFx.length + " FX pair gap(s)"}</span>
+                  <span>{backup.priceSnapshots.length} price / FX snapshot(s)</span>
+                </div>
               </div>
-              <div className={`hero-profit ${performance.profit >= 0 ? "positive" : "negative"}`}>
-                <span>Current Profit / Loss</span>
-                <strong>{formatMoney(performance.profit, backup.baseCurrency)}</strong>
-                <small>{performance.returnPercent === null ? "Return unavailable" : `${performance.returnPercent.toFixed(2)}% absolute return`}</small>
-              </div>
-              <div className="hero-xirr">
-                <span>XIRR</span>
-                <strong>{insights.xirrBase === null ? "-" : `${insights.xirrBase.toFixed(2)}%`}</strong>
-                <small>{backup.baseCurrency} base, using available transaction-date FX</small>
+              <div className="hero-stack">
+                <div className={"profit-tile " + (performance.totalProfit >= 0 ? "positive" : "negative")}>
+                  <span>Total Profit / Loss</span>
+                  <strong>{formatMoney(performance.totalProfit, backup.baseCurrency)}</strong>
+                  <small>{performance.absoluteReturnPercent === null ? "Return unavailable" : performance.absoluteReturnPercent.toFixed(2) + "% simple return after fees/tax"}</small>
+                </div>
+                <div className="xirr-tile">
+                  <span>XIRR</span>
+                  <strong>{insights.xirrBase === null ? "-" : insights.xirrBase.toFixed(2) + "%"}</strong>
+                  <small>Timing-aware return using transaction-date FX when available</small>
+                </div>
               </div>
             </div>
 
-            <div className="grid metrics main-metrics">
-              <Metric label="Invested" value={formatMoney(performance.invested, backup.baseCurrency)} />
+            <div className="wealth-strip">
+              <Metric label="Net Invested" value={formatMoney(performance.netInvested, backup.baseCurrency)} />
               <Metric label="Current Value" value={formatMoney(performance.current, backup.baseCurrency)} />
-              <Metric label="Returned Cash" value={formatMoney(performance.returnedCash, backup.baseCurrency)} />
-              <Metric label="Fees and Tax" value={formatMoney(performance.feesAndTax, backup.baseCurrency)} />
+              <Metric label="Current P/L" value={formatMoney(performance.currentProfit, backup.baseCurrency)} />
+              <Metric label="Gross Cash In" value={formatMoney(performance.grossCashIn, backup.baseCurrency)} />
+              <Metric label="Fees / Tax" value={formatMoney(performance.feesAndTax, backup.baseCurrency)} />
             </div>
 
-            {summary.missingFx.length > 0 && <div className="notice">Missing FX rate(s): {summary.missingFx.join(", ")}. Refresh market data or add real USD/INR rates under Imports.</div>}
-            {insights.transactionStats.missingFx.length > 0 && <div className="notice">INR cash-flow analytics are incomplete because transaction-date FX is missing.</div>}
+            {(summary.missingFx.length > 0 || insights.transactionStats.missingFx.length > 0) && (
+              <div className="notice critical-notice">Missing FX/NAV inputs affect INR analytics: {[...new Set([...summary.missingFx, ...insights.transactionStats.missingFx])].join(", ")}. Refresh market data or import real rates under Imports.</div>
+            )}
 
-            <div className="grid analytics-grid">
-              <ChartCard title="Asset Allocation"><DonutChart data={chartData.allocation} /></ChartCard>
+            <div className="control-grid">
+              <ChartCard title="Allocation Map"><DonutChart data={chartData.allocation} /></ChartCard>
+              <ChartCard title="Performance Bridge"><HorizontalBar data={performanceBridge} currency={backup.baseCurrency} /></ChartCard>
+              <div className="signal-panel cardless-panel">
+                <div className="panel-heading"><span>Portfolio Signals</span><strong>{dashboardSignals.filter((signal) => signal.tone === "warn").length} action(s)</strong></div>
+                <div className="signal-list">{dashboardSignals.map((signal) => <SignalCard signal={signal} key={signal.label} />)}</div>
+              </div>
+            </div>
+
+            <div className="asset-class-grid asset-command-grid">
+              {assetClassSummary.map((asset) => (
+                <div className={"asset-class-card asset-" + asset.key} key={asset.key}>
+                  <div><span>{asset.title}</span><strong>{formatMoney(asset.value, backup.baseCurrency)}</strong></div>
+                  <small>{asset.count} holding(s) · {asset.percent.toFixed(1)}%</small>
+                  <p>{asset.description}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="focus-grid">
+              <HoldingRankPanel title="Top Gain Contributors" direction="gain" items={topGainers} currency={backup.baseCurrency} />
+              <HoldingRankPanel title="Loss / Drag Watchlist" direction="loss" items={topLosers} currency={backup.baseCurrency} />
+              <div className="readiness-panel cardless-panel">
+                <div className="panel-heading"><span>Asset Modules</span><strong>Extensible intake</strong></div>
+                <div className="module-list">{readinessModules.map((module) => <ReadinessRow module={module} currency={backup.baseCurrency} key={module.label} />)}</div>
+              </div>
+            </div>
+
+            <div className="analytics-grid terminal-grid">
               <ChartCard title="By Asset Type"><HorizontalBar data={chartData.assetType} currency={backup.baseCurrency} /></ChartCard>
               <ChartCard title="By Region"><HorizontalBar data={chartData.region} currency={backup.baseCurrency} /></ChartCard>
               <ChartCard title="Top AMC / Institution"><HorizontalBar data={chartData.issuer} currency={backup.baseCurrency} /></ChartCard>
-            </div>
-
-            <div className="analytics-strip">
-              <MiniInsight label="Largest Holding" value={largestHolding ? displayHoldingName(largestHolding.label) : "-"} detail={largestHolding?.valueInBase === undefined ? "" : formatMoney(largestHolding.valueInBase, backup.baseCurrency)} />
-              <MiniInsight label="Top 5 Concentration" value={`${topFivePercent.toFixed(1)}%`} detail={formatMoney(topFiveValue, backup.baseCurrency)} />
-              <MiniInsight label="Best Group" value={chartData.category[0]?.name ?? "-"} detail={chartData.category[0] ? formatMoney(chartData.category[0].value, backup.baseCurrency) : ""} />
-              <MiniInsight label="Editable Records" value={String(backup.manualBalances.length + backup.transactions.length)} detail="holdings and transactions" />
+              <ChartCard title="Data Source Mix"><HorizontalBar data={chartData.provider} currency={backup.baseCurrency} /></ChartCard>
+              <ChartCard title="Institution Accounts"><HorizontalBar data={chartData.institution} currency={backup.baseCurrency} /></ChartCard>
+              <div className="insight-summary cardless-panel">
+                <MiniInsight label="Largest Holding" value={largestHolding ? displayHoldingName(largestHolding.label) : "-"} detail={largestHolding?.valueInBase === undefined ? "" : formatMoney(largestHolding.valueInBase, backup.baseCurrency)} />
+                <MiniInsight label="Top 5 Concentration" value={topFivePercent.toFixed(1) + "%"} detail={formatMoney(topFiveValue, backup.baseCurrency)} />
+                <MiniInsight label="Dominant Category" value={chartData.category[0]?.name ?? "-"} detail={chartData.category[0] ? formatMoney(chartData.category[0].value, backup.baseCurrency) : ""} />
+              </div>
             </div>
           </section>
         )}
@@ -557,7 +692,21 @@ function MiniInsight({ label, value, detail }: { label: string; value: string; d
 }
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div className="card chart-card"><h2>{title}</h2>{children}</div>;
+  return <div className="chart-card"><h2>{title}</h2>{children}</div>;
+}
+
+function SignalCard({ signal }: { signal: DashboardSignal }) {
+  const Icon = signal.icon === "alert" ? AlertTriangle : signal.icon === "trend" ? TrendingUp : ShieldCheck;
+  return <div className={"signal-item " + signal.tone}><Icon size={18} /><div><span>{signal.label}</span><strong>{signal.value}</strong><small>{signal.detail}</small></div></div>;
+}
+
+function HoldingRankPanel({ title, direction, items, currency }: { title: string; direction: "gain" | "loss"; items: HoldingPerformance[]; currency: string }) {
+  const Icon = direction === "gain" ? TrendingUp : TrendingDown;
+  return <div className="rank-panel cardless-panel"><div className="panel-heading"><span>{title}</span><Icon size={18} /></div>{items.length === 0 ? <p className="message">Cost basis is unavailable until matching transactions and FX are complete.</p> : <div className="rank-list">{items.map((item) => <div className="rank-row" key={item.id}><div><strong title={item.name}>{item.name}</strong><span>{item.meta}</span></div><div className={(item.profit ?? 0) >= 0 ? "positive-text" : "negative-text"}><strong>{formatMoney(item.profit ?? 0, currency)}</strong><span>{item.returnPercent === undefined ? "-" : item.returnPercent.toFixed(1) + "%"}</span></div></div>)}</div>}</div>;
+}
+
+function ReadinessRow({ module, currency }: { module: ReadinessModule; currency: string }) {
+  return <div className="module-row"><div><strong>{module.label}</strong><span>{module.detail}</span></div><div><strong>{module.count}</strong><span>{module.value > 0 ? formatMoney(module.value, currency) : "Empty"}</span></div><em>{module.category}</em></div>;
 }
 
 function DonutChart({ data }: { data: Array<{ name: string; value: number; percent?: number }> }) {
@@ -610,6 +759,36 @@ function calculateHoldingCosts(backup: PortfolioBackup): Map<string, HoldingCost
     costs.set(balance.id, { invested, profit, returnPercent: (profit / invested) * 100 });
   }
   return costs;
+}
+
+function buildReadinessModules(holdings: ReturnType<typeof calculatePortfolioInsights>["holdings"]): ReadinessModule[] {
+  const moduleDefs = [
+    { label: "Mutual Funds", detail: "CAS/CAMS/KFin statement positions", category: "Equity/Debt/Gold/Others", match: (kind: string, name: string) => /mutual fund|fund/i.test(kind + " " + name) },
+    { label: "Indian Stocks", detail: "Broker and demat equity positions", category: "Equity", match: (kind: string, name: string) => /indian stock|india stock|nse|bse/i.test(kind + " " + name) },
+    { label: "US Stocks", detail: "INDMoney, Fidelity, and other broker ledgers", category: "Equity", match: (kind: string, name: string) => /us|direct stock|fidelity|indmoney/i.test(kind + " " + name) },
+    { label: "PF / EPF", detail: "Provident fund contribution balances", category: "Debt", match: (kind: string, name: string) => /epf|pf|provident/i.test(kind + " " + name) },
+    { label: "PPF / SSY", detail: "Small savings balance modules", category: "Debt", match: (kind: string, name: string) => /ppf|ssy|sukanya/i.test(kind + " " + name) },
+    { label: "NPS", detail: "Tier I/II retirement allocations", category: "Equity/Debt/Others", match: (kind: string, name: string) => /nps|pension/i.test(kind + " " + name) },
+    { label: "FD", detail: "Fixed deposit maturity schedules", category: "Debt", match: (kind: string, name: string) => /fd|fixed deposit/i.test(kind + " " + name) },
+    { label: "Cash / ESPP", detail: "Manual cash and ESPP contribution entries", category: "Cash/Equity", match: (kind: string, name: string) => /cash|espp/i.test(kind + " " + name) }
+  ];
+
+  return moduleDefs.map((definition) => {
+    const matched = holdings.filter((holding) => definition.match(holding.assetKind, holding.label));
+    return {
+      label: definition.label,
+      detail: definition.detail,
+      category: definition.category,
+      count: matched.length,
+      value: matched.reduce((sum, holding) => sum + (holding.valueInBase ?? 0), 0)
+    };
+  });
+}
+
+function daysSince(date: string): number {
+  const parsed = Date.parse(date + "T00:00:00.000Z");
+  if (Number.isNaN(parsed)) return 0;
+  return Math.max(0, Math.floor((Date.now() - parsed) / 86400000));
 }
 
 function viewTitle(view: View): string {

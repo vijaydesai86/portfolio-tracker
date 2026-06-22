@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Rebuilt the analytics page into a distinct wealth cockpit with dark navigation, command hero, performance bridge, portfolio signal panel, gain/loss contributor lists, adaptive asset modules for future PF/NPS/PPF/FD/cash/ESPP/Fidelity inputs, and corrected gross-cash-in vs net-invested profit terminology.
+
 - Initialized project governance, package configuration, and test setup.
 - Added canonical backup schema, manual CSV importer, import commit pipeline, and analytics tests.
 - Added local-first dashboard with manual CSV import, JSON backup/restore, allocation, holdings, and import history.

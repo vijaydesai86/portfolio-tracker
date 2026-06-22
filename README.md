@@ -21,14 +21,18 @@ Portfolio Tracker is a local-first multi-asset portfolio tracker and goal planne
 - Browser CAS PDF upload with password entry, staging, and commit flow privately verified against the provided password-protected CAS PDF via Selenium/Firefox.
 - Browser INDMoney Transactions Ledger XLSX import for US stocks, dividends, taxes, stock splits, cash movements, open positions, and combined analytics.
 - Live market refresh route for AMFI mutual fund NAVs, US stock quotes, latest USD/INR, and historical USD/INR for transaction-date conversion. USD/INR now uses reachable real-provider fallbacks; NAV and stock quote failures are surfaced in the UI instead of using fake fallback data.
-- Analytics-first dashboard with invested amount, current value, current profit/loss, absolute return, INR XIRR with historical FX, returned cash, fees/tax, allocation charts, concentration, asset-kind totals, India/US totals, source totals, and institution/AMC-style totals.
+- Research-driven analytics cockpit with INR net worth, gross cash in, net invested, current profit/loss, total profit/loss after fees/tax, INR XIRR with historical FX, performance bridge, allocation map, concentration signals, market-data freshness warnings, gain/loss contributors, asset-kind totals, India/US totals, source totals, and institution/AMC-style totals.
 - Separate Holdings and Transactions workspaces with search, sorting, explicit edit mode, inline editing, category overrides, quantity/price/value edits, and transaction corrections.
 - Implemented manual CSV fallback for holdings, cash, simple ESPP contribution buckets, PPF, SSY, NPS, EPF, FD, gold, and other manual balances.
 - Importable canonical CSV fallback templates under `fixtures/importable/` covering every requested asset class.
 - Import pipeline with validation, deduplication, review-oriented error reporting, commit history, and manual-edit preservation.
-- Dashboard with net worth, allocation, holdings, import history, and JSON backup/restore.
+- Adaptive dashboard modules for future PF/EPF, PPF/SSY, NPS, FD, cash, ESPP, Indian stock, US stock, and mutual-fund inputs; empty modules stay visible as capability placeholders until data exists.
 - Initial verified data-source work starts with the fixture manifest and source notes under `fixtures/`.
 - Categories: `Equity`, `Debt`, `Gold`, `Others`, and `Cash`.
+
+## Performance Math
+
+The dashboard does not treat gross cash in as the only invested number. Sells, redemptions, dividends, interest, maturities, and withdrawals reduce net invested for current profit/loss. The headline model is: gross cash in, net invested, current value, current P/L, fees/tax, total P/L, and XIRR. Cash-out flows are used internally for net invested, but they are not a primary dashboard KPI.
 
 ## Import Support Policy
 

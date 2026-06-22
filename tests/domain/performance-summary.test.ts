@@ -3,12 +3,14 @@ import { calculatePortfolioInsights, calculatePortfolioSummary } from "@/src/dom
 import { createEmptyBackup } from "@/src/schema/backup";
 
 function calculatePerformance(summary: ReturnType<typeof calculatePortfolioSummary>, insights: ReturnType<typeof calculatePortfolioInsights>) {
-  const invested = insights.transactionStats.investedBase;
+  const grossCashIn = insights.transactionStats.investedBase;
   const current = summary.netWorth;
-  const returnedCash = insights.transactionStats.incomeBase;
+  const cashOut = insights.transactionStats.incomeBase;
   const feesAndTax = insights.transactionStats.feesAndTaxesBase;
-  const profit = current + returnedCash - invested - feesAndTax;
-  return { invested, current, returnedCash, feesAndTax, profit, returnPercent: invested === 0 ? null : (profit / invested) * 100 };
+  const netInvested = grossCashIn - cashOut;
+  const currentProfit = current - netInvested;
+  const totalProfit = currentProfit - feesAndTax;
+  return { grossCashIn, current, cashOut, feesAndTax, netInvested, currentProfit, totalProfit, absoluteReturnPercent: netInvested === 0 ? null : (totalProfit / netInvested) * 100 };
 }
 
 describe("portfolio performance summary", () => {
@@ -25,7 +27,7 @@ describe("portfolio performance summary", () => {
 
     const performance = calculatePerformance(calculatePortfolioSummary(backup), calculatePortfolioInsights(backup));
 
-    expect(performance).toMatchObject({ invested: 1000, current: 1200, returnedCash: 100, feesAndTax: 10, profit: 290 });
-    expect(performance.returnPercent).toBeCloseTo(29, 6);
+    expect(performance).toMatchObject({ grossCashIn: 1000, current: 1200, cashOut: 100, feesAndTax: 10, netInvested: 900, currentProfit: 300, totalProfit: 290 });
+    expect(performance.absoluteReturnPercent).toBeCloseTo(32.2222, 3);
   });
 });

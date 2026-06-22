@@ -61,3 +61,8 @@ Current automated CAS support includes browser PDF upload, password entry, clien
 ## INR-First Analytics Rule
 
 The app is INR-first. Current foreign-currency holdings require latest FX. Foreign-currency transaction analytics require FX on or before each transaction date. Do not mix local currency values into INR totals without an FX snapshot, and do not fabricate missing FX.
+
+## Portfolio Analytics Rule
+
+- Dashboard profit labels must distinguish gross cash in, cash-out flows, net invested, current P/L, fees/tax, total P/L, and XIRR. Do not show "returned cash" as a headline KPI; use cash-out flows internally to derive net invested.
+- New analytics panels must remain adaptive to future asset modules: PF/EPF, PPF/SSY, NPS, FD, cash, ESPP, Indian stocks, US stocks, and mutual funds.
