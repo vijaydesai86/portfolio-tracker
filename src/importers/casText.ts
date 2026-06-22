@@ -477,9 +477,33 @@ function toCanonicalTransactionType(type: CasTransactionType): Transaction["type
 
 function inferCategory(schemeName: string): CasScheme["category"] {
   const value = schemeName.toLowerCase();
-  if (value.includes("gold")) return "Gold";
-  if (value.includes("gilt") || value.includes("ultra short") || value.includes("debt") || value.includes("liquid") || value.includes("bond")) return "Debt";
-  if (value.includes("hybrid") || value.includes("dynamic asset allocation") || value.includes("balanced")) return "Others";
+  if (value.includes("gold") || value.includes("silver")) return "Gold";
+  if (
+    value.includes("gilt") ||
+    value.includes("ultra short") ||
+    value.includes("low duration") ||
+    value.includes("money market") ||
+    value.includes("debt") ||
+    value.includes("liquid") ||
+    value.includes("bond") ||
+    value.includes("overnight") ||
+    value.includes("conservative hybrid")
+  ) return "Debt";
+  if (
+    value.includes("nifty") ||
+    value.includes("sensex") ||
+    value.includes("index fund") ||
+    value.includes("flexi cap") ||
+    value.includes("large cap") ||
+    value.includes("mid cap") ||
+    value.includes("small cap") ||
+    value.includes("equity") ||
+    value.includes("elss") ||
+    value.includes("dynamic asset allocation") ||
+    value.includes("balanced advantage") ||
+    value.includes("aggressive hybrid")
+  ) return "Equity";
+  if (value.includes("hybrid") || value.includes("balanced") || value.includes("asset allocation")) return "Others";
   return "Equity";
 }
 

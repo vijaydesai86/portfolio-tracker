@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, FileJson, LayoutDashboard, RefreshCw, RotateCcw, Upload } from "lucide-react";
+import { Download, FileJson, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Save, Search, Table2, Upload, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { calculatePortfolioInsights, calculatePortfolioSummary } from "@/src/domain/analytics";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
@@ -11,13 +11,17 @@ import { commitManualCsvImport } from "@/src/importers/importPipeline";
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
-import { createEmptyBackup, parseBackup, type AssetCategory, type PortfolioBackup } from "@/src/schema/backup";
+import { createEmptyBackup, parseBackup, type AssetCategory, type ManualBalance, type PortfolioBackup, type Transaction } from "@/src/schema/backup";
 
 const sampleTemplate = `account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes\nCash Wallet,Cash Wallet,cash,Cash,INR,10000,2026-06-22,liquid cash\nEmployer ESPP,ESPP Contribution,espp,Equity,USD,2000,2026-06-22,total contribution\nPPF,Public Provident Fund,ppf,Debt,INR,300000,2026-06-22,manual balance`;
 
 const categoryOrder: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
+const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
-type View = "dashboard" | "imports" | "backup";
+type View = "dashboard" | "records" | "imports" | "backup";
+type HoldingSort = "value" | "name" | "category" | "source";
+type EditableBalance = Pick<ManualBalance, "label" | "category" | "currency" | "value" | "quantity" | "price" | "asOfDate" | "notes">;
+type EditableTransaction = Pick<Transaction, "date" | "type" | "currency" | "amount" | "quantity" | "price" | "fees" | "taxes">;
 
 export function TrackerApp() {
   const [backup, setBackup] = useState<PortfolioBackup>(() => createEmptyBackup("INR"));
@@ -35,10 +39,40 @@ export function TrackerApp() {
   const [fxRate, setFxRate] = useState("");
   const [fxDate, setFxDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [fxCsv, setFxCsv] = useState("date,rate\n2026-06-22,83.50");
+  const [holdingQuery, setHoldingQuery] = useState("");
+  const [transactionQuery, setTransactionQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<AssetCategory | "All">("All");
+  const [holdingSort, setHoldingSort] = useState<HoldingSort>("value");
+  const [editingBalanceId, setEditingBalanceId] = useState<string | null>(null);
+  const [balanceDraft, setBalanceDraft] = useState<EditableBalance | null>(null);
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [transactionDraft, setTransactionDraft] = useState<EditableTransaction | null>(null);
 
   const summary = useMemo(() => calculatePortfolioSummary(backup), [backup]);
   const insights = useMemo(() => calculatePortfolioInsights(backup), [backup]);
   const allocation = summary.allocation;
+  const filteredHoldings = useMemo(() => {
+    const q = holdingQuery.trim().toLowerCase();
+    return insights.holdings
+      .filter((holding) => categoryFilter === "All" || holding.category === categoryFilter)
+      .filter((holding) => !q || [holding.label, holding.assetKind, holding.region, holding.provider, holding.institution, holding.issuer].join(" ").toLowerCase().includes(q))
+      .sort((a, b) => {
+        if (holdingSort === "name") return displayHoldingName(a.label).localeCompare(displayHoldingName(b.label));
+        if (holdingSort === "category") return a.category.localeCompare(b.category) || (b.valueInBase ?? 0) - (a.valueInBase ?? 0);
+        if (holdingSort === "source") return a.provider.localeCompare(b.provider) || (b.valueInBase ?? 0) - (a.valueInBase ?? 0);
+        return (b.valueInBase ?? 0) - (a.valueInBase ?? 0);
+      });
+  }, [categoryFilter, holdingQuery, holdingSort, insights.holdings]);
+  const filteredTransactions = useMemo(() => {
+    const q = transactionQuery.trim().toLowerCase();
+    return backup.transactions
+      .filter((tx) => !q || transactionSearchText(tx, backup).includes(q))
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [backup, transactionQuery]);
+  const largestHolding = insights.holdings[0];
+  const topFiveValue = insights.holdings.slice(0, 5).reduce((sum, holding) => sum + (holding.valueInBase ?? 0), 0);
+  const topFivePercent = summary.netWorth === 0 ? 0 : (topFiveValue / summary.netWorth) * 100;
+  const importProviders = new Set(backup.imports.map((run) => run.provider)).size;
 
   function importCsv() {
     const importId = `manual_${Date.now()}`;
@@ -263,6 +297,98 @@ export function TrackerApp() {
     setStatus("Portfolio reset locally.");
   }
 
+  function beginEditBalance(balanceId: string) {
+    const balance = backup.manualBalances.find((item) => item.id === balanceId);
+    if (!balance) return;
+    setEditingBalanceId(balanceId);
+    setBalanceDraft({
+      label: balance.label,
+      category: balance.category,
+      currency: balance.currency,
+      value: balance.value,
+      quantity: balance.quantity,
+      price: balance.price,
+      asOfDate: balance.asOfDate,
+      notes: balance.notes ?? ""
+    });
+    setStatus("Editing holding. Save writes to the canonical local backup model.");
+  }
+
+  function saveBalanceEdit() {
+    if (!editingBalanceId || !balanceDraft) return;
+    const now = new Date().toISOString();
+    setBackup((current) => ({
+      ...current,
+      exportedAt: now,
+      manualBalances: current.manualBalances.map((balance) =>
+        balance.id === editingBalanceId
+          ? {
+              ...balance,
+              ...balanceDraft,
+              value: Number(balanceDraft.value),
+              quantity: optionalNumber(balanceDraft.quantity),
+              price: optionalNumber(balanceDraft.price),
+              currency: balanceDraft.currency.toUpperCase(),
+              userModified: true,
+              updatedAt: now
+            }
+          : balance
+      ),
+      instruments: current.instruments.map((instrument) => {
+        const edited = current.manualBalances.find((balance) => balance.id === editingBalanceId && balance.instrumentId === instrument.id);
+        return edited ? { ...instrument, category: balanceDraft.category, updatedAt: now } : instrument;
+      })
+    }));
+    setEditingBalanceId(null);
+    setBalanceDraft(null);
+    setStatus("Holding updated locally. Export the canonical backup to preserve this edit outside the browser.");
+  }
+
+  function beginEditTransaction(transactionId: string) {
+    const tx = backup.transactions.find((item) => item.id === transactionId);
+    if (!tx) return;
+    setEditingTransactionId(transactionId);
+    setTransactionDraft({
+      date: tx.date,
+      type: tx.type,
+      currency: tx.currency,
+      amount: tx.amount,
+      quantity: tx.quantity,
+      price: tx.price,
+      fees: tx.fees,
+      taxes: tx.taxes
+    });
+    setStatus("Editing transaction. Save marks the imported record as user modified.");
+  }
+
+  function saveTransactionEdit() {
+    if (!editingTransactionId || !transactionDraft) return;
+    const now = new Date().toISOString();
+    setBackup((current) => ({
+      ...current,
+      exportedAt: now,
+      transactions: current.transactions.map((tx) =>
+        tx.id === editingTransactionId
+          ? {
+              ...tx,
+              ...transactionDraft,
+              amount: Number(transactionDraft.amount),
+              quantity: optionalNumber(transactionDraft.quantity),
+              price: optionalNumber(transactionDraft.price),
+              fees: Number(transactionDraft.fees ?? 0),
+              taxes: Number(transactionDraft.taxes ?? 0),
+              currency: transactionDraft.currency.toUpperCase(),
+              userModified: true,
+              updatedAt: now
+            }
+          : tx
+      )
+    }));
+    setEditingTransactionId(null);
+    setTransactionDraft(null);
+    setStatus("Transaction updated locally. Export the canonical backup to preserve this edit outside the browser.");
+  }
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -270,6 +396,9 @@ export function TrackerApp() {
         <nav className="nav" aria-label="Primary">
           <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
             <LayoutDashboard size={18} /> Dashboard
+          </button>
+          <button className={view === "records" ? "active" : ""} onClick={() => setView("records")}>
+            <Table2 size={18} /> Records
           </button>
           <button className={view === "imports" ? "active" : ""} onClick={() => setView("imports")}>
             <Upload size={18} /> Imports
@@ -307,7 +436,7 @@ export function TrackerApp() {
               <Metric label="Net Worth" value={formatMoney(summary.netWorth, backup.baseCurrency)} />
               <Metric label="Holdings" value={String(insights.holdings.length)} />
               <Metric label="Transactions" value={String(backup.transactions.length)} />
-              <Metric label="Imports" value={String(backup.imports.length)} />
+              <Metric label="Data Sources" value={String(importProviders)} />
             </div>
             {summary.missingFx.length > 0 && (
               <div className="notice">Missing FX rate(s): {summary.missingFx.join(", ")}. Refresh market data or add real USD/INR rates under Imports to include foreign-currency holdings in INR totals.</div>
@@ -315,71 +444,118 @@ export function TrackerApp() {
             {insights.transactionStats.missingFx.length > 0 && (
               <div className="notice">INR cash-flow analytics are incomplete because transaction-date FX is missing. Import USD/INR CSV rows for the listed transaction dates.</div>
             )}
-            <div className="grid two">
-              <div className="card wide-card">
-                <h2>Holdings</h2>
-                {insights.holdings.length === 0 ? (
-                  <p className="message">No holdings yet.</p>
-                ) : (
-                  <div className="table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Name</th>
-                          <th>Category</th>
-                          <th>Kind</th>
-                          <th>Region</th>
-                          <th>Qty</th>
-                          <th>Price</th>
-                          <th>Current Value</th>
-                          <th>Local Value</th>
-                          <th>As of</th>
-                          <th>Source</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {insights.holdings.map((holding) => (
-                          <tr key={holding.id}>
-                            <td>{holding.label}</td>
-                            <td><span className="badge">{holding.category}</span></td>
-                            <td>{holding.assetKind}</td>
-                            <td>{holding.region}</td>
-                            <td>{holding.quantity === undefined ? "-" : formatNumber(holding.quantity)}</td>
-                            <td>{holding.price === undefined ? "-" : formatMoney(holding.price, holding.currency)}</td>
-                            <td>{holding.valueInBase === undefined ? "FX needed" : formatMoney(holding.valueInBase, backup.baseCurrency)}</td>
-                            <td>{holding.currency === backup.baseCurrency ? "-" : formatMoney(holding.value, holding.currency)}</td>
-                            <td>{holding.asOfDate}</td>
-                            <td>{holding.provider}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+
+            <div className="analytics-strip">
+              <MiniInsight label="Largest Holding" value={largestHolding ? displayHoldingName(largestHolding.label) : "-"} detail={largestHolding?.valueInBase === undefined ? "" : formatMoney(largestHolding.valueInBase, backup.baseCurrency)} />
+              <MiniInsight label="Top 5 Concentration" value={`${topFivePercent.toFixed(1)}%`} detail={formatMoney(topFiveValue, backup.baseCurrency)} />
+              <MiniInsight label="Invested" value={formatMoney(insights.transactionStats.investedBase, backup.baseCurrency)} detail="base currency cash flow" />
+              <MiniInsight label="Income" value={formatMoney(insights.transactionStats.incomeBase, backup.baseCurrency)} detail="dividend, redemption, interest" />
+            </div>
+
+            <div className="grid holdings-layout">
+              <div className="card wide-card holdings-card">
+                <div className="section-head">
+                  <div>
+                    <h2>Holdings</h2>
+                    <p>Compact names are shown here; hover or open edit to see and change the full record.</p>
+                  </div>
+                  <div className="toolbar">
+                    <label className="search-box"><Search size={15} /><input value={holdingQuery} onChange={(event) => setHoldingQuery(event.target.value)} placeholder="Search holdings" /></label>
+                    <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as AssetCategory | "All")}>
+                      <option value="All">All categories</option>
+                      {categoryOrder.map((category) => <option value={category} key={category}>{category}</option>)}
+                    </select>
+                    <select value={holdingSort} onChange={(event) => setHoldingSort(event.target.value as HoldingSort)}>
+                      <option value="value">Sort by value</option>
+                      <option value="name">Sort by name</option>
+                      <option value="category">Sort by category</option>
+                      <option value="source">Sort by source</option>
+                    </select>
+                  </div>
+                </div>
+                {filteredHoldings.length === 0 ? <p className="message">No holdings match the current filters.</p> : (
+                  <div className="holding-list">
+                    {filteredHoldings.map((holding) => <HoldingRow key={holding.id} holding={holding} baseCurrency={backup.baseCurrency} onEdit={() => beginEditBalance(holding.id)} />)}
                   </div>
                 )}
               </div>
-              <div className="card">
-                <h2>Allocation</h2>
-                {categoryOrder.map((category) => (
-                  <div className="allocation-row" key={category}>
-                    <span>{category}</span>
-                    <div className="bar"><div className={`fill ${category}`} style={{ width: `${allocation[category].percent}%` }} /></div>
-                    <span>{allocation[category].percent.toFixed(1)}%</span>
-                  </div>
-                ))}
+              <div className="side-stack">
+                <div className="card">
+                  <h2>Allocation</h2>
+                  {categoryOrder.map((category) => (
+                    <div className="allocation-row" key={category}>
+                      <span>{category}</span>
+                      <div className="bar"><div className={`fill ${category}`} style={{ width: `${allocation[category].percent}%` }} /></div>
+                      <span>{allocation[category].percent.toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
+                <StatsCard title="By Institution / AMC" rows={insights.totalsByIssuer.map((item) => ({ label: item.name, value: formatMoney(item.value, backup.baseCurrency) }))} />
               </div>
             </div>
+
             <div className="grid three">
               <StatsCard title="XIRR" rows={[{ label: backup.baseCurrency + " base", value: insights.xirrBase === null ? "-" : `${insights.xirrBase.toFixed(2)}%` }, ...Object.entries(insights.xirrByCurrency).map(([currency, value]) => ({ label: currency + " local", value: value === null ? "-" : `${value.toFixed(2)}%` }))]} />
               <StatsCard title="By Asset Type" rows={insights.totalsByAssetKind.map((item) => ({ label: item.name, value: formatMoney(item.value, backup.baseCurrency) }))} />
               <StatsCard title="By Region" rows={insights.totalsByRegion.map((item) => ({ label: item.name, value: formatMoney(item.value, backup.baseCurrency) }))} />
             </div>
-            <div className="grid two">
-              <StatsCard title="Cash Flows" rows={[
-                { label: "Invested", value: formatMoney(insights.transactionStats.investedBase, backup.baseCurrency) },
-                { label: "Income", value: formatMoney(insights.transactionStats.incomeBase, backup.baseCurrency) },
-                { label: "Fees & tax", value: formatMoney(insights.transactionStats.feesAndTaxesBase, backup.baseCurrency) }
-              ]} />
-              <StatsCard title="By Institution / AMC" rows={insights.totalsByIssuer.map((item) => ({ label: item.name, value: formatMoney(item.value, backup.baseCurrency) }))} />
+          </section>
+        )}
+
+        {view === "records" && (
+          <section className="grid">
+            <div className="grid two records-grid">
+              <div className="card wide-card">
+                <div className="section-head">
+                  <div><h2>Editable Holdings</h2><p>Imported balances, manual balances, categories, quantities, prices, notes, and dates.</p></div>
+                </div>
+                <div className="record-list">
+                  {backup.manualBalances.length === 0 ? <p className="message">No balances yet.</p> : backup.manualBalances.map((balance) => (
+                    <div className="record-row" key={balance.id}>
+                      {editingBalanceId === balance.id && balanceDraft ? (
+                        <BalanceEditor draft={balanceDraft} setDraft={setBalanceDraft} onSave={saveBalanceEdit} onCancel={() => { setEditingBalanceId(null); setBalanceDraft(null); }} />
+                      ) : (
+                        <>
+                          <div className="record-main">
+                            <strong title={balance.label}>{displayHoldingName(balance.label)}</strong>
+                            <span>{balance.category} · {balance.currency} · {balance.asOfDate} · {balance.source.provider ?? balance.source.type}</span>
+                          </div>
+                          <div className="record-value">{formatMoney(balance.value, balance.currency)}</div>
+                          <button className="icon-button" onClick={() => beginEditBalance(balance.id)} title="Edit holding"><Pencil size={15} /></button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="card wide-card">
+                <div className="section-head">
+                  <div><h2>Transactions</h2><p>All imported transactions are searchable and editable.</p></div>
+                  <label className="search-box"><Search size={15} /><input value={transactionQuery} onChange={(event) => setTransactionQuery(event.target.value)} placeholder="Search transactions" /></label>
+                </div>
+                <div className="transaction-list">
+                  {filteredTransactions.length === 0 ? <p className="message">No transactions match the current search.</p> : filteredTransactions.slice(0, 250).map((tx) => {
+                    const instrument = backup.instruments.find((item) => item.id === tx.instrumentId);
+                    return (
+                      <div className="transaction-row" key={tx.id}>
+                        {editingTransactionId === tx.id && transactionDraft ? (
+                          <TransactionEditor draft={transactionDraft} setDraft={setTransactionDraft} onSave={saveTransactionEdit} onCancel={() => { setEditingTransactionId(null); setTransactionDraft(null); }} />
+                        ) : (
+                          <>
+                            <div className="record-main">
+                              <strong>{tx.date} · {tx.type}</strong>
+                              <span title={instrument?.name}>{displayHoldingName(instrument?.name ?? tx.instrumentId)} · {tx.source.provider ?? tx.source.type}</span>
+                            </div>
+                            <div className="record-value">{formatMoney(tx.amount, tx.currency)}</div>
+                            <button className="icon-button" onClick={() => beginEditTransaction(tx.id)} title="Edit transaction"><Pencil size={15} /></button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {filteredTransactions.length > 250 && <p className="message">Showing latest 250 matching transactions. Narrow the search to inspect older rows.</p>}
+              </div>
             </div>
           </section>
         )}
@@ -526,13 +702,17 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <div className="card"><div className="metric-label">{label}</div><div className="metric-value">{value}</div></div>;
 }
 
+function MiniInsight({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return <div className="mini-insight"><span>{label}</span><strong title={value}>{value}</strong><small>{detail}</small></div>;
+}
+
 function StatsCard({ title, rows }: { title: string; rows: Array<{ label: string; value: string }> }) {
   return (
     <div className="card stats-card">
       <h2>{title}</h2>
       {rows.length === 0 ? <p className="message">No data yet.</p> : rows.slice(0, 8).map((row) => (
         <div className="stat-line" key={row.label}>
-          <span>{row.label}</span>
+          <span title={row.label}>{displayHoldingName(row.label)}</span>
           <strong>{row.value}</strong>
         </div>
       ))}
@@ -540,10 +720,92 @@ function StatsCard({ title, rows }: { title: string; rows: Array<{ label: string
   );
 }
 
+function HoldingRow({ holding, baseCurrency, onEdit }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; onEdit: () => void }) {
+  const value = holding.valueInBase === undefined ? "FX needed" : formatMoney(holding.valueInBase, baseCurrency);
+  return (
+    <div className="holding-row">
+      <div className="holding-name-block">
+        <strong title={holding.label}>{displayHoldingName(holding.label)}</strong>
+        <span>{holding.assetKind} · {holding.region} · {holding.provider}</span>
+      </div>
+      <div className="holding-chips">
+        <span className={`badge category-${holding.category}`}>{holding.category}</span>
+        <span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span>
+      </div>
+      <div className="holding-money">
+        <strong>{value}</strong>
+        <span>{holding.currency === baseCurrency ? "" : formatMoney(holding.value, holding.currency)}</span>
+      </div>
+      <button className="icon-button" onClick={onEdit} title="Edit holding"><Pencil size={15} /></button>
+    </div>
+  );
+}
+
+function BalanceEditor({ draft, setDraft, onSave, onCancel }: { draft: EditableBalance; setDraft: (value: EditableBalance) => void; onSave: () => void; onCancel: () => void }) {
+  return (
+    <div className="editor-grid balance-editor">
+      <label>Name<input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
+      <label>Category<select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+      <label>Currency<input value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value.toUpperCase() })} /></label>
+      <label>Value<input type="number" step="0.01" value={draft.value} onChange={(event) => setDraft({ ...draft, value: Number(event.target.value) })} /></label>
+      <label>Quantity<input type="number" step="0.000001" value={draft.quantity ?? ""} onChange={(event) => setDraft({ ...draft, quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /></label>
+      <label>Price<input type="number" step="0.0001" value={draft.price ?? ""} onChange={(event) => setDraft({ ...draft, price: event.target.value === "" ? undefined : Number(event.target.value) })} /></label>
+      <label>As of<input type="date" value={draft.asOfDate} onChange={(event) => setDraft({ ...draft, asOfDate: event.target.value })} /></label>
+      <label className="wide-field">Notes<input value={draft.notes ?? ""} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label>
+      <div className="editor-actions"><button className="primary" onClick={onSave}><Save size={15} /> Save</button><button onClick={onCancel}><X size={15} /> Cancel</button></div>
+    </div>
+  );
+}
+
+function TransactionEditor({ draft, setDraft, onSave, onCancel }: { draft: EditableTransaction; setDraft: (value: EditableTransaction) => void; onSave: () => void; onCancel: () => void }) {
+  return (
+    <div className="editor-grid transaction-editor">
+      <label>Date<input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} /></label>
+      <label>Type<select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as Transaction["type"] })}>{transactionTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+      <label>Currency<input value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value.toUpperCase() })} /></label>
+      <label>Amount<input type="number" step="0.01" value={draft.amount} onChange={(event) => setDraft({ ...draft, amount: Number(event.target.value) })} /></label>
+      <label>Quantity<input type="number" step="0.000001" value={draft.quantity ?? ""} onChange={(event) => setDraft({ ...draft, quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /></label>
+      <label>Price<input type="number" step="0.0001" value={draft.price ?? ""} onChange={(event) => setDraft({ ...draft, price: event.target.value === "" ? undefined : Number(event.target.value) })} /></label>
+      <label>Fees<input type="number" step="0.01" value={draft.fees ?? 0} onChange={(event) => setDraft({ ...draft, fees: Number(event.target.value) })} /></label>
+      <label>Taxes<input type="number" step="0.01" value={draft.taxes ?? 0} onChange={(event) => setDraft({ ...draft, taxes: Number(event.target.value) })} /></label>
+      <div className="editor-actions"><button className="primary" onClick={onSave}><Save size={15} /> Save</button><button onClick={onCancel}><X size={15} /> Cancel</button></div>
+    </div>
+  );
+}
+
 function viewTitle(view: View): string {
   if (view === "imports") return "Imports";
   if (view === "backup") return "Backup and Restore";
+  if (view === "records") return "Records and Editing";
   return "Dashboard";
+}
+
+function displayHoldingName(name: string): string {
+  const cleaned = name
+    .replace(/^Registrar\s*:\s*[^\s]+\s+/i, "")
+    .replace(/\s*\([^)]*\)/g, "")
+    .replace(/\s+formerly\s+.*$/i, "")
+    .replace(/\s+erstwhile\s+.*$/i, "")
+    .replace(/\s+-\s+Direct Plan\s+-\s+Growth Option/i, " Direct Growth")
+    .replace(/\s+-\s+Direct Plan\s+-\s+Growth/i, " Direct Growth")
+    .replace(/\s+-\s+Direct Plan Growth/i, " Direct Growth")
+    .replace(/\s+-\s+Direct Growth/i, " Direct Growth")
+    .replace(/\s+-\s+Growth Option/i, " Growth")
+    .replace(/\s+Plan\s+Growth/i, " Growth")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length <= 58) return cleaned;
+  return cleaned.slice(0, 55).trimEnd() + "...";
+}
+
+function transactionSearchText(tx: Transaction, backup: PortfolioBackup): string {
+  const instrument = backup.instruments.find((item) => item.id === tx.instrumentId);
+  const account = backup.accounts.find((item) => item.id === tx.accountId);
+  return [tx.date, tx.type, tx.currency, tx.amount, tx.source.provider, instrument?.name, instrument?.symbol, account?.name, account?.institution].join(" ").toLowerCase();
+}
+
+function optionalNumber(value: number | undefined): number | undefined {
+  return value === undefined || Number.isNaN(value) ? undefined : Number(value);
 }
 
 function formatMoney(value: number, currency: string): string {

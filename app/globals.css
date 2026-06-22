@@ -419,3 +419,277 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+.analytics-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.mini-insight {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mini-insight span,
+.section-head p {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.mini-insight strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 18px;
+}
+
+.mini-insight small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.holdings-layout {
+  grid-template-columns: minmax(0, 1fr) 360px;
+  align-items: start;
+}
+
+.side-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.section-head h2 {
+  margin-bottom: 4px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.search-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #fff;
+}
+
+.search-box input {
+  border: 0;
+  outline: 0;
+  min-width: 170px;
+}
+
+select,
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input:not([type]) {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--text);
+}
+
+.holding-list,
+.record-list,
+.transaction-list {
+  display: grid;
+  gap: 8px;
+}
+
+.holding-row,
+.record-row,
+.transaction-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto minmax(160px, auto) 38px;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.record-row,
+.transaction-row {
+  grid-template-columns: minmax(220px, 1fr) minmax(120px, auto) 38px;
+}
+
+.holding-name-block,
+.record-main,
+.holding-money {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.holding-name-block strong,
+.record-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holding-name-block span,
+.record-main span,
+.holding-money span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holding-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.holding-money,
+.record-value {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.icon-button {
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
+.muted-badge {
+  color: var(--muted);
+}
+
+.category-Equity { background: #dbeafe; color: #1e40af; }
+.category-Debt { background: #e5e7eb; color: #374151; }
+.category-Gold { background: #fef3c7; color: #92400e; }
+.category-Others { background: #ede9fe; color: #5b21b6; }
+.category-Cash { background: #ccfbf1; color: #115e59; }
+
+.records-grid {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+}
+
+.editor-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.editor-grid label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.editor-grid label input,
+.editor-grid label select {
+  width: 100%;
+}
+
+.wide-field {
+  grid-column: span 2;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  justify-content: flex-end;
+  grid-column: span 2;
+}
+
+.editor-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+@media (max-width: 1200px) {
+  .analytics-strip,
+  .holdings-layout,
+  .records-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .holding-row {
+    grid-template-columns: minmax(0, 1fr) auto 38px;
+  }
+
+  .holding-chips {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .analytics-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .section-head,
+  .toolbar {
+    display: grid;
+    justify-content: stretch;
+  }
+
+  .search-box,
+  .search-box input,
+  .toolbar select {
+    width: 100%;
+  }
+
+  .holding-row,
+  .record-row,
+  .transaction-row {
+    grid-template-columns: minmax(0, 1fr) 38px;
+  }
+
+  .holding-money,
+  .record-value {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wide-field,
+  .editor-actions {
+    grid-column: auto;
+  }
+}

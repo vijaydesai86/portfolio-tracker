@@ -18,3 +18,4 @@ All meaningful project changes are recorded here.
 - Added INDMoney XLSX browser import, private XLSX fixture test, Selenium import smoke test, linked quantity/price balances, XIRR analytics, grouped dashboard statistics, and live market-data refresh routes.
 - Fixed INR-first multi-currency analytics: latest USD/INR converts current USD holdings, historical USD/INR converts USD transaction cash flows, and dashboard holdings show asset kind plus India/US region tags.
 - Added real USD/INR provider fallbacks using Frankfurter, Open ER API, and currency-api, plus manual real-FX CSV import for blocked-source recovery and provider-specific market refresh errors.
+- Upgraded dashboard and records UX with compact holding names, holdings search/filter/sort, concentration analytics, editable holdings and transactions, and improved mutual-fund category inference.

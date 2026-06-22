@@ -55,4 +55,26 @@ describe("CAS text parser", () => {
     expect(imported.priceSnapshots).toHaveLength(1);
     expect(imported.importRun).toMatchObject({ provider: "cas_pdf", status: "staged", confidence: "medium" });
   });
+
+  it("classifies common mutual fund categories from scheme names", () => {
+    const multiSchemeCas = `Consolidated Account Statement
+Folio No: 1 PAN: REDACTED
+REDACTED INVESTOR
+AAA-Parag Parikh Dynamic Asset Allocation Fund - Direct Plan Growth - ISIN: INF000000010 Registrar : CAMS
+Nominee 1: REDACTED Opening Unit Balance: 0.000
+Closing Unit Balance: 10.000 NAV on 19-Jun-2026: INR 10.000 Total Cost Value: 100.00 Market Value on 19-Jun-2026: INR 100.00
+Folio No: 2 PAN: REDACTED
+REDACTED INVESTOR
+BBB-Parag Parikh Conservative Hybrid Fund - Direct Plan Growth - ISIN: INF000000011 Registrar : CAMS
+Nominee 1: REDACTED Opening Unit Balance: 0.000
+Closing Unit Balance: 10.000 NAV on 19-Jun-2026: INR 10.000 Total Cost Value: 100.00 Market Value on 19-Jun-2026: INR 100.00`;
+
+    const parsed = parseCasText(multiSchemeCas);
+
+    expect(parsed.schemes.map((scheme) => ({ name: scheme.schemeName, category: scheme.category }))).toEqual([
+      { name: "Parag Parikh Dynamic Asset Allocation Fund - Direct Plan Growth", category: "Equity" },
+      { name: "Parag Parikh Conservative Hybrid Fund - Direct Plan Growth", category: "Debt" }
+    ]);
+  });
+
 });
