@@ -8,6 +8,7 @@ import { deleteImportRunFromBackup, deleteTransactionFromBackup } from "@/src/do
 import { buildReadinessModules, type ReadinessModule } from "@/src/domain/assetModules";
 import { lossWatchlist, topGainContributors, type HoldingPerformanceRow } from "@/src/domain/holdingPerformance";
 import { calculateHoldingReturns, type HoldingReturn } from "@/src/domain/holdingReturns";
+import { calculateDashboardPerformance } from "@/src/domain/dashboardPerformance";
 import { buildPortfolioTimeline, type PortfolioTimelinePoint } from "@/src/domain/performanceTimeline";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
@@ -82,32 +83,7 @@ export function TrackerApp() {
   const timeline = useMemo(() => buildPortfolioTimeline(backup), [backup]);
   const allocation = summary.allocation;
   const holdingReturns = useMemo(() => calculateHoldingReturns(backup), [backup]);
-  const performance = useMemo(() => {
-    const grossCashIn = insights.transactionStats.externalCashInBase;
-    const current = summary.netWorth;
-    const cashOut = insights.transactionStats.externalCashOutBase;
-    const feesAndTax = insights.transactionStats.feesAndTaxesBase;
-    const knownReturns = [...holdingReturns.values()].filter((row) => row.costBasisKnown && row.currentValue !== undefined);
-    const holdingNetInvested = knownReturns.reduce((sum, row) => sum + row.netInvested, 0);
-    const currentWithCostBasis = knownReturns.reduce((sum, row) => sum + (row.currentValue ?? 0), 0);
-    const hasExternalFlows = grossCashIn > 0 || cashOut > 0;
-    const netInvested = hasExternalFlows ? Math.max(0, grossCashIn - cashOut) : holdingNetInvested;
-    const currentProfit = hasExternalFlows ? current - netInvested : knownReturns.reduce((sum, row) => sum + (row.profit ?? 0), 0);
-    const totalProfit = currentProfit;
-    const profitKnown = hasExternalFlows || knownReturns.length > 0;
-    return {
-      grossCashIn,
-      current,
-      cashOut,
-      feesAndTax,
-      netInvested,
-      currentWithCostBasis,
-      currentProfit,
-      totalProfit,
-      profitKnown,
-      absoluteReturnPercent: !profitKnown || netInvested === 0 ? null : (totalProfit / netInvested) * 100
-    };
-  }, [holdingReturns, insights.transactionStats, summary.netWorth]);
+  const performance = useMemo(() => calculateDashboardPerformance(summary, insights.transactionStats, holdingReturns.values()), [holdingReturns, insights.transactionStats, summary]);
 
   const chartData = useMemo(() => ({
     allocation: categoryOrder.map((category) => ({ name: category, value: allocation[category].value, percent: allocation[category].percent })).filter((item) => item.value > 0),
@@ -183,8 +159,7 @@ export function TrackerApp() {
   const staleHoldings = insights.holdings.filter((holding) => daysSince(holding.asOfDate) > 7).length;
   const reviewCategoryCount = insights.holdings.filter((holding) => holding.category === "Others").length;
   const performanceBridge = [
-    { name: "Gross Cash In", value: performance.grossCashIn },
-    { name: "Net Invested", value: performance.netInvested },
+    { name: "Cost Basis", value: performance.netInvested },
     { name: "Current Value", value: performance.current },
     { name: "Total P/L", value: performance.totalProfit }
   ].filter((item) => item.value !== 0);
@@ -733,10 +708,10 @@ export function TrackerApp() {
                   </div>
                 </div>
                 <div className="sub-analytics-strip">
-                  <MiniInsight label="External Cash In" value={formatMoney(performance.grossCashIn, backup.baseCurrency)} detail="broker deposits, direct buys, SIPs, contributions" />
-                  <MiniInsight label="External Cash Out" value={formatMoney(performance.cashOut, backup.baseCurrency)} detail="withdrawals, redemptions, dividends outside cash-ledger brokers" />
+                  <MiniInsight label="Cost Basis" value={formatMoney(performance.netInvested, backup.baseCurrency)} detail="same basis used for headline P/L" />
+                  <MiniInsight label="Recorded Cash In" value={formatMoney(performance.grossCashIn, backup.baseCurrency)} detail="transaction-ledger inflows only" />
+                  <MiniInsight label="Recorded Cash Out" value={formatMoney(performance.cashOut, backup.baseCurrency)} detail="transaction-ledger outflows only" />
                   <MiniInsight label="Fees & Taxes" value={formatMoney(performance.feesAndTax, backup.baseCurrency)} detail="recorded charges and tax fields" />
-                  <MiniInsight label="Current P/L" value={performance.profitKnown ? formatMoney(performance.currentProfit, backup.baseCurrency) : "-"} detail="only where invested/cost is known" />
                 </div>
               </div>
             )}

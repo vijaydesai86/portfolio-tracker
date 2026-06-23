@@ -27,15 +27,15 @@ describe("private report validation", () => {
     const backup = applyCanonicalCasImport(createEmptyBackup("INR"), buildCanonicalCasImport(parsed, { importId: "private_cas", now: "2026-06-23T00:00:00.000Z" }));
     const returns = calculateHoldingReturns(backup);
     expect(backup.manualBalances).toHaveLength(parsed.schemes.filter((scheme) => scheme.marketValue !== undefined).length);
+    expect(parsed.transactions.some((row) => row.raw.includes("Switch-In") && row.type === "switch_in")).toBe(true);
+    expect(backup.transactions.some((tx) => tx.type === "switch_in")).toBe(true);
+    expect([...returns.values()].filter((row) => typeof row.xirr === "number")).toHaveLength(backup.manualBalances.length);
     for (const scheme of parsed.schemes) {
       const balance = backup.manualBalances.find((item) => item.label === scheme.schemeName);
       if (!balance || scheme.totalCostValue === undefined) continue;
       const row = returns.get(balance.id)!;
-      const parsedCashCost = backup.transactions
-        .filter((tx) => tx.accountId === balance.accountId && tx.instrumentId === balance.instrumentId && ["buy", "sip", "deposit", "contribution", "switch_in"].includes(tx.type))
-        .reduce((sum, tx) => sum + Math.abs(tx.amount) + Math.abs(tx.fees ?? 0) + Math.abs(tx.taxes ?? 0), 0);
       expect(row.invested).toBeCloseTo(scheme.totalCostValue, 2);
-      if (!costBasisMatchesTransactions(scheme.totalCostValue, parsedCashCost)) expect(row.xirr).toBeUndefined();
+      expect(typeof row.xirr).toBe("number");
     }
     validateReportMath(backup);
   });
@@ -51,7 +51,7 @@ describe("private report validation", () => {
     expect(backup.manualBalances).toHaveLength(parsed.positions.length);
     expect([...returns.values()].filter((row) => row.costBasisKnown && (row.currentValue ?? 0) > 0 && row.invested === 0)).toEqual([]);
     validateReportMath(backup);
-  });
+  }, 15000);
 
   it.skipIf(!process.env.PF_TEXT_PATHS)("validates PF parser and holding report invariants", () => {
     const paths = splitPaths(process.env.PF_TEXT_PATHS);

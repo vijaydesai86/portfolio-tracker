@@ -8,7 +8,7 @@ All meaningful project changes are recorded here.
 
 - Fixed EPFO/PF yearly parsing to select the main passbook closing balance instead of taxable-data subtables, and to include main passbook transfer-in rows as PF cost-basis contributions.
 
-- Changed headline portfolio invested/P&L to use external capital-in minus external capital-out when transaction cash-flow data exists, while holding rows continue to show remaining cost basis.
+- Fixed headline portfolio invested/P&L to match holdings remaining cost basis, relabeled supporting cash-flow metrics as recorded transaction-ledger cash in/out, and added regression coverage so Overview reconciles with Holdings for CAS, IND, NPS, and manual imports.
 
 - Fixed CAS mutual-fund invested/P&L calculations to use statement `Total Cost Value` as authoritative cost basis, and suppress holding XIRR when the CAS statement window lacks complete acquisition cash flows.
 
