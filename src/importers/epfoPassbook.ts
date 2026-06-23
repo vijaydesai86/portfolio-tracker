@@ -75,7 +75,11 @@ export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, option
   const accountId = "acct_epfo_pf";
   const account: Account = { id: accountId, name: "EPFO Provident Fund", institution: "EPFO", type: "epf", currency: "INR", createdAt: now, updatedAt: now };
 
-  const instruments = parsed.balances.map((bucket): Instrument => ({
+  const portfolioBuckets = parsed.balances.filter((bucket) => bucket.key !== "pension");
+  const portfolioContributions = parsed.yearlyContributions.filter((bucket) => bucket.key !== "pension");
+  const portfolioInterest = parsed.yearlyInterest.filter((bucket) => bucket.key !== "pension");
+
+  const instruments = portfolioBuckets.map((bucket): Instrument => ({
     id: slugId("inst", ["epfo", bucket.key]),
     name: bucket.label,
     type: "epf",
@@ -87,7 +91,7 @@ export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, option
     updatedAt: now
   }));
 
-  const manualBalances = parsed.balances.map((bucket): ManualBalance => {
+  const manualBalances = portfolioBuckets.map((bucket): ManualBalance => {
     const instrument = instruments.find((item) => item.name === bucket.label)!;
     const sourceRecordHash = stableHash({ provider: "epfo_passbook", balance: bucket, asOfDate: parsed.asOfDate });
     return {
@@ -107,7 +111,7 @@ export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, option
     };
   });
 
-  const contributionTransactions = parsed.yearlyContributions.filter((bucket) => bucket.value > 0).map((bucket): Transaction => {
+  const contributionTransactions = portfolioContributions.filter((bucket) => bucket.value > 0).map((bucket): Transaction => {
     const instrument = instruments.find((item) => item.name === bucket.label)!;
     const sourceRecordHash = stableHash({ provider: "epfo_passbook", contribution: bucket, asOfDate: parsed.asOfDate });
     return {
@@ -127,7 +131,7 @@ export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, option
     };
   });
 
-  const interestTransactions = parsed.yearlyInterest.filter((bucket) => bucket.value > 0).map((bucket): Transaction => {
+  const interestTransactions = portfolioInterest.filter((bucket) => bucket.value > 0).map((bucket): Transaction => {
     const instrument = instruments.find((item) => item.name === bucket.label)!;
     const sourceRecordHash = stableHash({ provider: "epfo_passbook", interestAccrual: bucket, asOfDate: parsed.asOfDate });
     return {
@@ -156,7 +160,7 @@ export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, option
     status: parsed.errors.length > 0 ? "failed" : "staged",
     confidence: parsed.errors.length > 0 ? "low" : "medium",
     createdAt: now,
-    notes: parsed.balances.length + " PF balance buckets, " + contributionTransactions.length + " yearly contribution rows, " + interestTransactions.length + " interest accrual rows"
+    notes: portfolioBuckets.length + " PF portfolio balance buckets, " + contributionTransactions.length + " contribution rows, " + interestTransactions.length + " interest accrual rows; EPS pension bucket excluded from portfolio value"
   };
 
   const sourceDocument: SourceDocument | undefined = options.fileName ? {

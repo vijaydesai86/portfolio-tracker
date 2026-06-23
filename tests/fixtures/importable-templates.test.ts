@@ -16,6 +16,7 @@ describe("importable canonical template pack", () => {
       "debt-small-savings-template.csv",
       "equity-mf-india-us-template.csv",
       "gold-others-template.csv",
+      "manual-balances-sample.csv",
       "manual-balances-template.csv",
       "manual-transactions-template.csv"
     ]);
@@ -58,4 +59,14 @@ describe("importable canonical template pack", () => {
       ])
     );
   });
+  it("includes a non-zero manual balances sample with invested amounts", () => {
+    const csv = readFileSync(resolve(fixtureDir, "manual-balances-sample.csv"), "utf8");
+    const result = parseManualCsv(csv, { importId: "manual_balance_sample" });
+
+    expect(result.errors).toEqual([]);
+    expect(result.manualBalances).toHaveLength(9);
+    expect(result.manualBalances.every((balance) => balance.value > 0)).toBe(true);
+    expect(result.manualBalances.every((balance) => balance.investedAmount !== undefined && balance.investedAmount > 0)).toBe(true);
+  });
+
 });

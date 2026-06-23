@@ -55,6 +55,8 @@ export type CasScheme = {
 
 export type CasParseResult = {
   statementType: "cas";
+  statementStartDate?: string;
+  statementEndDate?: string;
   schemes: CasScheme[];
   transactions: CasTransactionRow[];
   datedRows: number;
@@ -92,6 +94,8 @@ export function parseCasText(text: string): CasParseResult {
   const schemes: CasScheme[] = [];
   const warnings: string[] = [];
   const errors: string[] = [];
+  let statementStartDate: string | undefined;
+  let statementEndDate: string | undefined;
   let current: MutableScheme | undefined;
   let datedRows = 0;
   let parsedFinancialRows = 0;
@@ -131,6 +135,12 @@ export function parseCasText(text: string): CasParseResult {
     const line = lines[i];
     const trimmed = line.trim();
     if (!trimmed) continue;
+
+    const statementPeriod = parseStatementPeriod(trimmed);
+    if (statementPeriod) {
+      statementStartDate ??= statementPeriod.start;
+      statementEndDate ??= statementPeriod.end;
+    }
 
     const folio = parseFolio(trimmed);
     if (folio) {
@@ -211,6 +221,8 @@ export function parseCasText(text: string): CasParseResult {
 
   return {
     statementType: "cas",
+    statementStartDate,
+    statementEndDate,
     schemes,
     transactions: schemes.flatMap((scheme) => scheme.transactions),
     datedRows,
@@ -271,6 +283,9 @@ export function buildCanonicalCasImport(
         category: scheme.category,
         currency: "INR",
         value: scheme.marketValue,
+        investedAmount: scheme.totalCostValue,
+        investedCurrency: scheme.totalCostValue === undefined ? undefined : "INR",
+        investedAsOfDate: scheme.totalCostValue === undefined ? undefined : scheme.marketValueDate,
         quantity: scheme.closingUnitBalance,
         price: scheme.nav,
         asOfDate: scheme.marketValueDate,
@@ -291,6 +306,28 @@ export function buildCanonicalCasImport(
         asOfDate: scheme.navDate,
         source: "cas_pdf",
         createdAt: now
+      });
+    }
+
+    const openingCost = estimateOpeningCostBasis(scheme);
+    if (openingCost !== undefined && openingCost.amount > 0) {
+      const sourceRecordHash = stableHash({ scheme: scheme.isin, folio: scheme.folio, openingCost, statementStartDate: parsed.statementStartDate });
+      transactions.push({
+        id: slugId("txn", [sourceRecordHash]),
+        accountId,
+        instrumentId,
+        date: parsed.statementStartDate ?? scheme.transactions[0]?.date ?? scheme.marketValueDate ?? now.slice(0, 10),
+        type: "buy",
+        quantity: openingCost.units,
+        price: openingCost.units > 0 ? openingCost.amount / openingCost.units : undefined,
+        amount: openingCost.amount,
+        currency: "INR",
+        fees: 0,
+        taxes: 0,
+        source: { type: "import", importId: options.importId, provider: "cas_pdf", sourceRecordHash },
+        userModified: false,
+        createdAt: now,
+        updatedAt: now
       });
     }
 
@@ -359,6 +396,64 @@ function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] 
   const map = new Map(existing.map((item) => [item.id, item]));
   for (const item of incoming) map.set(item.id, item);
   return [...map.values()];
+}
+
+function parseStatementPeriod(line: string): { start: string; end: string } | undefined {
+  const match = line.match(/(\d{2}-[A-Za-z]{3}-\d{4})\s+To\s+(\d{2}-[A-Za-z]{3}-\d{4})/);
+  if (!match) return undefined;
+  return { start: parseCasDate(match[1]), end: parseCasDate(match[2]) };
+}
+
+function estimateOpeningCostBasis(scheme: CasScheme): { units: number; amount: number } | undefined {
+  const openingUnits = scheme.openingUnitBalance ?? 0;
+  const targetCost = scheme.totalCostValue;
+  if (!targetCost || openingUnits <= 0) return undefined;
+
+  const withoutOpening = simulateRemainingCost(scheme.transactions, { quantity: 0, cost: 0 });
+  const unitOpening = simulateRemainingCost(scheme.transactions, { quantity: openingUnits, cost: 1 });
+  const openingFactor = unitOpening - withoutOpening;
+  if (openingFactor <= 0) return undefined;
+  const amount = targetCost - withoutOpening;
+  if (amount <= 0) return undefined;
+  return { units: roundQuantity(openingUnits), amount: roundMoney(amount / openingFactor) };
+}
+
+function simulateRemainingCost(rows: CasTransactionRow[], openingLot: { quantity: number; cost: number }): number {
+  const lots: Array<{ quantity: number; cost: number }> = [];
+  if (openingLot.quantity > 0 && openingLot.cost > 0) lots.push({ ...openingLot });
+  let unallocatedCost = 0;
+  for (const row of rows) {
+    if (row.amount === undefined) continue;
+    if (["purchase", "sip", "switch_in"].includes(row.type)) {
+      addLot(lots, row.units, row.amount, (value) => { unallocatedCost += value; });
+    } else if (["redemption", "switch_out"].includes(row.type)) {
+      removeLot(lots, row.units, row.amount, (value) => { unallocatedCost = Math.max(0, unallocatedCost - value); });
+    }
+  }
+  return lots.reduce((sum, lot) => sum + lot.cost, unallocatedCost);
+}
+
+function addLot(lots: Array<{ quantity: number; cost: number }>, quantity: number | undefined, cost: number, addUnallocated: (cost: number) => void) {
+  const qty = Math.abs(quantity ?? 0);
+  if (qty > 0) lots.push({ quantity: qty, cost });
+  else addUnallocated(cost);
+}
+
+function removeLot(lots: Array<{ quantity: number; cost: number }>, quantity: number | undefined, fallbackAmount: number, removeUnallocated: (cost: number) => void) {
+  let remainingQuantity = Math.abs(quantity ?? 0);
+  if (remainingQuantity <= 0) {
+    removeUnallocated(fallbackAmount);
+    return;
+  }
+  while (remainingQuantity > 0.0000001 && lots.length > 0) {
+    const lot = lots[0];
+    const consumed = Math.min(lot.quantity, remainingQuantity);
+    const consumedCost = lot.quantity === 0 ? 0 : lot.cost * (consumed / lot.quantity);
+    lot.quantity = roundQuantity(lot.quantity - consumed);
+    lot.cost = Math.max(0, lot.cost - consumedCost);
+    remainingQuantity = roundQuantity(remainingQuantity - consumed);
+    if (lot.quantity <= 0.0000001) lots.shift();
+  }
 }
 
 function parseFolio(line: string): string | undefined {
@@ -529,6 +624,14 @@ function parseCasDate(value: string): string {
 
 function parseNumber(value: string): number {
   return Number(value.replace(/,/g, ""));
+}
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function roundQuantity(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1000000) / 1000000;
 }
 
 function isPageOrHeaderLine(line: string): boolean {

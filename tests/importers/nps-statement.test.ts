@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyCanonicalNpsImport, buildCanonicalNpsImport, parseNpsCsv } from "@/src/importers/npsStatement";
 import { createEmptyBackup } from "@/src/schema/backup";
+import { calculatePortfolioInsights } from "@/src/domain/analytics";
 
 const npsCsv = `NPS Transaction Statement for Tier I Account
 Subscriber Details
@@ -42,6 +43,26 @@ describe("NPS statement importer", () => {
     expect(parsed.holdings[1]).toMatchObject({ category: "Debt", value: 200000.25 });
     expect(parsed.contributionRows).toHaveLength(1);
     expect(parsed.transactions.map((row) => row.type)).toEqual(["fee", "contribution", "contribution"]);
+  });
+
+  it("treats subscriber scheme preference changes as internal switches, not external cash out", () => {
+    const switchCsv = npsCsv.replace(
+      "20-Jun-2026,Closing Balance,,,1040.0000",
+      "15-May-2026,To Withdrawal On Account of Subscriber Initiated Scheme Preference Change,(1000.00),100.0000,(10.0000)\n20-Jun-2026,Closing Balance,,,1040.0000"
+    ).replace(
+      "20-Jun-2026,Closing Balance,,,2060.0000",
+      "15-May-2026,By Contribution On Account of Subscriber Initiated Scheme Preference Change,1000.00,100.0000,10.0000\n20-Jun-2026,Closing Balance,,,2060.0000"
+    );
+
+    const parsed = parseNpsCsv(switchCsv);
+    const backup = applyCanonicalNpsImport(createEmptyBackup("INR"), buildCanonicalNpsImport(parsed, { importId: "nps_switch", now: "2026-06-22T00:00:00.000Z" }));
+    const insights = calculatePortfolioInsights(backup);
+
+    expect(parsed.transactions.map((row) => row.type)).toContain("switch_out");
+    expect(parsed.transactions.map((row) => row.type)).toContain("switch_in");
+    expect(backup.transactions.filter((tx) => tx.type === "switch_out")).toHaveLength(1);
+    expect(backup.transactions.filter((tx) => tx.type === "switch_in")).toHaveLength(1);
+    expect(insights.transactionStats.externalCashOutBase).toBe(0);
   });
 
   it("builds and commits canonical NPS records", () => {

@@ -65,17 +65,21 @@ export function calculateHoldingReturns(backup: PortfolioBackup): Map<string, Ho
       }
     }
 
-    if (!hasCashFlows && balance.investedAmount !== undefined) {
+    const reconstructedCostBasis = lots.reduce((sum, lot) => sum + lot.cost, unallocatedCostBasis);
+    let remainingCostBasis = reconstructedCostBasis;
+    let xirrCashFlowsComplete = true;
+
+    if (balance.investedAmount !== undefined) {
       const investedValue = convert(balance.investedAmount, balance.investedCurrency ?? balance.currency, backup, balance.investedAsOfDate ?? balance.asOfDate, missingFx);
       if (investedValue !== undefined) {
-        unallocatedCostBasis = investedValue;
+        remainingCostBasis = investedValue;
         hasCostBasisInput = true;
+        xirrCashFlowsComplete = !hasCashFlows || costBasisMatchesTransactions(investedValue, reconstructedCostBasis);
       }
     }
 
-    const remainingCostBasis = lots.reduce((sum, lot) => sum + lot.cost, unallocatedCostBasis);
     const costBasisKnown = hasCostBasisInput || balance.investedAmount !== undefined;
-    if (hasCashFlows && currentValue !== undefined && currentValue !== 0) flows.push({ date: balance.asOfDate, amount: currentValue });
+    if (hasCashFlows && xirrCashFlowsComplete && currentValue !== undefined && currentValue !== 0) flows.push({ date: balance.asOfDate, amount: currentValue });
     const profit = costBasisKnown && currentValue !== undefined ? currentValue - remainingCostBasis : undefined;
     returns.set(balance.id, {
       currentValue: currentValue === undefined ? undefined : roundMoney(currentValue),
@@ -86,13 +90,18 @@ export function calculateHoldingReturns(backup: PortfolioBackup): Map<string, Ho
       hasCashFlows,
       profit: profit === undefined ? undefined : roundMoney(profit),
       returnPercent: profit === undefined || remainingCostBasis <= 0 ? undefined : roundPercent((profit / remainingCostBasis) * 100),
-      xirr: !hasCashFlows ? undefined : missingFx.size > 0 ? null : calculateXirr(flows),
+      xirr: !hasCashFlows || !xirrCashFlowsComplete ? undefined : missingFx.size > 0 ? null : calculateXirr(flows),
       allocationPercent: currentValue === undefined || netWorth <= 0 ? 0 : roundPercent((currentValue / netWorth) * 100),
       missingFx: [...missingFx].sort()
     });
   }
 
   return returns;
+}
+
+function costBasisMatchesTransactions(authoritative: number, reconstructed: number): boolean {
+  const tolerance = Math.max(1, Math.abs(authoritative) * 0.01);
+  return Math.abs(authoritative - reconstructed) <= tolerance;
 }
 
 function addCost(lots: CostLot[], quantity: number | undefined, cost: number, addUnallocated: (cost: number) => void) {

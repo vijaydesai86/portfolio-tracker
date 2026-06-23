@@ -40,6 +40,32 @@ describe("CAS text parser", () => {
     expect(parsed.schemes[0].transactions.map((tx) => tx.type)).toEqual(["purchase", "stamp_duty"]);
   });
 
+  it("uses CAS Total Cost Value as holding invested amount when statement-window transactions are partial", () => {
+    const partialHistoryCas = `Consolidated Account Statement
+Date          Transaction                                                                         Amount               Units             Price                 Unit
+                                                                                                       (INR)                              (INR)                Balance
+Sample Mutual Fund
+Folio No: 123456 / 78                                                                            PAN: REDACTED                                   KYC: OK PAN: OK
+REDACTED INVESTOR
+ABC1-Sample Index Fund - Direct Plan - Growth - ISIN: INF000000002 Registrar : CAMS
+Nominee 1: REDACTED Opening Unit Balance: 100.000
+04-Nov-2025   Purchase - via AMCOnline                                                            10,000.00            10.000         1,000.000                 110.000
+Closing Unit Balance: 110.000             NAV on 19-Jun-2026: INR 1,200.000       Total Cost Value: 1,10,000.00            Market Value on 19-Jun-2026: INR 1,32,000.00`;
+
+    const imported = buildCanonicalCasImport(parseCasText(partialHistoryCas), {
+      importId: "cas_test_partial_history",
+      fileName: "sample-cas.pdf",
+      now: "2026-06-22T00:00:00.000Z"
+    });
+
+    expect(imported.manualBalances[0]).toMatchObject({
+      value: 132000,
+      investedAmount: 110000,
+      investedCurrency: "INR",
+      investedAsOfDate: "2026-06-19"
+    });
+  });
+
   it("normalizes parsed CAS data into canonical portfolio records", () => {
     const parsed = parseCasText(sampleCasText);
     const imported = buildCanonicalCasImport(parsed, {

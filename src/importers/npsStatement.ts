@@ -298,6 +298,7 @@ function inferNpsCategory(name: string): AssetCategory {
 function inferNpsTransactionType(description: string, amount: number | undefined): Transaction["type"] {
   const value = description.toLowerCase();
   if (value.includes("billing") || value.includes("charge")) return "fee";
+  if (value.includes("scheme preference change")) return (amount ?? 0) < 0 ? "switch_out" : "switch_in";
   if (value.includes("redemption") || value.includes("withdraw")) return "redemption";
   if ((amount ?? 0) < 0) return "fee";
   return "contribution";

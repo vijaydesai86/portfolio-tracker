@@ -52,13 +52,13 @@ describe("private PF/NPS imports", () => {
       expectedContributionCount += imported.transactions.filter((tx) => tx.type === "contribution").length;
       expectedInterestCount += imported.transactions.filter((tx) => tx.type === "interest_accrual").length;
       if (parsed.asOfDate >= (parsedDates.sort().at(-1) ?? "")) {
-        latestExpectedBalances = parsed.balances.map((bucket) => ({ label: bucket.label, value: bucket.value }));
+        latestExpectedBalances = parsed.balances.filter((bucket) => bucket.key !== "pension").map((bucket) => ({ label: bucket.label, value: bucket.value }));
       }
       backup = applyCanonicalEpfoImport(backup, imported);
     });
 
     const latestDate = parsedDates.sort().at(-1);
-    expect(backup.manualBalances).toHaveLength(3);
+    expect(backup.manualBalances).toHaveLength(2);
     expect(backup.manualBalances.every((balance) => balance.asOfDate === latestDate && balance.category === "Debt")).toBe(true);
     expect(new Map(backup.manualBalances.map((balance) => [balance.label, balance.value]))).toEqual(new Map(latestExpectedBalances.map((balance) => [balance.label, balance.value])));
     expect(backup.imports).toHaveLength(paths.length);

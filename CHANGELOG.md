@@ -4,6 +4,12 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Fixed CAS mutual-fund invested/P&L calculations to use statement `Total Cost Value` as authoritative cost basis, and suppress holding XIRR when the CAS statement window lacks complete acquisition cash flows.
+
+- Fixed PF portfolio valuation to exclude EPS pension from net worth and external cash-in while keeping employee/employer PF shares from the latest detailed closing balance.
+
+- Fixed NPS scheme preference changes so internal reallocations are represented as switches instead of external cash out/cash in.
+
 - Fixed holding-return scoping so the same instrument in different accounts/brokers does not share cost basis or XIRR cash flows.
 
 - Fixed INDMoney zero-amount migration rows so they no longer erase holding cost basis or create zero-cost open holdings, with private workbook validation.

@@ -19,10 +19,24 @@ describe("private report validation", () => {
       if (scheme.closingUnitBalance === undefined) continue;
       const lastUnitBalance = scheme.transactions.map((row) => row.unitBalance).filter((value): value is number => value !== undefined).at(-1);
       if (lastUnitBalance !== undefined) expect(roundQuantity(lastUnitBalance)).toBeCloseTo(roundQuantity(scheme.closingUnitBalance), 3);
+      const opening = scheme.openingUnitBalance ?? 0;
+      const parsedUnitDelta = scheme.transactions.reduce((sum, row) => sum + (row.units ?? 0), 0);
+      expect(roundQuantity(opening + parsedUnitDelta)).toBeCloseTo(roundQuantity(scheme.closingUnitBalance), 3);
     }
 
     const backup = applyCanonicalCasImport(createEmptyBackup("INR"), buildCanonicalCasImport(parsed, { importId: "private_cas", now: "2026-06-23T00:00:00.000Z" }));
+    const returns = calculateHoldingReturns(backup);
     expect(backup.manualBalances).toHaveLength(parsed.schemes.filter((scheme) => scheme.marketValue !== undefined).length);
+    for (const scheme of parsed.schemes) {
+      const balance = backup.manualBalances.find((item) => item.label === scheme.schemeName);
+      if (!balance || scheme.totalCostValue === undefined) continue;
+      const row = returns.get(balance.id)!;
+      const parsedCashCost = backup.transactions
+        .filter((tx) => tx.accountId === balance.accountId && tx.instrumentId === balance.instrumentId && ["buy", "sip", "deposit", "contribution", "switch_in"].includes(tx.type))
+        .reduce((sum, tx) => sum + Math.abs(tx.amount) + Math.abs(tx.fees ?? 0) + Math.abs(tx.taxes ?? 0), 0);
+      expect(row.invested).toBeCloseTo(scheme.totalCostValue, 2);
+      if (!costBasisMatchesTransactions(scheme.totalCostValue, parsedCashCost)) expect(row.xirr).toBeUndefined();
+    }
     validateReportMath(backup);
   });
 
@@ -46,7 +60,7 @@ describe("private report validation", () => {
       const parsed = parseEpfoPassbookText(fs.readFileSync(file, "utf8"));
       expect(parsed.errors).toEqual([]);
       const imported = buildCanonicalEpfoImport(parsed, { importId: "private_pf_" + index, now: "2026-06-23T00:00:00.000Z" });
-      expect(imported.transactions.length).toBe(parsed.yearlyContributions.filter((row) => row.value > 0).length + parsed.yearlyInterest.filter((row) => row.value > 0).length);
+      expect(imported.transactions.length).toBe(parsed.yearlyContributions.filter((row) => row.key !== "pension" && row.value > 0).length + parsed.yearlyInterest.filter((row) => row.key !== "pension" && row.value > 0).length);
       backup = applyCanonicalEpfoImport(backup, imported);
     }
     expect(backup.manualBalances.every((balance) => balance.asOfDate <= "2026-06-23")).toBe(true);
@@ -62,6 +76,10 @@ describe("private report validation", () => {
       backup = applyCanonicalNpsImport(backup, buildCanonicalNpsImport(parsed, { importId: "private_nps_" + index, now: "2026-06-23T00:00:00.000Z" }));
     }
     validateReportMath(backup);
+    const insights = calculatePortfolioInsights(backup);
+    expect(insights.transactionStats.externalCashOutBase).toBe(0);
+    expect(backup.transactions.filter((tx) => tx.type === "redemption")).toHaveLength(0);
+    expect(backup.transactions.filter((tx) => tx.type === "switch_out").length).toBeGreaterThan(0);
   });
 });
 
@@ -133,21 +151,30 @@ function independentlyAuditHolding(backup: PortfolioBackup, balance: ManualBalan
     if (tx.type === "fee" || tx.type === "tax") flows.push({ date: tx.date, amount: -amount });
   }
 
-  if (transactions.length === 0 && balance.investedAmount !== undefined) {
-    unallocatedCost = balance.investedAmount;
+  const reconstructed = lots.reduce((sum, lot) => sum + lot.cost, unallocatedCost);
+  let invested = reconstructed;
+  let xirrComplete = true;
+  if (balance.investedAmount !== undefined) {
+    invested = balance.investedAmount;
     costBasisKnown = true;
+    xirrComplete = transactions.length === 0 || costBasisMatchesTransactions(balance.investedAmount, reconstructed);
   }
 
-  const invested = roundMoney(lots.reduce((sum, lot) => sum + lot.cost, unallocatedCost));
-  if (transactions.length > 0 && balance.value !== 0) flows.push({ date: balance.asOfDate, amount: balance.value });
+  invested = roundMoney(invested);
+  if (transactions.length > 0 && xirrComplete && balance.value !== 0) flows.push({ date: balance.asOfDate, amount: balance.value });
   const profit = costBasisKnown ? roundMoney(balance.value - invested) : undefined;
   return {
     costBasisKnown,
     invested,
     profit,
     returnPercent: profit === undefined || invested <= 0 ? undefined : roundPercent((profit / invested) * 100),
-    xirr: transactions.length === 0 ? undefined : independentXirr(flows)
+    xirr: transactions.length === 0 || !xirrComplete ? undefined : independentXirr(flows)
   };
+}
+
+function costBasisMatchesTransactions(authoritative: number, reconstructed: number): boolean {
+  const tolerance = Math.max(1, Math.abs(authoritative) * 0.01);
+  return Math.abs(authoritative - reconstructed) <= tolerance;
 }
 
 function isAuditCashIn(type: Transaction["type"]): boolean {

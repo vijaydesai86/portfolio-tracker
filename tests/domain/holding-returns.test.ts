@@ -35,6 +35,21 @@ describe("calculateHoldingReturns", () => {
     expect(row.xirr).toBeUndefined();
   });
 
+  it("uses authoritative holding invested amount over partial transaction reconstruction", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push({ id: "acct", name: "MF", institution: "AMC", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "inst", name: "Fund", type: "mutual_fund", currency: "INR", country: "IN", category: "Equity", issuer: "AMC", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.transactions.push({ id: "buy", accountId: "acct", instrumentId: "inst", date: "2026-01-01", type: "buy", quantity: 10, amount: 10000, currency: "INR", fees: 0, taxes: 0, source: { type: "import", provider: "cas_pdf" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.manualBalances.push({ id: "bal", accountId: "acct", instrumentId: "inst", label: "Fund", category: "Equity", currency: "INR", value: 132000, investedAmount: 110000, investedCurrency: "INR", investedAsOfDate: "2026-06-19", quantity: 110, price: 1200, asOfDate: "2026-06-19", source: { type: "import", provider: "cas_pdf" }, userModified: false, createdAt: "2026-06-19T00:00:00.000Z", updatedAt: "2026-06-19T00:00:00.000Z" });
+
+    const row = calculateHoldingReturns(backup).get("bal")!;
+
+    expect(row.invested).toBe(110000);
+    expect(row.profit).toBe(22000);
+    expect(row.returnPercent).toBe(20);
+    expect(row.xirr).toBeUndefined();
+  });
+
   it("uses optional invested amount for balance-only holdings without creating XIRR", () => {
     const backup = createEmptyBackup("INR");
     backup.accounts.push({ id: "ppf", name: "PPF", institution: "Post Office", type: "ppf", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });

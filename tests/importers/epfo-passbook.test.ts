@@ -75,12 +75,14 @@ describe("EPFO passbook importer", () => {
 
     expect(backup.accounts).toHaveLength(1);
     expect(backup.accounts[0]).toMatchObject({ type: "epf", institution: "EPFO" });
-    expect(backup.instruments.map((item) => item.type)).toEqual(["epf", "epf", "epf"]);
-    expect(backup.instruments.map((item) => item.category)).toEqual(["Debt", "Debt", "Debt"]);
-    expect(backup.manualBalances).toHaveLength(3);
-    expect(backup.manualBalances.map((balance) => balance.category)).toEqual(["Debt", "Debt", "Debt"]);
-    expect(backup.transactions).toHaveLength(6);
-    expect(backup.transactions.filter((tx) => tx.type === "interest_accrual").map((tx) => tx.amount)).toEqual([1234, 987, 765]);
+    expect(backup.instruments.map((item) => item.type)).toEqual(["epf", "epf"]);
+    expect(backup.instruments.map((item) => item.name)).toEqual(["EPF Employee Share", "EPF Employer Share"]);
+    expect(backup.instruments.map((item) => item.category)).toEqual(["Debt", "Debt"]);
+    expect(backup.manualBalances).toHaveLength(2);
+    expect(backup.manualBalances.map((balance) => balance.value)).toEqual([123456, 98765]);
+    expect(backup.manualBalances.map((balance) => balance.category)).toEqual(["Debt", "Debt"]);
+    expect(backup.transactions).toHaveLength(4);
+    expect(backup.transactions.filter((tx) => tx.type === "interest_accrual").map((tx) => tx.amount)).toEqual([1234, 987]);
     expect(backup.imports[0]).toMatchObject({ provider: "epfo_passbook", status: "committed" });
   });
 
