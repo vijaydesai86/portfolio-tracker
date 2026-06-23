@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Added multi-file yearly PF/NPS import handling that retains all yearly transactions while keeping latest dated closing balances.
+
 - Fixed EPFO/PF parsing to capture capitalized yearly interest rows separately from contributions and closing balances.
 
 - Fixed the dashboard loss watchlist so it only shows holdings with negative P/L instead of the lowest positive gains.

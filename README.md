@@ -20,8 +20,8 @@ Portfolio Tracker is a local-first multi-asset portfolio tracker and goal planne
 - CAS text parser and canonical normalization privately verified against the provided password-protected CAS PDF via local `pdftotext` extraction.
 - Browser CAS PDF upload with password entry, staging, and commit flow privately verified against the provided password-protected CAS PDF via Selenium/Firefox.
 - Browser INDMoney Transactions Ledger XLSX import for US stocks, dividends, taxes, stock splits, cash movements, open positions, and combined analytics.
-- Browser EPFO/PF yearly PDF import for employee, employer, and pension balance buckets, yearly contribution rows, and EPFO capitalized yearly interest accrual rows.
-- Browser NPS yearly CSV statement import for Tier I/II scheme holdings, NAV snapshots, scheme transactions, fees, and contributions. NPS PDF/XLSX files remain detected-only until real fixtures are available.
+- Browser EPFO/PF yearly PDF import for one or more yearly passbooks per batch, with employee, employer, and pension balance buckets, yearly contribution rows, EPFO capitalized yearly interest accrual rows, and latest-closing-balance retention across reimports.
+- Browser NPS yearly CSV statement import for one or more yearly CSVs per batch, retaining all scheme transactions and latest dated scheme balances/NAV snapshots across reimports. NPS PDF/XLSX files remain detected-only until real fixtures are available.
 - Live market refresh route for AMFI mutual fund NAVs, US stock quotes, latest USD/INR, and historical USD/INR for transaction-date conversion. USD/INR now uses reachable real-provider fallbacks; NAV and stock quote failures are surfaced in the UI instead of using fake fallback data.
 - Research-driven analytics cockpit with main KPIs for invested amount, current value, and profit/loss; supporting cash-flow analytics for lifetime cash in, lifetime cash out, fees/taxes, and current P/L before fees; plus INR XIRR with historical FX, performance bridge, allocation map, concentration signals, market-data freshness warnings, gain/loss contributors, asset-kind totals, India/US totals, source totals, and institution/AMC-style totals.
 - The loss watchlist is sign-strict: it only includes holdings with negative P/L, while low positive gains remain outside the loss panel.
@@ -42,6 +42,8 @@ The dashboard does not treat lifetime cash in as the only invested number. Sells
 Asset modules are classified from structured account/instrument types such as `mutual_fund`, `indian_stock`, `us_stock`, `epf`, `ppf`, `ssy`, `nps`, `fd`, `cash`, and `espp`. The app must not infer PF, stocks, or other modules from free-text fund names.
 
 ## Import Support Policy
+
+PF/NPS yearly files can be imported as batches by selecting multiple files from the same import family. File names are not part of the parser contract; the supported contract is the real statement format. Do not mix unrelated documents or different import families in one batch.
 
 Automated provider parsing is not claimed without real, legally usable fixtures. Current parsing support is canonical JSON restore, the application-defined manual CSV fallback, browser CAS PDF import, browser INDMoney Transactions Ledger XLSX import, browser EPFO/PF yearly PDF import, and browser NPS yearly CSV statement import. Native file detection exists for Fidelity, NPS PDF/XLSX, FD, PPF, and SSY families so the app can route files correctly while provider parsers are added test-first.
 
@@ -77,7 +79,9 @@ CAS_PASSWORD=your-password npm run test:ui:cas
 IND_XLSX_PATH=/path/to/private-indmoney.xlsx npm run test:ind:private
 IND_XLSX_PATH=/path/to/private-indmoney.xlsx npm run test:ui:ind
 PF_TEXT_PATH=/tmp/private-pf.txt NPS_CSV_PATH=/path/to/private-nps.csv npm run test:pf-nps:private
+PF_TEXT_PATHS=/tmp/pf-2024.txt:/tmp/pf-2025.txt NPS_CSV_PATHS=/path/to/nps-24-25.csv:/path/to/nps-25-26.csv npm run test:pf-nps:private
 PF_PDF_PATH=/path/to/private-pf.pdf NPS_CSV_PATH=/path/to/private-nps.csv npm run test:ui:pf-nps
+PF_PDF_PATHS=/path/to/pf-2024.pdf:/path/to/pf-2025.pdf NPS_CSV_PATHS=/path/to/nps-24-25.csv:/path/to/nps-25-26.csv npm run test:ui:pf-nps
 ```
 
 ## Deployment

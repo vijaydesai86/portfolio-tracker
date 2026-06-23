@@ -172,7 +172,7 @@ export function applyCanonicalEpfoImport(base: PortfolioBackup, imported: EpfoCa
     accounts: mergeById(base.accounts, imported.accounts),
     instruments: mergeById(base.instruments, imported.instruments),
     transactions: mergeById(base.transactions, imported.transactions),
-    manualBalances: mergeById(base.manualBalances, imported.manualBalances),
+    manualBalances: mergeLatestManualBalances(base.manualBalances, imported.manualBalances),
     imports: mergeById(base.imports, [{ ...imported.importRun, status: "committed", committedAt: now }]),
     sourceDocuments: imported.sourceDocument ? mergeById(base.sourceDocuments, [imported.sourceDocument]) : base.sourceDocuments
   };
@@ -267,6 +267,20 @@ function lastIndexMatching(lines: string[], regex: RegExp, beforeIndex: number):
 
 function emptyResult(errors: string[]): EpfoPassbookParseResult {
   return { statementType: "epfo_passbook", asOfDate: "", balances: [], yearlyContributions: [], yearlyInterest: [], warnings: [], errors };
+}
+
+function mergeLatestManualBalances(existing: ManualBalance[], incoming: ManualBalance[]): ManualBalance[] {
+  const map = new Map(existing.map((item) => [item.id, item]));
+  for (const item of incoming) {
+    const current = map.get(item.id);
+    if (!current) {
+      map.set(item.id, item);
+      continue;
+    }
+    if (current.userModified) continue;
+    if (item.asOfDate >= current.asOfDate) map.set(item.id, item);
+  }
+  return [...map.values()];
 }
 
 function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {

@@ -57,4 +57,16 @@ describe("NPS statement importer", () => {
     expect(backup.transactions).toHaveLength(3);
     expect(backup.imports[0]).toMatchObject({ provider: "nps_statement", status: "committed" });
   });
+
+  it("keeps latest NPS scheme balances while retaining older yearly transactions", () => {
+    const olderCsv = npsCsv.replaceAll("2026", "2025").replaceAll("20-Jun-2025", "20-Jun-2025").replace("100000.50", "50000.50").replace("200000.25", "80000.25").replace("1000.5000", "500.5000").replace("2000.2500", "800.2500");
+    const newer = buildCanonicalNpsImport(parseNpsCsv(npsCsv), { importId: "nps_newer", fileName: "nps-newer.csv", now: "2026-06-22T00:00:00.000Z" });
+    const older = buildCanonicalNpsImport(parseNpsCsv(olderCsv), { importId: "nps_older", fileName: "nps-older.csv", now: "2026-06-22T00:00:00.000Z" });
+
+    const backup = applyCanonicalNpsImport(applyCanonicalNpsImport(createEmptyBackup("INR"), newer), older);
+
+    expect(backup.manualBalances.find((balance) => balance.label === "SBI PENSION FUND SCHEME E - TIER I POP")).toMatchObject({ value: 100000.5, asOfDate: "2026-06-20" });
+    expect(backup.transactions.length).toBeGreaterThan(newer.transactions.length);
+    expect(backup.imports).toHaveLength(2);
+  });
 });

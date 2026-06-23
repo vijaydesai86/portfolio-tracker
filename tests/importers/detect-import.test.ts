@@ -86,4 +86,12 @@ describe("native import source detection", () => {
   it("detects NPS yearly CSV statements", () => {
     expect(detectImportSource({ fileName: "nps-yearly.csv", textSample: "NPS Transaction Statement for Tier I Account\nPRAN,'############" })).toMatchObject({ providerId: "nps_statement", nativeInputType: "csv" });
   });
+
+  it("detects NPS CSV by content even when the filename is arbitrary", () => {
+    expect(detectImportSource({ fileName: "download.csv", textSample: "NPS Transaction Statement for Tier I Account\nPRAN,'############" })).toMatchObject({ providerId: "nps_statement", nativeInputType: "csv" });
+  });
+
+  it("detects EPFO text exports by content even when the filename is arbitrary", () => {
+    expect(detectImportSource({ fileName: "download.html", textSample: "Member Passbook EPFO Closing Balance as on" })).toMatchObject({ providerId: "epfo_passbook", nativeInputType: "html" });
+  });
 });

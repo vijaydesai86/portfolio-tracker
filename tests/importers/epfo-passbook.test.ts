@@ -45,9 +45,23 @@ describe("EPFO passbook importer", () => {
     expect(backup.accounts).toHaveLength(1);
     expect(backup.accounts[0]).toMatchObject({ type: "epf", institution: "EPFO" });
     expect(backup.instruments.map((item) => item.type)).toEqual(["epf", "epf", "epf"]);
+    expect(backup.instruments.map((item) => item.category)).toEqual(["Debt", "Debt", "Debt"]);
     expect(backup.manualBalances).toHaveLength(3);
+    expect(backup.manualBalances.map((balance) => balance.category)).toEqual(["Debt", "Debt", "Debt"]);
     expect(backup.transactions).toHaveLength(6);
     expect(backup.transactions.filter((tx) => tx.type === "interest_accrual").map((tx) => tx.amount)).toEqual([1234, 987, 765]);
     expect(backup.imports[0]).toMatchObject({ provider: "epfo_passbook", status: "committed" });
+  });
+
+  it("keeps the latest PF closing balance when yearly files are imported out of order", () => {
+    const olderText = epfoText.replaceAll("31/03/2026", "31/03/2025").replace("1,23,456", "50,000").replace("98,765", "40,000").replace("76,543", "30,000");
+    const newer = buildCanonicalEpfoImport(parseEpfoPassbookText(epfoText), { importId: "pf_newer", fileName: "pf-newer.pdf", now: "2026-06-22T00:00:00.000Z" });
+    const older = buildCanonicalEpfoImport(parseEpfoPassbookText(olderText), { importId: "pf_older", fileName: "pf-older.pdf", now: "2026-06-22T00:00:00.000Z" });
+
+    const backup = applyCanonicalEpfoImport(applyCanonicalEpfoImport(createEmptyBackup("INR"), newer), older);
+
+    expect(backup.manualBalances.find((balance) => balance.label === "EPF Employee Share")).toMatchObject({ value: 123456, asOfDate: "2026-03-31" });
+    expect(backup.transactions.length).toBeGreaterThan(newer.transactions.length);
+    expect(backup.imports).toHaveLength(2);
   });
 });

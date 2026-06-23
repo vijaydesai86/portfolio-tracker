@@ -3,16 +3,16 @@ import { Builder, Browser, By, until } from "selenium-webdriver";
 import firefox from "selenium-webdriver/firefox.js";
 
 const url = process.env.APP_URL ?? "http://127.0.0.1:3000";
-const pfPdfPath = process.env.PF_PDF_PATH;
-const npsCsvPath = process.env.NPS_CSV_PATH;
+const pfPdfPaths = splitPaths(process.env.PF_PDF_PATHS ?? process.env.PF_PDF_PATH);
+const npsCsvPaths = splitPaths(process.env.NPS_CSV_PATHS ?? process.env.NPS_CSV_PATH);
 const firefoxBinary = process.env.FIREFOX_BIN ?? "/arm/tools/mozilla/firefox/146.0.1/linux64/firefox/firefox";
 const geckoDriver = process.env.GECKODRIVER_BIN ?? "/arm/tools/mozilla/geckodriver/0.35.0/linux64/geckodriver";
 const screenshotPath = process.env.SCREENSHOT_PATH ?? "test-results/selenium-pf-nps-import.png";
 
-if (!pfPdfPath) throw new Error("PF_PDF_PATH is required");
-if (!npsCsvPath) throw new Error("NPS_CSV_PATH is required");
-if (!fs.existsSync(pfPdfPath)) throw new Error(`PF PDF not found: ${pfPdfPath}`);
-if (!fs.existsSync(npsCsvPath)) throw new Error(`NPS CSV not found: ${npsCsvPath}`);
+if (pfPdfPaths.length === 0) throw new Error("PF_PDF_PATH or PF_PDF_PATHS is required");
+if (npsCsvPaths.length === 0) throw new Error("NPS_CSV_PATH or NPS_CSV_PATHS is required");
+for (const pfPdfPath of pfPdfPaths) if (!fs.existsSync(pfPdfPath)) throw new Error(`PF PDF not found: ${pfPdfPath}`);
+for (const npsCsvPath of npsCsvPaths) if (!fs.existsSync(npsCsvPath)) throw new Error(`NPS CSV not found: ${npsCsvPath}`);
 fs.mkdirSync("test-results", { recursive: true });
 
 const options = new firefox.Options().setBinary(firefoxBinary).addArguments("-headless");
@@ -28,7 +28,7 @@ try {
   await driver.get(url);
   await driver.wait(until.elementLocated(By.xpath("//button[contains(., 'Imports')]")), 20000).click();
 
-  await driver.wait(until.elementLocated(By.css('input[type="file"]')), 20000).sendKeys(pfPdfPath);
+  await driver.wait(until.elementLocated(By.css('input[type="file"]')), 20000).sendKeys(pfPdfPaths.join("\n"));
   await driver.wait(until.elementLocated(By.xpath("//button[contains(., 'Parse PF PDF')]")), 20000).click();
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
@@ -39,7 +39,9 @@ try {
   await driver.findElement(By.xpath("//button[contains(., 'Commit PF Import')]")).click();
   await driver.wait(async () => (await driver.findElement(By.css("body")).getText()).includes("PF committed:"), 20000);
 
-  await driver.findElement(By.css('input[type="file"]')).sendKeys(npsCsvPath);
+  const fileInput = await driver.findElement(By.css('input[type="file"]'));
+  await driver.executeScript("arguments[0].value = null", fileInput);
+  await fileInput.sendKeys(npsCsvPaths.join("\n"));
   await driver.wait(until.elementLocated(By.xpath("//button[contains(., 'Parse NPS CSV')]")), 20000).click();
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
@@ -61,3 +63,10 @@ try {
 
 if (failure) throw failure;
 process.exit(0);
+
+function splitPaths(value) {
+  return String(value ?? "")
+    .split(process.platform === "win32" ? ";" : ":")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
