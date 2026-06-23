@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { describe, expect, it } from "vitest";
 import { applyCanonicalEpfoImport, buildCanonicalEpfoImport, parseEpfoPassbookText } from "@/src/importers/epfoPassbook";
 import { applyCanonicalNpsImport, buildCanonicalNpsImport, parseNpsCsv } from "@/src/importers/npsStatement";
+import { calculateHoldingReturns } from "@/src/domain/holdingReturns";
 import { createEmptyBackup } from "@/src/schema/backup";
 
 describe("private PF/NPS imports", () => {
@@ -34,23 +35,48 @@ describe("private PF/NPS imports", () => {
     const paths = splitPaths(process.env.PF_TEXT_PATHS);
     let backup = createEmptyBackup("INR");
     const parsedDates: string[] = [];
+    let expectedTransactionCount = 0;
+    let expectedContributionCount = 0;
+    let expectedInterestCount = 0;
+    let latestExpectedBalances: Array<{ label: string; value: number }> = [];
 
     paths.forEach((path, index) => {
       const parsed = parseEpfoPassbookText(fs.readFileSync(path, "utf8"));
       const imported = buildCanonicalEpfoImport(parsed, { importId: "private_pf_" + index, fileName: "private-pf-yearly.pdf", now: "2026-06-22T00:00:00.000Z" });
       expect(parsed.errors).toEqual([]);
       expect(parsed.balances).toHaveLength(3);
-      expect(parsed.yearlyContributions).toHaveLength(3);
-      expect(parsed.yearlyInterest).toHaveLength(3);
+      expect(parsed.yearlyContributions.length).toBeGreaterThan(0);
+      expect(parsed.yearlyInterest.length).toBeGreaterThanOrEqual(3);
       parsedDates.push(parsed.asOfDate);
+      expectedTransactionCount += imported.transactions.length;
+      expectedContributionCount += imported.transactions.filter((tx) => tx.type === "contribution").length;
+      expectedInterestCount += imported.transactions.filter((tx) => tx.type === "interest_accrual").length;
+      if (parsed.asOfDate >= (parsedDates.sort().at(-1) ?? "")) {
+        latestExpectedBalances = parsed.balances.map((bucket) => ({ label: bucket.label, value: bucket.value }));
+      }
       backup = applyCanonicalEpfoImport(backup, imported);
     });
 
     const latestDate = parsedDates.sort().at(-1);
     expect(backup.manualBalances).toHaveLength(3);
     expect(backup.manualBalances.every((balance) => balance.asOfDate === latestDate && balance.category === "Debt")).toBe(true);
+    expect(new Map(backup.manualBalances.map((balance) => [balance.label, balance.value]))).toEqual(new Map(latestExpectedBalances.map((balance) => [balance.label, balance.value])));
     expect(backup.imports).toHaveLength(paths.length);
-    expect(backup.transactions.length).toBeGreaterThan(paths.length);
+    expect(backup.transactions).toHaveLength(expectedTransactionCount);
+    expect(backup.transactions.filter((tx) => tx.type === "contribution")).toHaveLength(expectedContributionCount);
+    expect(backup.transactions.filter((tx) => tx.type === "interest_accrual")).toHaveLength(expectedInterestCount);
+
+    const returns = calculateHoldingReturns(backup);
+    for (const balance of backup.manualBalances) {
+      const row = returns.get(balance.id)!;
+      expect(row.currentValue).toBe(balance.value);
+      if (balance.value > 0) {
+        expect(row.costBasisKnown).toBe(true);
+        expect(row.invested).toBeGreaterThan(0);
+        expect(row.profit).toBeCloseTo(balance.value - row.invested, 2);
+        expect(typeof row.xirr).toBe("number");
+      }
+    }
   });
 
   it.skipIf(!process.env.NPS_CSV_PATHS)("parses and merges multiple private NPS yearly CSVs", () => {

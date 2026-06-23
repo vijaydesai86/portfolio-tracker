@@ -2,6 +2,24 @@ import { describe, expect, it } from "vitest";
 import { applyCanonicalEpfoImport, buildCanonicalEpfoImport, parseEpfoPassbookText } from "@/src/importers/epfoPassbook";
 import { createEmptyBackup } from "@/src/schema/backup";
 
+
+const epfoDualSummaryText = `
+EPF Passbook [ Financial Year - 2024-2025 ]
+Total Contributions for the year [ 2024 ]                            3,07,800                3,07,800                           0
+Total Transfer-Ins/VDRs for the year [ 2024 ]                               6,79,429                6,79,429                           0
+Total Withdrawals for the year [ 2024 ]                                          0                      0                       0
+Int. Updated upto 31/03/2025                                                                                                                                        54,934                  54,934                          0
+Closing Balance as on 31/03/2025                                                                                                                                10,68,502              10,68,502                            0
+OB Int. Updated upto 01/04/2024                                                                     26,339                                                 26,339                                                          0
+Jan-2025                                                                                            25,800                                               2,50,000                                                  32,000
+Feb-2025                                                                                            25,800                                               2,50,000                                                  32,000
+Mar-2025                                                                                            25,800                                               2,50,000                                                  57,800
+TOTAL                                                                                            3,07,800                                                2,50,000                                                  57,800
+Int. Updated upto 31/03/2025                                                                        54,934                                                 54,671                                                       263
+Closing Balance as on 31/03/2025                                                                 3,89,073                                                3,31,010                                                  58,063
+Printed On : 23-06-2026 10:58:25
+`;
+
 const epfoText = `
 EPF Passbook [ Financial Year - 2025-2026 ]
 Total Contributions for the year [ 2025 ]
@@ -37,6 +55,19 @@ describe("EPFO passbook importer", () => {
     expect(parsed.yearlyInterest.map((row) => row.value)).toEqual([1234, 987, 765]);
   });
 
+
+  it("prefers detailed PF buckets over the combined summary table", () => {
+    const parsed = parseEpfoPassbookText(epfoDualSummaryText);
+
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.asOfDate).toBe("2025-03-31");
+    expect(parsed.balances.map((row) => row.value)).toEqual([389073, 331010, 58063]);
+    expect(sumBucket(parsed.yearlyContributions, "employee")).toBe(77400);
+    expect(sumBucket(parsed.yearlyContributions, "employer")).toBe(250000);
+    expect(sumBucket(parsed.yearlyContributions, "pension")).toBe(57800);
+    expect(parsed.yearlyInterest.map((row) => row.value)).toEqual([54934, 54671, 263]);
+  });
+
   it("builds and commits canonical EPF records without duplicate IDs", () => {
     const parsed = parseEpfoPassbookText(epfoText);
     const imported = buildCanonicalEpfoImport(parsed, { importId: "epfo_test", fileName: "pf-yearly.pdf", now: "2026-06-22T00:00:00.000Z" });
@@ -65,3 +96,7 @@ describe("EPFO passbook importer", () => {
     expect(backup.imports).toHaveLength(2);
   });
 });
+
+function sumBucket(rows: Array<{ key: string; value: number }>, key: string): number {
+  return rows.filter((row) => row.key === key).reduce((sum, row) => sum + row.value, 0);
+}

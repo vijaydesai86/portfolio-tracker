@@ -4,6 +4,14 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Fixed holding-return scoping so the same instrument in different accounts/brokers does not share cost basis or XIRR cash flows.
+
+- Fixed INDMoney zero-amount migration rows so they no longer erase holding cost basis or create zero-cost open holdings, with private workbook validation.
+
+- Fixed EPFO/PF parsing to prefer detailed employee/employer/pension buckets, capture detailed monthly contribution rows, avoid future-dated closing balances by using the printed date when needed, and validate PF report math against the private yearly passbooks.
+
+- Added private parser-to-report validation that independently recomputes remaining cost basis, P/L, simple return, and XIRR from real CAS, INDMoney, PF, and NPS fixture imports.
+
 - Fixed portfolio cash-flow math so brokers with cash ledgers do not double-count deposits and internal stock buys/sells, changed holding invested/P&L to remaining cost basis with FIFO partial-sale reduction, and added regression tests for both cases.
 
 - Extended manual balance CSVs with optional invested amount fields, stopped fabricating P/L for balance-only rows without cost basis, auto-refreshes FX after foreign-currency balance imports, and added named import deletion plus transaction deletion controls.

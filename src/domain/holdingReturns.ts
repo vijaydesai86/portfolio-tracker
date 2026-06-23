@@ -30,7 +30,7 @@ export function calculateHoldingReturns(backup: PortfolioBackup): Map<string, Ho
   for (const balance of backup.manualBalances) {
     const missingFx = new Set<string>();
     const currentValue = convert(balance.value, balance.currency, backup, undefined, missingFx);
-    const transactions = balance.instrumentId ? backup.transactions.filter((tx) => tx.instrumentId === balance.instrumentId) : [];
+    const transactions = backup.transactions.filter((tx) => tx.accountId === balance.accountId && (balance.instrumentId ? tx.instrumentId === balance.instrumentId : !tx.instrumentId));
     let realizedCashOut = 0;
     let unallocatedCostBasis = 0;
     let hasCostBasisInput = false;
@@ -46,16 +46,20 @@ export function calculateHoldingReturns(backup: PortfolioBackup): Map<string, Ho
 
       if (cashInTypes.has(tx.type)) {
         const cost = amount + fees + taxes;
-        if (cost > 0) hasCostBasisInput = true;
-        addCost(lots, tx.quantity, cost, (value) => { unallocatedCostBasis += value; });
-        flows.push({ date: tx.date, amount: -cost });
+        if (cost > 0) {
+          hasCostBasisInput = true;
+          addCost(lots, tx.quantity, cost, (value) => { unallocatedCostBasis += value; });
+          flows.push({ date: tx.date, amount: -cost });
+        }
       } else if (cashOutTypes.has(tx.type)) {
         const proceeds = amount - fees - taxes;
-        realizedCashOut += proceeds;
-        if (lotOutTypes.has(tx.type)) {
-          removeCost(lots, tx.quantity, amount, (value) => { unallocatedCostBasis = Math.max(0, unallocatedCostBasis - value); });
+        if (amount > 0 || fees > 0 || taxes > 0) {
+          realizedCashOut += proceeds;
+          if (lotOutTypes.has(tx.type)) {
+            removeCost(lots, tx.quantity, amount, (value) => { unallocatedCostBasis = Math.max(0, unallocatedCostBasis - value); });
+          }
+          flows.push({ date: tx.date, amount: proceeds });
         }
-        flows.push({ date: tx.date, amount: proceeds });
       } else if (feeTypes.has(tx.type)) {
         flows.push({ date: tx.date, amount: -amount });
       }

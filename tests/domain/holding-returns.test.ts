@@ -71,6 +71,50 @@ describe("calculateHoldingReturns", () => {
     expect(row.returnPercent).toBe(50);
   });
 
+
+  it("preserves cost basis across zero-amount broker migration rows", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push({ id: "acct", name: "US Broker", institution: "INDMoney", type: "us_stock", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "inst", name: "Migrated Stock", type: "us_stock", symbol: "MIG", currency: "INR", country: "US", category: "Equity", issuer: "Company", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.transactions.push(
+      { id: "buy1", accountId: "acct", instrumentId: "inst", date: "2025-01-01", type: "buy", quantity: 10, amount: 1000, currency: "INR", fees: 0, taxes: 0, source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" },
+      { id: "migration_out", accountId: "acct", instrumentId: "inst", date: "2026-05-05", type: "sell", quantity: 10, amount: 0, currency: "INR", fees: 0, taxes: 0, source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2026-05-05T00:00:00.000Z", updatedAt: "2026-05-05T00:00:00.000Z" },
+      { id: "migration_in", accountId: "acct", instrumentId: "inst", date: "2026-05-06", type: "buy", quantity: 10, amount: 0, currency: "INR", fees: 0, taxes: 0, source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2026-05-06T00:00:00.000Z", updatedAt: "2026-05-06T00:00:00.000Z" }
+    );
+    backup.manualBalances.push({ id: "bal", accountId: "acct", instrumentId: "inst", label: "Migrated Stock", category: "Equity", currency: "INR", value: 1500, quantity: 10, price: 150, asOfDate: "2026-06-23", source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2026-06-23T00:00:00.000Z", updatedAt: "2026-06-23T00:00:00.000Z" });
+
+    const row = calculateHoldingReturns(backup).get("bal")!;
+
+    expect(row.invested).toBe(1000);
+    expect(row.netInvested).toBe(1000);
+    expect(row.profit).toBe(500);
+    expect(row.xirr).toBeGreaterThan(0);
+  });
+
+
+  it("keeps same-instrument holdings isolated by account", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push(
+      { id: "acct_ind", name: "INDMoney", institution: "INDMoney", type: "us_stock", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "acct_fid", name: "Fidelity", institution: "Fidelity", type: "us_stock", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.instruments.push({ id: "inst", name: "ARM", type: "us_stock", symbol: "ARM", currency: "INR", country: "US", category: "Equity", issuer: "Arm", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.transactions.push(
+      { id: "ind_buy", accountId: "acct_ind", instrumentId: "inst", date: "2026-01-01", type: "buy", quantity: 10, amount: 1000, currency: "INR", fees: 0, taxes: 0, source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "fid_buy", accountId: "acct_fid", instrumentId: "inst", date: "2026-01-01", type: "buy", quantity: 5, amount: 750, currency: "INR", fees: 0, taxes: 0, source: { type: "import", provider: "manual_transactions" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.manualBalances.push(
+      { id: "bal_ind", accountId: "acct_ind", instrumentId: "inst", label: "ARM INDMoney", category: "Equity", currency: "INR", value: 1200, quantity: 10, price: 120, asOfDate: "2027-01-01", source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2027-01-01T00:00:00.000Z", updatedAt: "2027-01-01T00:00:00.000Z" },
+      { id: "bal_fid", accountId: "acct_fid", instrumentId: "inst", label: "ARM Fidelity", category: "Equity", currency: "INR", value: 900, quantity: 5, price: 180, asOfDate: "2027-01-01", source: { type: "import", provider: "manual_positions" }, userModified: false, createdAt: "2027-01-01T00:00:00.000Z", updatedAt: "2027-01-01T00:00:00.000Z" }
+    );
+
+    const returns = calculateHoldingReturns(backup);
+
+    expect(returns.get("bal_ind")!.invested).toBe(1000);
+    expect(returns.get("bal_ind")!.profit).toBe(200);
+    expect(returns.get("bal_fid")!.invested).toBe(750);
+    expect(returns.get("bal_fid")!.profit).toBe(150);
+  });
   it("returns null XIRR when holding FX is missing", () => {
     const backup = createEmptyBackup("INR");
     backup.accounts.push({ id: "acct", name: "US", institution: "Broker", type: "us_stock", currency: "USD", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
