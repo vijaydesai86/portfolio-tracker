@@ -1,4 +1,0 @@
-field,value
-template_version,1
-base_currency,INR
-instructions,Edit Holdings and Transactions with real data. Add only real Prices and FX rates. Do not leave duplicate transaction_id or holding_key values.

@@ -14,7 +14,6 @@ dist/
 *.pdf
 *.xls
 *.xlsx
-!fixtures/importable/generic-manual-portfolio-template.xlsx
 *.xlsm
 CAS_*.txt
 *CAS*.txt

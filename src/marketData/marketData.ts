@@ -96,7 +96,7 @@ export function parseStooqCsv(text: string, currency = "USD", source = "stooq"):
     const fields = splitCsvLine(line);
     const price = Number(fields[closeIndex]);
     if (!Number.isFinite(price) || price <= 0) return [];
-    return [{ symbol: fields[symbolIndex].replace(/\.US$/i, "").toUpperCase(), price, currency, asOfDate: fields[dateIndex], source }];
+    return [{ symbol: fields[symbolIndex].replace(/\.(US|NS|BO)$/i, "").toUpperCase(), price, currency, asOfDate: fields[dateIndex], source }];
   });
 }
 
@@ -113,7 +113,7 @@ export function parseStooqHistoricalStockCsv(text: string, symbol: string, curre
     const price = Number(fields[closeIndex]);
     const asOfDate = fields[dateIndex];
     if (!isIsoDate(asOfDate) || !isValidRate(price)) return [];
-    return [{ symbol: symbol.replace(/\.US$/i, "").toUpperCase(), price, currency, asOfDate, source: "stooq_history" }];
+    return [{ symbol: symbol.replace(/\.(US|NS|BO)$/i, "").toUpperCase(), price, currency, asOfDate, source: "stooq_history" }];
   });
 }
 
@@ -201,7 +201,7 @@ export function parseYahooHistoricalPrices(data: unknown, requestedSymbol: strin
     if (!Number.isFinite(seconds) || !isValidRate(price)) return [];
     const asOfDate = new Date(seconds * 1000).toISOString().slice(0, 10);
     if (!isIsoDate(asOfDate)) return [];
-    return [{ symbol: symbol.replace(/\.US$/i, "").toUpperCase(), price, currency, asOfDate, source: "yahoo_history" }];
+    return [{ symbol: symbol.replace(/\.(US|NS|BO)$/i, "").toUpperCase(), price, currency, asOfDate, source: "yahoo_history" }];
   }).sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
 }
 
@@ -216,7 +216,7 @@ export function parseYahooChartQuote(data: unknown, requestedSymbol?: string): S
   const marketTime = Number(meta?.regularMarketTime);
   const asOfDate = Number.isFinite(marketTime) && marketTime > 0 ? new Date(marketTime * 1000).toISOString().slice(0, 10) : "";
   if (!symbol || !isValidRate(price) || !isIsoDate(asOfDate)) return undefined;
-  return { symbol: symbol.replace(/\.US$/i, "").toUpperCase(), price, currency, asOfDate, source: "yahoo_chart" };
+  return { symbol: symbol.replace(/\.(US|NS|BO)$/i, "").toUpperCase(), price, currency, asOfDate, source: "yahoo_chart" };
 }
 
 export function applyMarketDataPayload(backup: PortfolioBackup, payload: MarketDataPayload): PortfolioBackup {
@@ -242,7 +242,7 @@ export function applyMarketDataPayload(backup: PortfolioBackup, payload: MarketD
   }
 
   for (const quote of payload.stocks) {
-    const instrument = next.instruments.find((item) => item.symbol?.toUpperCase() === quote.symbol.toUpperCase() && item.type === "us_stock");
+    const instrument = next.instruments.find((item) => item.symbol?.toUpperCase() === quote.symbol.toUpperCase() && (item.type === "us_stock" || item.type === "indian_stock"));
     if (!instrument) continue;
     priceSnapshots.push({
       id: slugId("price", [instrument.id, quote.asOfDate, String(quote.price), quote.source]),

@@ -1,4 +1,4 @@
-import { parseManualCsv, parseManualWorkbook, type ManualCsvResult } from "@/src/importers/manualCsv";
+import { parseManualCsv, type ManualCsvResult } from "@/src/importers/manualCsv";
 import type { ImportRun, PortfolioBackup, SourceDocument } from "@/src/schema/backup";
 
 export type CommitOptions = {
@@ -20,12 +20,6 @@ export function commitManualCsvImport(backup: PortfolioBackup, csv: string, opti
   const now = options.now ?? new Date().toISOString();
   const parsed = parseManualCsv(csv, { importId: options.importId, now });
   return commitManualParsedImport(backup, parsed, { ...options, now, provider: "manual_csv", mimeType: "text/csv" });
-}
-
-export async function commitManualWorkbookImport(backup: PortfolioBackup, file: File, options: CommitOptions): Promise<CommitResult> {
-  const now = options.now ?? new Date().toISOString();
-  const parsed = await parseManualWorkbook(file, { importId: options.importId, now });
-  return commitManualParsedImport(backup, parsed, { ...options, now, fileName: options.fileName ?? file.name, provider: "manual_workbook", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
 function commitManualParsedImport(backup: PortfolioBackup, parsed: ManualCsvResult, options: CommitOptions & { now: string; provider: string; mimeType: string }): CommitResult {

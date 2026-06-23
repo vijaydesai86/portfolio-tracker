@@ -60,8 +60,8 @@ Current automated CAS support includes browser PDF upload, password entry, clien
 - INDMoney Transactions Ledger XLSX browser import is implemented and private-file verified.
 - EPFO/PF yearly PDF browser import is implemented and private-file verified. The private raw PDF and extracted text must never be committed.
 - NPS yearly CSV statement browser import is implemented and private-file verified. NPS PDF/XLSX remains detected-only until real fixtures are available.
-- Live market refresh uses AMFI NAVAll for mutual funds, Stooq/Yahoo for US stock quotes, and Frankfurter/Open ER API/currency-api/Stooq for USD/INR. Never replace failed market fetches with fabricated fallback prices; manual FX/imported workbook FX must be user-supplied real data.
-- Generic manual XLSX workbook import is implemented for `Holdings`, `Transactions`, `Prices`, and `FX` sheets. XLSX is the preferred manual format; legacy CSV is balance-only fallback.
+- Live market refresh uses AMFI NAVAll for mutual funds, Stooq/Yahoo for US stock quotes, Yahoo NSE/BSE lookup for Indian stock quotes, and Frankfurter/Open ER API/currency-api/Stooq for USD/INR. Never replace failed market fetches with fabricated fallback prices; manual FX must be user-supplied real data.
+- Manual CSV import is implemented for `manual-transactions-template.csv` and `manual-balances-template.csv`. Do not ask users to maintain prices or FX in normal manual files; dynamic market assets should use transaction facts, while fixed/manual assets should use current balances.
 
 ## INR-First Analytics Rule
 

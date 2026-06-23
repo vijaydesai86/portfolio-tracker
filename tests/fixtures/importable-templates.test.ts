@@ -15,7 +15,9 @@ describe("importable canonical template pack", () => {
       "cash-espp-template.csv",
       "debt-small-savings-template.csv",
       "equity-mf-india-us-template.csv",
-      "gold-others-template.csv"
+      "gold-others-template.csv",
+      "manual-balances-template.csv",
+      "manual-transactions-template.csv"
     ]);
 
     for (const file of files) {
@@ -23,7 +25,7 @@ describe("importable canonical template pack", () => {
       const result = parseManualCsv(csv, { importId: `template_${file}` });
 
       expect(result.errors, file).toEqual([]);
-      expect(result.manualBalances.length, file).toBeGreaterThan(0);
+      expect(result.manualBalances.length + result.transactions.length, file).toBeGreaterThan(0);
     }
   });
 

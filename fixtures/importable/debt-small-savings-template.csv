@@ -1,6 +1,6 @@
-account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes
-PPF,PPF balance,ppf,Debt,INR,0,2026-06-22,Template row - PPF
-SSY,SSY balance,ssy,Debt,INR,0,2026-06-22,Template row - SSY
-NPS,NPS balance,nps,Debt,INR,0,2026-06-22,Template row - NPS
-EPF,PF balance,epf,Debt,INR,0,2026-06-22,Template row - EPF/PF
-Fixed Deposits,FD balance,fd,Debt,INR,0,2026-06-22,Template row - FD
+balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,notes
+ppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,0,INR,Debt,Latest PPF balance
+ssy-main,2026-06-22,Bank or Post Office,ssy,Sukanya Samriddhi Account,0,INR,Debt,Latest SSY balance
+epf-main,2026-06-22,EPFO,epf,EPF Balance,0,INR,Debt,Native PF import preferred
+nps-main,2026-06-22,NPS,nps,NPS Manual Balance,0,INR,Others,Native NPS import preferred; set category to Equity/Debt/Others if manually split
+fd-main,2026-06-22,Bank,fd,Fixed Deposit,0,INR,Debt,Current or maturity value

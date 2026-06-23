@@ -14,13 +14,13 @@ import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type Ca
 import { applyCanonicalIndMoneyImport, buildCanonicalIndMoneyImport, parseIndMoneyWorkbook, type IndMoneyCanonicalImport, type IndMoneyParseResult } from "@/src/importers/indmoneyXlsx";
 import { applyCanonicalEpfoImport, buildCanonicalEpfoImport, parseEpfoPassbookText, type EpfoCanonicalImport, type EpfoPassbookParseResult } from "@/src/importers/epfoPassbook";
 import { applyCanonicalNpsImport, buildCanonicalNpsImport, parseNpsCsv, type NpsCanonicalImport, type NpsParseResult } from "@/src/importers/npsStatement";
-import { commitManualCsvImport, commitManualWorkbookImport } from "@/src/importers/importPipeline";
+import { commitManualCsvImport } from "@/src/importers/importPipeline";
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
 import { createEmptyBackup, parseBackup, type AssetCategory, type ManualBalance, type PortfolioBackup, type Transaction } from "@/src/schema/backup";
 
-const sampleTemplate = `account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes\nCash Wallet,Cash Wallet,cash,Cash,INR,10000,2026-06-22,liquid cash\nEmployer ESPP,ESPP Contribution,espp,Equity,USD,2000,2026-06-22,total contribution\nPPF,Public Provident Fund,ppf,Debt,INR,300000,2026-06-22,manual balance`;
+const sampleTemplate = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,notes\ncash-main,2026-06-22,Manual,cash,Cash Wallet,10000,INR,Cash,liquid cash\nespp-contribution,2026-06-22,Employer,espp,ESPP Contribution,2000,USD,Equity,total contribution only\nppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,300000,INR,Debt,latest known balance`;
 
 const categoryOrder: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
 const chartColors = ["#0e7490", "#2563eb", "#8b5cf6", "#d97706", "#059669", "#dc2626", "#64748b", "#0891b2"];
@@ -35,7 +35,7 @@ const assetClassCards = [
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
 type View = "dashboard" | "holdings" | "transactions" | "imports" | "backup";
-type AnalyticsTab = "overview" | "allocation" | "growth" | "risk";
+type AnalyticsTab = "overview" | "allocation" | "holdings" | "history";
 type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
 
 
@@ -215,12 +215,17 @@ export function TrackerApp() {
   const assetKindTimelineKeys = topTimelineKeys(timeline.points, "assetKind", 6);
   const issuerTimelineKeys = topTimelineKeys(timeline.points, "issuer", 5);
 
-  function importCsv() {
+  async function importCsv() {
     const importId = `manual_${Date.now()}`;
     const result = commitManualCsvImport(backup, csv, { importId, fileName: "manual-template.csv" });
     setBackup(result.backup);
     setErrors(result.errors.map((error) => `Row ${error.row}: ${error.message}`));
-    setStatus(`Import complete: ${result.addedBalances} added, ${result.skippedDuplicates} duplicate(s) skipped.`);
+    const message = `Manual CSV committed: ${result.addedBalances} holding(s), ${result.addedTransactions} transaction(s), ${result.addedPrices} price row(s); ${result.skippedDuplicates} duplicate(s) skipped.`;
+    if (result.errors.length === 0 && result.addedTransactions > 0) {
+      await refreshMarketDataFor(result.backup, message);
+    } else {
+      setStatus(message);
+    }
   }
 
   function exportBackup() {
@@ -267,8 +272,6 @@ export function TrackerApp() {
 
     if (detection.providerId === "cas_pdf") {
       setStatus(`${detection.label}: enter the PDF password and parse in browser.`);
-    } else if (detection.providerId === "manual_csv" && detection.nativeInputType === "xlsx") {
-      setStatus(`${detection.label}: parse the manual XLSX workbook in browser.`);
     } else if (detection.providerId === "manual_csv" && detection.nativeInputType === "csv") {
       setStatus(`${detection.label}: parse the manual CSV in browser.`);
     } else if (detection.providerId === "indmoney_export") {
@@ -279,6 +282,8 @@ export function TrackerApp() {
       setStatus(`${detection.label}: parse ${files.length > 1 ? files.length + " NPS CSVs" : "the NPS CSV"} in browser.`);
     } else if (detection.providerId === "nps_statement") {
       setStatus(`${detection.label}: detected, but only the verified CSV statement parser is implemented.`);
+    } else if (detection.providerId === "manual_csv") {
+      setStatus(`${detection.label}: use the manual transactions or balances CSV template.`);
     } else if (detection.status === "implemented") {
       setStatus(`${detection.label}: implemented import path detected.`);
     } else {
@@ -289,21 +294,28 @@ export function TrackerApp() {
   async function parseManualNativeInBrowser() {
     const nativeFile = nativeFiles[0];
     if (!nativeFile) {
-      setErrors(["Select a manual workbook or CSV first."]);
+      setErrors(["Select a manual CSV first."]);
       return;
     }
     setErrors([]);
-    setStatus("Parsing manual portfolio file in browser...");
+    if (!nativeFile.name.toLowerCase().endsWith(".csv")) {
+      setErrors(["Manual imports use CSV templates: manual-transactions-template.csv or manual-balances-template.csv."]);
+      setStatus("Manual portfolio import needs a CSV file.");
+      return;
+    }
+    setStatus("Parsing manual portfolio CSV in browser...");
 
     try {
       const importId = "manual_" + Date.now();
-      const lowerName = nativeFile.name.toLowerCase();
-      const result = lowerName.endsWith(".xlsx")
-        ? await commitManualWorkbookImport(backup, nativeFile, { importId, fileName: nativeFile.name })
-        : commitManualCsvImport(backup, await nativeFile.text(), { importId, fileName: nativeFile.name });
+      const result = commitManualCsvImport(backup, await nativeFile.text(), { importId, fileName: nativeFile.name });
       setBackup(result.backup);
       setErrors(result.errors.map((error) => "Row " + error.row + ": " + error.message));
-      setStatus("Manual import complete: " + result.addedBalances + " holding(s), " + result.addedTransactions + " transaction(s), " + result.addedPrices + " price/FX row(s) added; " + result.skippedDuplicates + " duplicate(s) skipped.");
+      const message = "Manual CSV committed: " + result.addedBalances + " holding(s), " + result.addedTransactions + " transaction(s), " + result.addedPrices + " price row(s) added; " + result.skippedDuplicates + " duplicate(s) skipped.";
+      if (result.errors.length === 0 && result.addedTransactions > 0) {
+        await refreshMarketDataFor(result.backup, message);
+      } else {
+        setStatus(message);
+      }
     } catch (error) {
       setErrors([error instanceof Error ? error.message : "Unable to parse manual portfolio file"]);
       setStatus("Manual portfolio import failed.");
@@ -486,6 +498,9 @@ export function TrackerApp() {
     const symbols = portfolio.instruments
       .filter((instrument) => instrument.type === "us_stock" && instrument.symbol)
       .map((instrument) => instrument.symbol as string);
+    const indianSymbols = portfolio.instruments
+      .filter((instrument) => instrument.type === "indian_stock" && instrument.symbol)
+      .map((instrument) => instrument.symbol as string);
     const fxDates = [
       ...portfolio.transactions.filter((tx) => tx.currency === "USD").map((tx) => tx.date),
       ...portfolio.manualBalances.filter((balance) => balance.currency === "USD").map((balance) => balance.asOfDate)
@@ -495,8 +510,8 @@ export function TrackerApp() {
       ...portfolio.manualBalances.map((balance) => balance.asOfDate)
     ].filter(Boolean).sort();
 
-    if (isins.length === 0 && symbols.length === 0 && fxDates.length === 0) {
-      setStatus(prefix ?? "No mutual fund ISINs, US stock symbols, or USD cash flows available for market refresh.");
+    if (isins.length === 0 && symbols.length === 0 && indianSymbols.length === 0 && fxDates.length === 0) {
+      setStatus(prefix ?? "No mutual fund ISINs, stock symbols, or USD cash flows available for market refresh.");
       return;
     }
 
@@ -505,12 +520,13 @@ export function TrackerApp() {
     const params = new URLSearchParams();
     if (isins.length > 0) params.set("isins", [...new Set(isins)].join(","));
     if (symbols.length > 0) params.set("symbols", [...new Set(symbols)].join(","));
+    if (indianSymbols.length > 0) params.set("indianSymbols", [...new Set(indianSymbols)].join(","));
     const today = new Date().toISOString().slice(0, 10);
     if (fxDates.length > 0) {
       params.set("fxStart", fxDates[0]);
       params.set("fxEnd", today);
     }
-    if (historyDates.length > 0 && (isins.length > 0 || symbols.length > 0)) {
+    if (historyDates.length > 0 && (isins.length > 0 || symbols.length > 0 || indianSymbols.length > 0)) {
       params.set("historyStart", historyDates[0]);
       params.set("historyEnd", today);
     }
@@ -522,7 +538,7 @@ export function TrackerApp() {
       setErrors(payload.errors);
       setStatus(
         (prefix ? prefix + " " : "") +
-          `Market refresh complete: ${payload.navs.length} NAV snapshot(s), ${payload.stocks.length} US price snapshot(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s).`
+          `Market refresh complete: ${payload.navs.length} NAV snapshot(s), ${payload.stocks.length} stock price snapshot(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s).`
       );
     } catch (error) {
       setErrors([error instanceof Error ? error.message : "Market refresh failed"]);
@@ -636,7 +652,7 @@ export function TrackerApp() {
               <div className="hero-ledger">
                 <span className="eyebrow">Portfolio command center</span>
                 <h2>{formatMoney(performance.current, backup.baseCurrency)}</h2>
-                <p>{insights.holdings.length} holdings, {backup.transactions.length} transactions, {importProviders} source(s). Analytics are split into overview, allocation, growth, and risk so deeper views stay navigable as PF, NPS, stocks, cash, FD, PPF, SSY, and ESPP expand.</p>
+                <p>{insights.holdings.length} holdings, {backup.transactions.length} transactions, {importProviders} source(s). Analytics are split into overview, allocation, holdings, and historical reconstruction so deeper views stay navigable as PF, NPS, stocks, cash, FD, PPF, SSY, and ESPP expand.</p>
                 <div className="hero-meta-row">
                   <span>{backup.baseCurrency} base</span>
                   <span>{timeline.coverage.pricedDates}/{timeline.coverage.totalDates} complete valuation date(s)</span>
@@ -671,7 +687,7 @@ export function TrackerApp() {
                   <Metric label="Profit / Loss" value={formatMoney(performance.totalProfit, backup.baseCurrency)} />
                 </div>
                 <div className="feature-grid">
-                  <ChartCard title="Portfolio Growth"><PortfolioGrowthChart points={timeline.points} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Current Allocation Explorer"><CurrentAllocationExplorer datasets={chartData} currency={backup.baseCurrency} /></ChartCard>
                   <div className="signal-panel cardless-panel">
                     <div className="panel-heading"><span>Portfolio Signals</span><strong>{dashboardSignals.filter((signal) => signal.tone === "warn").length} action(s)</strong></div>
                     <div className="signal-list">{dashboardSignals.map((signal) => <SignalCard signal={signal} key={signal.label} />)}</div>
@@ -699,27 +715,29 @@ export function TrackerApp() {
                 </div>
                 <div className="analytics-grid">
                   <ChartCard title="Allocation Map"><DonutChart data={chartData.allocation} /></ChartCard>
-                  <ChartCard title="Asset Class Value History"><BreakdownGrowthChart points={timeline.points} field="category" keys={categoryTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                  <ChartCard title="Region Value History"><BreakdownGrowthChart points={timeline.points} field="region" keys={regionTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="By Asset Type"><HorizontalBar data={chartData.assetType} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="By Region"><HorizontalBar data={chartData.region} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Top AMC / Issuer"><HorizontalBar data={chartData.issuer} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Data Source Mix"><HorizontalBar data={chartData.provider} currency={backup.baseCurrency} /></ChartCard>
                 </div>
               </div>
             )}
 
-            {analyticsTab === "growth" && (
+            {analyticsTab === "history" && (
               <div className="analytics-tab-panel">
+                <div className="notice history-notice">Historical charts reconstruct month-end value from transactions plus available real NAV/quote/FX snapshots. Use them as a research view; current dashboard totals remain the source of truth when historical market coverage is incomplete.</div>
                 <div className="analytics-grid">
-                  <ChartCard title="Asset Type Value History"><BreakdownGrowthChart points={timeline.points} field="assetKind" keys={assetKindTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                  <ChartCard title="Issuer / AMC Value History"><BreakdownGrowthChart points={timeline.points} field="issuer" keys={issuerTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                  <ChartCard title="Performance Bridge"><HorizontalBar data={performanceBridge} currency={backup.baseCurrency} /></ChartCard>
-                  <ChartCard title="Top AMC / Institution"><HorizontalBar data={chartData.issuer} currency={backup.baseCurrency} /></ChartCard>
-                  <ChartCard title="Data Source Mix"><HorizontalBar data={chartData.provider} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Portfolio Growth"><PortfolioGrowthChart points={timeline.points} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Asset Class Growth"><BreakdownGrowthChart points={timeline.points} field="category" keys={categoryTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Region Growth"><BreakdownGrowthChart points={timeline.points} field="region" keys={regionTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Asset Type Growth"><BreakdownGrowthChart points={timeline.points} field="assetKind" keys={assetKindTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Issuer / AMC Growth"><BreakdownGrowthChart points={timeline.points} field="issuer" keys={issuerTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="Institution Accounts"><HorizontalBar data={chartData.institution} currency={backup.baseCurrency} /></ChartCard>
                 </div>
               </div>
             )}
 
-            {analyticsTab === "risk" && (
+            {analyticsTab === "holdings" && (
               <div className="analytics-tab-panel">
                 <div className="risk-grid">
                   <div className="insight-summary cardless-panel">
@@ -879,7 +897,7 @@ function ImportsView(props: {
           <input type="file" multiple accept=".json,.csv,.pdf,.html,.xlsx,application/json,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => props.inspectNativeFile(event.target.files ?? undefined)} />
           {props.nativeDetection && <div className="detection"><div><span>Provider</span><strong>{props.nativeDetection.label}</strong></div><div><span>Files</span><strong>{props.nativeFileCount}</strong></div><div><span>Status</span><strong>{props.nativeDetection.status}</strong></div><div><span>Type</span><strong>{props.nativeDetection.nativeInputType}</strong></div><div><span>Confidence</span><strong>{props.nativeDetection.confidence}</strong></div><p>{props.nativeDetection.reason}</p></div>}
           {props.nativeDetection?.providerId === "cas_pdf" && <div className="native-actions"><input type="password" placeholder="CAS PDF password" value={props.casPassword} onChange={(event) => props.setCasPassword(event.target.value)} /><button className="primary" onClick={props.parseCasPdfInBrowser}>Parse CAS PDF</button></div>}
-          {props.nativeDetection?.providerId === "manual_csv" && ["csv", "xlsx"].includes(props.nativeDetection.nativeInputType) && <div className="native-actions"><button className="primary" onClick={props.parseManualNativeInBrowser}>Parse Manual {props.nativeDetection.nativeInputType.toUpperCase()}</button></div>}
+          {props.nativeDetection?.providerId === "manual_csv" && props.nativeDetection.nativeInputType === "csv" && <div className="native-actions"><button className="primary" onClick={props.parseManualNativeInBrowser}>Parse Manual CSV</button></div>}
           {props.nativeDetection?.providerId === "indmoney_export" && <div className="native-actions"><button className="primary" onClick={props.parseIndMoneyXlsxInBrowser}>Parse INDMoney XLSX</button></div>}
           {props.nativeDetection?.nativeInputType === "pdf" && props.nativeDetection.providerId !== "cas_pdf" && <div className="native-actions"><button className="primary" onClick={props.parseEpfoPdfInBrowser}>Parse PF PDF{props.nativeFileCount > 1 ? "s" : ""}</button></div>}
           {props.nativeDetection?.providerId === "nps_statement" && props.nativeDetection.nativeInputType === "csv" && <div className="native-actions"><button className="primary" onClick={props.parseNpsCsvInBrowser}>Parse NPS CSV{props.nativeFileCount > 1 ? "s" : ""}</button></div>}
@@ -893,7 +911,7 @@ function ImportsView(props: {
       </div>
       <div className="grid two">
         <div className="card"><h2>USD/INR FX Rates</h2><div className="native-actions"><input type="number" step="0.0001" placeholder="USD/INR rate" value={props.fxRate} onChange={(event) => props.setFxRate(event.target.value)} /><input type="date" value={props.fxDate} onChange={(event) => props.setFxDate(event.target.value)} /><button className="primary" onClick={props.applyManualFxRate}>Add Rate</button></div><p className="message">Use a real USD/INR rate. Current holdings use the latest rate; transaction analytics use rates on or before each transaction date.</p><input type="file" accept=".csv,text/csv" onChange={(event) => props.importFxCsvFile(event.target.files?.[0])} /><textarea value={props.fxCsv} onChange={(event) => props.setFxCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importFxCsvText}>Import FX CSV</button></div></div>
-        <div className="card"><h2>Manual CSV Fallback</h2><textarea value={props.csv} onChange={(event) => props.setCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importCsv}>Stage and Commit</button></div></div>
+        <div className="card"><h2>Manual Balance CSV</h2><p className="message">Use the committed templates for normal uploads. This text box is the same balance CSV parser for quick cash, ESPP contribution, PPF, SSY, FD, EPF, NPS, gold, and other balance entries.</p><textarea value={props.csv} onChange={(event) => props.setCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importCsv}>Stage and Commit</button></div></div>
         <div className="card"><h2>Import History</h2>{props.backup.imports.length === 0 ? <p className="message">No imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Provider</th><th>Status</th><th>Confidence</th><th>Created</th></tr></thead><tbody>{props.backup.imports.map((run) => <tr key={run.id}><td>{run.provider}</td><td>{run.status}</td><td>{run.confidence}</td><td>{new Date(run.createdAt).toLocaleString()}</td></tr>)}</tbody></table></div>}</div>
       </div>
     </section>
@@ -902,10 +920,10 @@ function ImportsView(props: {
 
 function AnalyticsTabs({ active, setActive }: { active: AnalyticsTab; setActive: (tab: AnalyticsTab) => void }) {
   const tabs: Array<{ id: AnalyticsTab; label: string; detail: string }> = [
-    { id: "overview", label: "Overview", detail: "wealth, return, signals" },
-    { id: "allocation", label: "Allocation", detail: "asset class and geography" },
-    { id: "growth", label: "Growth", detail: "asset type, issuer, source" },
-    { id: "risk", label: "Risk", detail: "concentration and review" }
+    { id: "overview", label: "Overview", detail: "current value and signals" },
+    { id: "allocation", label: "Allocation", detail: "class, region, issuer" },
+    { id: "holdings", label: "Holdings", detail: "concentration and returns" },
+    { id: "history", label: "History", detail: "market-data dependent" }
   ];
   return <div className="analytics-tabs" role="tablist">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} onClick={() => setActive(tab.id)}><strong>{tab.label}</strong><span>{tab.detail}</span></button>)}</div>;
 }
@@ -965,6 +983,43 @@ function BreakdownGrowthChart({ points, field, keys, currency }: { points: Portf
         </AreaChart>
       </ResponsiveContainer>
       <p className="chart-note">Stacked month-end history using complete portfolio valuation points only. Today's snapshot is shown in dashboard totals and allocation bars, not connected as a fake historical segment.</p>
+    </div>
+  );
+}
+
+type AllocationExplorerKey = "category" | "assetType" | "region" | "issuer" | "provider";
+
+function CurrentAllocationExplorer({ datasets, currency }: { datasets: { allocation: Array<{ name: string; value: number; percent?: number }>; assetType: Array<{ name: string; value: number }>; region: Array<{ name: string; value: number }>; issuer: Array<{ name: string; value: number }>; provider: Array<{ name: string; value: number }> }; currency: string }) {
+  const [view, setView] = useState<AllocationExplorerKey>("category");
+  const options: Array<{ id: AllocationExplorerKey; label: string }> = [
+    { id: "category", label: "Class" },
+    { id: "assetType", label: "Asset" },
+    { id: "region", label: "Region" },
+    { id: "issuer", label: "Issuer" },
+    { id: "provider", label: "Source" }
+  ];
+  const rows = view === "category" ? datasets.allocation : datasets[view];
+  const total = rows.reduce((sum, item) => sum + item.value, 0);
+  const top = rows[0];
+
+  return (
+    <div className="allocation-explorer">
+      <div className="segment-control" role="tablist">
+        {options.map((option) => <button key={option.id} className={view === option.id ? "active" : ""} onClick={() => setView(option.id)}>{option.label}</button>)}
+      </div>
+      <div className="allocation-explorer-body">
+        <div className="allocation-focus">
+          <span>Largest Exposure</span>
+          <strong title={top?.name}>{top ? chartLabel(top.name) : "-"}</strong>
+          <small>{top ? formatMoney(top.value, currency) + " · " + (total === 0 ? "0.0" : ((top.value / total) * 100).toFixed(1)) + "%" : "No current holdings"}</small>
+        </div>
+        <div className="allocation-rank-list">
+          {rows.length === 0 ? <p className="message">No current allocation data yet.</p> : rows.slice(0, 7).map((item, index) => {
+            const percent = total === 0 ? 0 : (item.value / total) * 100;
+            return <div className="allocation-rank-row" key={item.name}><div><span style={{ background: chartColors[index % chartColors.length] }} /><strong title={item.name}>{chartLabel(item.name)}</strong></div><em>{formatMoney(item.value, currency)}</em><small>{percent.toFixed(1)}%</small></div>;
+          })}
+        </div>
+      </div>
     </div>
   );
 }

@@ -34,12 +34,12 @@ export const providerImportSpecs: ProviderImportSpec[] = [
   },
   {
     id: "manual_csv",
-    label: "Manual workbook / canonical CSV",
+    label: "Manual transactions / balances CSV",
     status: "implemented",
-    nativeInputTypes: ["csv", "xlsx"],
+    nativeInputTypes: ["csv"],
     assetTypes: ["mutual_fund", "indian_stock", "us_stock", "fd", "ppf", "ssy", "nps", "epf", "cash", "espp", "gold", "other"],
     categories: ["Equity", "Debt", "Gold", "Others", "Cash"],
-    implementation: "Manual fallback importer implemented in src/importers/manualCsv.ts for XLSX workbooks with Holdings/Transactions/Prices/FX sheets and canonical CSV balances."
+    implementation: "Manual fallback importer implemented in src/importers/manualCsv.ts for simple transaction CSVs and balance CSVs. Market-priced transaction assets derive open holdings from net quantity; fixed/manual assets use current balances."
   },
   {
     id: "cas_pdf",

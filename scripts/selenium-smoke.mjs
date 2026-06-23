@@ -38,20 +38,20 @@ try {
   if (!/Portfolio Analytics|Holdings|Transactions|Imports|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
-  for (const label of ["Overview", "Allocation", "Growth", "Risk"]) {
+  for (const label of ["Overview", "Allocation", "Holdings", "History"]) {
     await jsClick(`//button[.//strong[normalize-space(.)='${label}']]`);
     await driver.wait(async () => {
       const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
-      if (label === "Overview") return body.includes("portfolio growth");
-      if (label === "Allocation") return body.includes("asset class value history");
-      if (label === "Growth") return body.includes("asset type value history");
-      return body.includes("top 5 concentration");
+      if (label === "Overview") return body.includes("current allocation explorer");
+      if (label === "Allocation") return body.includes("allocation map") && body.includes("by asset type");
+      if (label === "Holdings") return body.includes("top 5 concentration") && body.includes("asset modules");
+      return body.includes("historical charts reconstruct") && body.includes("portfolio growth");
     }, 15000);
   }
   await jsClick("//button[contains(., 'Imports')]");
   await waitForBodyText("Native File Intake");
   await jsClick("//button[normalize-space(.)='Stage and Commit']");
-  await waitForBodyText("Import complete");
+  await waitForBodyText("Manual CSV committed");
   await jsClick("//button[contains(., 'Holdings')]");
   await waitForBodyText("XIRR Coverage");
   await driver.wait(async () => {

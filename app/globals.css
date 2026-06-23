@@ -1928,3 +1928,146 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+/* current analytics hierarchy */
+.allocation-explorer {
+  display: grid;
+  gap: 14px;
+  min-height: 292px;
+}
+
+.segment-control {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  padding: 6px;
+  background: #f5f8fb;
+}
+
+.segment-control button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #52606c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.segment-control button.active {
+  background: #ffffff;
+  color: #0e7490;
+  box-shadow: 0 5px 16px rgba(15, 23, 42, 0.08);
+}
+
+.allocation-explorer-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.allocation-focus {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  min-height: 210px;
+  border: 1px solid #dce5ec;
+  border-radius: 8px;
+  padding: 18px;
+  background: #111827;
+  color: #ffffff;
+}
+
+.allocation-focus span {
+  color: #f0b84a;
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.allocation-focus strong {
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.allocation-focus small {
+  color: #cbd5e1;
+  font-size: 13px;
+}
+
+.allocation-rank-list {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.allocation-rank-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(130px, auto) 58px;
+  gap: 10px;
+  align-items: center;
+  min-height: 38px;
+  border-bottom: 1px solid #e6edf2;
+  font-size: 13px;
+}
+
+.allocation-rank-row:last-child {
+  border-bottom: 0;
+}
+
+.allocation-rank-row div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.allocation-rank-row div span {
+  width: 9px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+}
+
+.allocation-rank-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.allocation-rank-row em,
+.allocation-rank-row small {
+  color: #52606c;
+  font-style: normal;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.history-notice {
+  border-color: #b6c5d2;
+  background: #f8fafc;
+  color: #334155;
+}
+
+@media (max-width: 980px) {
+  .allocation-explorer-body,
+  .segment-control {
+    grid-template-columns: 1fr;
+  }
+
+  .allocation-rank-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+    padding: 8px 0;
+  }
+
+  .allocation-rank-row em,
+  .allocation-rank-row small {
+    text-align: left;
+  }
+}

@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const isins = searchParams.get("isins")?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
   const symbols = searchParams.get("symbols")?.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean) ?? [];
+  const indianSymbols = searchParams.get("indianSymbols")?.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean) ?? [];
   const fxStart = normalizeDate(searchParams.get("fxStart"));
   const fxEnd = normalizeDate(searchParams.get("fxEnd")) ?? todayIso();
   const historyStart = normalizeDate(searchParams.get("historyStart"));
@@ -43,6 +44,8 @@ export async function GET(request: NextRequest) {
     isins.length > 0 && historyStart ? loadHistoricalNavs([...new Set(isins)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
     symbols.length > 0 ? loadStockQuotes([...new Set(symbols)], payload, errors) : Promise.resolve(),
     symbols.length > 0 && historyStart ? loadHistoricalStockQuotes([...new Set(symbols)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
+    indianSymbols.length > 0 ? loadIndianStockQuotes([...new Set(indianSymbols)], payload, errors) : Promise.resolve(),
+    indianSymbols.length > 0 && historyStart ? loadHistoricalIndianStockQuotes([...new Set(indianSymbols)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
     symbols.length > 0 || fxStart ? loadLatestUsdInr(payload, errors) : Promise.resolve(),
     fxStart ? loadHistoricalUsdInr(fxStart, fxEnd, payload, errors) : Promise.resolve()
   ]);
@@ -174,6 +177,33 @@ async function loadHistoricalStockQuotes(symbols: string[], start: string, end: 
   }
 }
 
+async function loadIndianStockQuotes(symbols: string[], payload: MarketDataPayload, errors: string[]) {
+  const results = await Promise.allSettled(symbols.map((symbol) => fetchYahooIndianStockQuote(symbol)));
+  const quotes = results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
+  if (quotes.length > 0) payload.stocks = mergeStockQuotes(payload.stocks, quotes);
+
+  const found = new Set(quotes.map((quote) => quote.symbol));
+  const missing = symbols.filter((symbol) => !found.has(symbol.toUpperCase()));
+  if (quotes.length === 0) {
+    errors.push("Indian stock quote fetch failed: " + results.map((result) => result.status === "rejected" ? errorMessage(result.reason) : "no quote").join("; "));
+  } else if (missing.length > 0) {
+    errors.push("Indian stock quote missing for: " + missing.join(", "));
+  }
+}
+
+async function loadHistoricalIndianStockQuotes(symbols: string[], start: string, end: string, payload: MarketDataPayload, errors: string[]) {
+  const results = await Promise.allSettled(symbols.map((symbol) => fetchYahooIndianStockHistory(symbol, start, end)));
+  const quotes = results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+  if (quotes.length > 0) payload.stocks = mergeStockQuotes(payload.stocks, quotes);
+
+  const found = new Set(quotes.map((quote) => quote.symbol));
+  const missing = symbols.filter((symbol) => !found.has(symbol.toUpperCase()));
+  if (missing.length > 0) {
+    const providerErrors = results.flatMap((result) => (result.status === "rejected" ? [errorMessage(result.reason)] : []));
+    errors.push("Historical Indian stock quote missing for " + missing.join(", ") + (providerErrors.length > 0 ? ": " + providerErrors.join("; ") : ""));
+  }
+}
+
 async function loadLatestUsdInr(payload: MarketDataPayload, errors: string[]) {
   const result = await firstUsable<FxQuote>([
     {
@@ -265,6 +295,24 @@ async function fetchYahooStockQuotes(symbols: string[]): Promise<StockQuote[]> {
   const quotes = results.flatMap((result) => (result.status === "fulfilled" ? [result.value] : []));
   if (quotes.length > 0) return quotes;
   throw new Error(results.map((result) => (result.status === "rejected" ? errorMessage(result.reason) : "no quote")).join("; "));
+}
+
+async function fetchYahooIndianStockQuote(symbol: string): Promise<StockQuote> {
+  const result = await firstUsable<StockQuote>([
+    { name: "Yahoo NSE quote", run: async () => parseYahooChartQuote(await fetchJson("https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol + ".NS")), symbol) },
+    { name: "Yahoo BSE quote", run: async () => parseYahooChartQuote(await fetchJson("https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol + ".BO")), symbol) }
+  ]);
+  if (result.value) return result.value;
+  throw new Error(symbol + ": " + result.errors.join("; "));
+}
+
+async function fetchYahooIndianStockHistory(symbol: string, start: string, end: string): Promise<StockQuote[]> {
+  const result = await firstUsable<StockQuote[]>([
+    { name: "Yahoo NSE historical chart", run: () => fetchYahooStockHistory(symbol + ".NS", start, end) },
+    { name: "Yahoo BSE historical chart", run: () => fetchYahooStockHistory(symbol + ".BO", start, end) }
+  ], (quotes) => quotes.length > 0);
+  if (result.value) return result.value;
+  throw new Error(symbol + ": " + result.errors.join("; "));
 }
 
 async function firstUsable<T>(providers: Array<Provider<T>>, isUsable: (value: T) => boolean = Boolean): Promise<{ value?: T; errors: string[]; emptyProvider?: string }> {

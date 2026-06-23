@@ -1,83 +1,71 @@
-import readXlsxFile from "read-excel-file/node";
 import { describe, expect, it } from "vitest";
-import { parseManualCsv, parseManualWorkbookSheets } from "@/src/importers/manualCsv";
+import { parseManualCsv } from "@/src/importers/manualCsv";
 
 describe("manual CSV importer", () => {
-  it("normalizes manual balances for all supported categories", () => {
-    const csv = `account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes\nCash Wallet,Cash Wallet,cash,Cash,INR,10000,2026-06-22,liquid\nEmployer ESPP,ESPP Contribution,espp,Equity,USD,2000,2026-06-22,manual contribution\nPPF,Public Provident Fund,ppf,Debt,INR,300000,2026-06-22,manual balance\nGold,Gold ETF,gold,Gold,INR,50000,2026-06-22,manual balance\nOther,Private Asset,other,Others,INR,12000,2026-06-22,manual balance`;
+  it("normalizes balance CSV rows for fixed and manual asset classes", () => {
+    const csv = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,notes
+cash-main,2026-06-22,Manual,cash,Cash Wallet,10000,INR,Cash,liquid
+espp-main,2026-06-22,Employer,espp,ESPP Contribution,2000,USD,Equity,contribution only
+ppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,300000,INR,Debt,manual balance
+ssy-main,2026-06-22,SBI,ssy,Sukanya Samriddhi Account,0,INR,Debt,template
+fd-main,2026-06-22,HDFC Bank,fd,Fixed Deposit,0,INR,Debt,template
+epf-main,2026-06-22,EPFO,epf,EPF Balance,0,INR,Debt,template
+nps-main,2026-06-22,NPS,nps,NPS Manual Balance,0,INR,Others,template
+gold-main,2026-06-22,Manual,gold,Gold Holding,0,INR,Gold,template
+other-main,2026-06-22,Manual,other,Private Asset,0,INR,Others,template`;
 
     const result = parseManualCsv(csv, { importId: "import_manual" });
 
     expect(result.errors).toEqual([]);
-    expect(result.accounts).toHaveLength(5);
+    expect(result.accounts).toHaveLength(9);
     expect(result.manualBalances.map((b) => b.category)).toEqual([
       "Cash",
       "Equity",
       "Debt",
+      "Debt",
+      "Debt",
+      "Debt",
+      "Others",
       "Gold",
       "Others"
     ]);
+    expect(result.transactions).toHaveLength(0);
+  });
+
+  it("parses transaction CSV rows and derives dynamic open holdings from net quantity", () => {
+    const csv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price,amount,fees,taxes,currency,category,notes
+us-buy-1,2026-01-15,Fidelity,us_stock,AAPL,Apple Inc,buy,10,100,,1,0,USD,Equity,real user transaction
+us-sell-1,2026-02-15,Fidelity,us_stock,AAPL,Apple Inc,sell,4,120,,1,0,USD,Equity,real user transaction
+in-buy-1,2026-03-01,Zerodha,indian_stock,RELIANCE,Reliance Industries,buy,5,2800,,20,0,INR,Equity,real user transaction
+mf-buy-1,2026-04-01,MF Platform,mutual_fund,INF000000000,Example Mutual Fund,buy,100,50,,0,0,INR,Equity,real user transaction`;
+
+    const result = parseManualCsv(csv, { importId: "manual_tx", now: "2026-06-23T00:00:00.000Z" });
+
+    expect(result.errors).toEqual([]);
+    expect(result.transactions).toHaveLength(4);
+    expect(result.manualBalances).toHaveLength(3);
+    expect(result.manualBalances.find((balance) => balance.label === "Apple Inc")).toMatchObject({ quantity: 6, price: 120, value: 720, currency: "USD", source: { provider: "manual_positions" } });
+    expect(result.manualBalances.find((balance) => balance.label === "Reliance Industries")).toMatchObject({ quantity: 5, price: 2800, value: 14000, currency: "INR" });
+    expect(result.priceSnapshots).toHaveLength(4);
   });
 
   it("rejects invalid categories and keeps rows out of staged data", () => {
-    const csv = `account_name,asset_name,asset_type,category,currency,current_value,as_of_date\nBad,Bad Asset,other,RealEstate,INR,100,2026-06-22`;
+    const csv = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category
+bad,2026-06-22,Manual,other,Bad Asset,100,INR,RealEstate`;
     const result = parseManualCsv(csv, { importId: "import_bad" });
 
     expect(result.manualBalances).toHaveLength(0);
     expect(result.errors[0].message).toMatch(/category/i);
   });
 
-  it("creates stable source hashes for duplicate detection", () => {
-    const csv = `account_name,asset_name,asset_type,category,currency,current_value,as_of_date\nCash,Cash,cash,Cash,INR,100,2026-06-22`;
-    const first = parseManualCsv(csv, { importId: "a" });
-    const second = parseManualCsv(csv, { importId: "b" });
+  it("uses stable source hashes for balance reuploads", () => {
+    const firstCsv = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category
+cash-main,2026-06-22,Manual,cash,Cash,100,INR,Cash`;
+    const secondCsv = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category
+cash-main,2026-06-23,Manual,cash,Cash,250,INR,Cash`;
+    const first = parseManualCsv(firstCsv, { importId: "a" });
+    const second = parseManualCsv(secondCsv, { importId: "b" });
 
     expect(first.manualBalances[0].source.sourceRecordHash).toBe(second.manualBalances[0].source.sourceRecordHash);
-  });
-
-  it("parses generic manual workbook holdings transactions prices and FX", () => {
-    const result = parseManualWorkbookSheets([
-      { sheet: "Holdings", data: [
-        ["holding_key", "account_name", "institution", "asset_name", "asset_type", "category", "currency", "current_value", "as_of_date", "quantity", "price", "symbol", "country", "issuer"],
-        ["us-aapl", "Fidelity US", "Fidelity", "Apple Inc", "us_stock", "Equity", "USD", 1200, "2026-06-22", 10, 120, "AAPL", "US", "Apple"],
-        ["ppf-main", "PPF", "SBI", "Public Provident Fund", "ppf", "Debt", "INR", 300000, "2026-06-22", "", "", "", "IN", "Government of India"]
-      ] },
-      { sheet: "Transactions", data: [
-        ["transaction_id", "account_name", "institution", "asset_name", "asset_type", "category", "currency", "date", "transaction_type", "quantity", "price", "amount", "fees", "taxes", "symbol", "country", "issuer"],
-        ["t1", "Fidelity US", "Fidelity", "Apple Inc", "us_stock", "Equity", "USD", "2026-01-01", "buy", 10, 100, 1000, 1, 0, "AAPL", "US", "Apple"],
-        ["t2", "PPF", "SBI", "Public Provident Fund", "ppf", "Debt", "INR", "2026-04-01", "contribution", "", "", 50000, 0, 0, "", "IN", "Government of India"]
-      ] },
-      { sheet: "Prices", data: [
-        ["asset_name", "asset_type", "category", "currency", "as_of_date", "price", "symbol", "country", "issuer"],
-        ["Apple Inc", "us_stock", "Equity", "USD", "2026-05-31", 115, "AAPL", "US", "Apple"]
-      ] },
-      { sheet: "FX", data: [
-        ["from_currency", "to_currency", "date", "rate"],
-        ["USD", "INR", "2026-01-01", 83],
-        ["USD", "INR", "2026-06-22", 85]
-      ] }
-    ], { importId: "manual_workbook", now: "2026-06-22T00:00:00.000Z" });
-
-    expect(result.errors).toEqual([]);
-    expect(result.accounts).toHaveLength(2);
-    expect(result.instruments).toHaveLength(2);
-    expect(result.manualBalances).toHaveLength(2);
-    expect(result.transactions).toHaveLength(2);
-    expect(result.priceSnapshots).toEqual(expect.arrayContaining([
-      expect.objectContaining({ instrumentId: "USDINR", price: 83, asOfDate: "2026-01-01" }),
-      expect.objectContaining({ instrumentId: "USDINR", price: 85, asOfDate: "2026-06-22" })
-    ]));
-    expect(result.manualBalances[0]).toMatchObject({ quantity: 10, price: 120, source: { provider: "manual_workbook" } });
-  });
-
-  it("parses the committed generic manual XLSX template", async () => {
-    const sheets = await readXlsxFile("fixtures/importable/generic-manual-portfolio-template.xlsx");
-    const result = parseManualWorkbookSheets(sheets, { importId: "fixture_template", now: "2026-06-23T00:00:00.000Z" });
-
-    expect(sheets.map((sheet) => sheet.sheet)).toEqual(["Manifest", "Holdings", "Transactions", "Prices", "FX"]);
-    expect(result.errors).toEqual([]);
-    expect(result.manualBalances.length).toBeGreaterThanOrEqual(10);
-    expect(result.transactions.length).toBeGreaterThanOrEqual(8);
-    expect(result.manualBalances.map((balance) => balance.source.provider)).toContain("manual_workbook");
   });
 });

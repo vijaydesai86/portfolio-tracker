@@ -1,5 +1,4 @@
 import Papa from "papaparse";
-import readXlsxFile from "read-excel-file/browser";
 import { categorySchema, currencySchema, type Account, type Instrument, type ManualBalance, type PriceSnapshot, type Transaction } from "@/src/schema/backup";
 import { slugId, stableHash } from "@/src/domain/hash";
 
@@ -22,70 +21,62 @@ export type ManualCsvResult = {
   errors: ImportError[];
 };
 
-type ManualCsvRow = {
-  account_name?: string;
-  institution?: string;
-  asset_name?: string;
-  asset_type?: string;
-  category?: string;
-  currency?: string;
-  current_value?: string;
-  as_of_date?: string;
-  quantity?: string;
-  price?: string;
-  symbol?: string;
-  isin?: string;
-  country?: string;
-  issuer?: string;
-  holding_key?: string;
+type ManualCsvRow = Record<string, string | undefined>;
+type NormalizedBalanceRow = Required<{
+  balance_id: string;
+  account_name: string;
+  institution: string;
+  asset_name: string;
+  asset_type: string;
+  category: string;
+  currency: string;
+  current_value: string;
+  as_of_date: string;
+  quantity: string;
+  price: string;
+  symbol: string;
+  isin: string;
+  country: string;
+  issuer: string;
+  notes: string;
+}>;
+
+type NormalizedTransactionRow = Required<{
+  transaction_id: string;
+  account_name: string;
+  institution: string;
+  asset_name: string;
+  asset_type: string;
+  category: string;
+  currency: string;
+  date: string;
+  transaction_type: string;
+  quantity: string;
+  price: string;
+  amount: string;
+  fees: string;
+  taxes: string;
+  symbol: string;
+  isin: string;
+  country: string;
+  issuer: string;
+  notes: string;
+}>;
+
+type PositionAccumulator = {
+  accountId: string;
+  instrumentId: string;
+  label: string;
+  category: AccountCategory;
+  currency: string;
+  quantity: number;
+  lastPrice?: number;
+  lastPriceDate?: string;
+  latestDate: string;
   notes?: string;
 };
 
-type ManualTransactionRow = {
-  account_name?: string;
-  institution?: string;
-  asset_name?: string;
-  asset_type?: string;
-  category?: string;
-  currency?: string;
-  date?: string;
-  transaction_type?: string;
-  quantity?: string;
-  price?: string;
-  amount?: string;
-  fees?: string;
-  taxes?: string;
-  symbol?: string;
-  isin?: string;
-  country?: string;
-  issuer?: string;
-  transaction_id?: string;
-  notes?: string;
-};
-
-type ManualPriceRow = {
-  asset_name?: string;
-  asset_type?: string;
-  category?: string;
-  currency?: string;
-  as_of_date?: string;
-  price?: string;
-  symbol?: string;
-  isin?: string;
-  country?: string;
-  issuer?: string;
-};
-
-type ManualFxRow = {
-  from_currency?: string;
-  to_currency?: string;
-  date?: string;
-  rate?: string;
-};
-
-type WorkbookCell = string | number | boolean | Date | null | undefined;
-type WorkbookRow = WorkbookCell[];
-type WorkbookSheet = { sheet: string; data: WorkbookRow[] };
+type AccountCategory = ManualBalance["category"];
 
 const supportedAccountTypes = new Set<Account["type"]>([
   "mutual_fund",
@@ -102,13 +93,21 @@ const supportedAccountTypes = new Set<Account["type"]>([
   "other"
 ]);
 
+const dynamicPositionTypes = new Set<Account["type"]>(["mutual_fund", "indian_stock", "us_stock", "gold"]);
+
 export function parseManualCsv(csv: string, options: ManualCsvParseOptions): ManualCsvResult {
   const parsed = Papa.parse<ManualCsvRow>(csv, {
     header: true,
     skipEmptyLines: true,
-    transformHeader: (header) => header.trim().toLowerCase()
+    transformHeader: normalizeHeader
   });
 
+  const headers = (parsed.meta.fields ?? []).map(normalizeHeader);
+  if (looksLikeTransactionTemplate(headers)) return parseTransactionCsvRows(parsed.data, options);
+  return parseBalanceCsvRows(parsed.data, options);
+}
+
+function parseBalanceCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOptions): ManualCsvResult {
   const now = options.now ?? new Date().toISOString();
   const accounts: Account[] = [];
   const instruments: Instrument[] = [];
@@ -117,53 +116,45 @@ export function parseManualCsv(csv: string, options: ManualCsvParseOptions): Man
   const priceSnapshots: PriceSnapshot[] = [];
   const errors: ImportError[] = [];
 
-  parsed.data.forEach((row, index) => {
+  rows.forEach((row, index) => {
     const rowNumber = index + 2;
-    const normalized = normalizeRow(row);
+    const normalized = normalizeBalanceRow(row);
     const category = categorySchema.safeParse(normalized.category);
     const currency = currencySchema.safeParse(normalized.currency);
     const value = Number(normalized.current_value);
 
     if (!normalized.account_name || !normalized.asset_name) {
-      errors.push({ row: rowNumber, message: "Missing account_name or asset_name" });
+      errors.push({ row: rowNumber, message: "Missing account/institution or name" });
       return;
     }
     if (!supportedAccountTypes.has(normalized.asset_type as Account["type"])) {
-      errors.push({ row: rowNumber, message: `Unsupported asset_type: ${normalized.asset_type}` });
+      errors.push({ row: rowNumber, message: "Unsupported asset_type: " + normalized.asset_type });
       return;
     }
     if (!category.success) {
-      errors.push({ row: rowNumber, message: `Invalid category: ${normalized.category}` });
+      errors.push({ row: rowNumber, message: "Invalid category: " + normalized.category });
       return;
     }
     if (!currency.success) {
-      errors.push({ row: rowNumber, message: `Invalid currency: ${normalized.currency}` });
+      errors.push({ row: rowNumber, message: "Invalid currency: " + normalized.currency });
       return;
     }
     if (!Number.isFinite(value)) {
-      errors.push({ row: rowNumber, message: `Invalid current_value: ${normalized.current_value}` });
+      errors.push({ row: rowNumber, message: "Invalid current_value: " + normalized.current_value });
       return;
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized.as_of_date)) {
-      errors.push({ row: rowNumber, message: `Invalid as_of_date: ${normalized.as_of_date}` });
+    if (!isIsoDate(normalized.as_of_date)) {
+      errors.push({ row: rowNumber, message: "Invalid as_of_date: " + normalized.as_of_date });
       return;
     }
 
     const accountId = ensureAccount(accounts, normalized, now);
     const instrumentId = ensureInstrument(instruments, normalized, now);
-
-    const sourceRecordHash = stableHash({
-      account_name: normalized.account_name,
-      asset_name: normalized.asset_name,
-      asset_type: normalized.asset_type,
-      category: normalized.category,
-      currency: normalized.currency,
-      current_value: value,
-      as_of_date: normalized.as_of_date
-    });
+    const logicalKey = normalized.balance_id || accountId + "|" + instrumentId;
+    const sourceRecordHash = stableHash({ provider: "manual_balances", logicalKey });
 
     manualBalances.push({
-      id: slugId("bal", [sourceRecordHash]),
+      id: slugId("bal", ["manual_balances", logicalKey]),
       accountId,
       instrumentId,
       label: normalized.asset_name,
@@ -177,24 +168,32 @@ export function parseManualCsv(csv: string, options: ManualCsvParseOptions): Man
       source: {
         type: "import",
         importId: options.importId,
-        provider: "manual_csv",
+        provider: "manual_balances",
         sourceRecordHash
       },
       userModified: false,
       createdAt: now,
       updatedAt: now
     });
+
+    const price = optionalNumber(normalized.price);
+    if (price !== undefined && price > 0) {
+      priceSnapshots.push({
+        id: slugId("price", [instrumentId, normalized.as_of_date, String(price), "manual_balances"]),
+        instrumentId,
+        price,
+        currency: normalized.currency,
+        asOfDate: normalized.as_of_date,
+        source: "manual_balances",
+        createdAt: now
+      });
+    }
   });
 
   return { accounts, instruments, transactions, manualBalances, priceSnapshots, errors };
 }
 
-export async function parseManualWorkbook(file: File, options: ManualCsvParseOptions): Promise<ManualCsvResult> {
-  const sheets = await readXlsxFile(file) as unknown as WorkbookSheet[];
-  return parseManualWorkbookSheets(sheets, options);
-}
-
-export function parseManualWorkbookSheets(sheets: WorkbookSheet[], options: ManualCsvParseOptions): ManualCsvResult {
+function parseTransactionCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOptions): ManualCsvResult {
   const now = options.now ?? new Date().toISOString();
   const accounts: Account[] = [];
   const instruments: Instrument[] = [];
@@ -202,125 +201,139 @@ export function parseManualWorkbookSheets(sheets: WorkbookSheet[], options: Manu
   const manualBalances: ManualBalance[] = [];
   const priceSnapshots: PriceSnapshot[] = [];
   const errors: ImportError[] = [];
-  const byName = new Map(sheets.map((sheet) => [sheet.sheet.trim().toLowerCase(), sheet.data]));
+  const positions = new Map<string, PositionAccumulator>();
 
-  const holdingRows = rowsFromSheet<ManualCsvRow>(byName.get("holdings") ?? []);
-  const transactionRows = rowsFromSheet<ManualTransactionRow>(byName.get("transactions") ?? []);
-  const priceRows = rowsFromSheet<ManualPriceRow>(byName.get("prices") ?? []);
-  const fxRows = rowsFromSheet<ManualFxRow>(byName.get("fx") ?? []);
-
-  if (holdingRows.length === 0 && transactionRows.length === 0 && priceRows.length === 0 && fxRows.length === 0) {
-    return { accounts, instruments, transactions, manualBalances, priceSnapshots, errors: [{ row: 1, message: "Manual workbook must contain at least one of these sheets: Holdings, Transactions, Prices, FX" }] };
-  }
-
-  for (const { row, rowNumber } of holdingRows) {
-    const normalized = normalizeRow(row);
-    const category = categorySchema.safeParse(normalized.category);
-    const currency = currencySchema.safeParse(normalized.currency);
-    const value = Number(normalized.current_value);
-    if (!normalized.account_name || !normalized.asset_name) { errors.push({ row: rowNumber, message: "Holdings: missing account_name or asset_name" }); continue; }
-    if (!supportedAccountTypes.has(normalized.asset_type as Account["type"])) { errors.push({ row: rowNumber, message: "Holdings: unsupported asset_type: " + normalized.asset_type }); continue; }
-    if (!category.success) { errors.push({ row: rowNumber, message: "Holdings: invalid category: " + normalized.category }); continue; }
-    if (!currency.success) { errors.push({ row: rowNumber, message: "Holdings: invalid currency: " + normalized.currency }); continue; }
-    if (!Number.isFinite(value)) { errors.push({ row: rowNumber, message: "Holdings: invalid current_value: " + normalized.current_value }); continue; }
-    if (!isIsoDate(normalized.as_of_date)) { errors.push({ row: rowNumber, message: "Holdings: invalid as_of_date: " + normalized.as_of_date }); continue; }
-    const accountId = ensureAccount(accounts, normalized, now);
-    const instrumentId = ensureInstrument(instruments, normalized, now);
-    const logicalHoldingKey = normalized.holding_key || accountId + "|" + instrumentId;
-    const sourceRecordHash = stableHash({ provider: "manual_workbook", logicalHoldingKey });
-    manualBalances.push({
-      id: slugId("bal", ["manual_workbook", logicalHoldingKey]),
-      accountId,
-      instrumentId,
-      label: normalized.asset_name,
-      category: category.data,
-      currency: normalized.currency,
-      value,
-      quantity: optionalNumber(normalized.quantity),
-      price: optionalNumber(normalized.price),
-      asOfDate: normalized.as_of_date,
-      notes: normalized.notes || undefined,
-      source: { type: "import", importId: options.importId, provider: "manual_workbook", sourceRecordHash },
-      userModified: false,
-      createdAt: now,
-      updatedAt: now
-    });
-    if (optionalNumber(normalized.price) !== undefined) {
-      priceSnapshots.push({ id: slugId("price", [instrumentId, normalized.as_of_date, normalized.price]), instrumentId, price: optionalNumber(normalized.price)!, currency: normalized.currency, asOfDate: normalized.as_of_date, source: "manual_workbook", createdAt: now });
-    }
-  }
-
-  for (const { row, rowNumber } of transactionRows) {
+  rows.forEach((row, index) => {
+    const rowNumber = index + 2;
     const normalized = normalizeTransactionRow(row);
     const category = categorySchema.safeParse(normalized.category);
     const currency = currencySchema.safeParse(normalized.currency);
-    const amount = Number(normalized.amount);
-    if (!normalized.account_name || !normalized.asset_name) { errors.push({ row: rowNumber, message: "Transactions: missing account_name or asset_name" }); continue; }
-    if (!supportedAccountTypes.has(normalized.asset_type as Account["type"])) { errors.push({ row: rowNumber, message: "Transactions: unsupported asset_type: " + normalized.asset_type }); continue; }
-    if (!category.success) { errors.push({ row: rowNumber, message: "Transactions: invalid category: " + normalized.category }); continue; }
-    if (!currency.success) { errors.push({ row: rowNumber, message: "Transactions: invalid currency: " + normalized.currency }); continue; }
-    if (!isTransactionType(normalized.transaction_type)) { errors.push({ row: rowNumber, message: "Transactions: invalid transaction_type: " + normalized.transaction_type }); continue; }
-    if (!isIsoDate(normalized.date)) { errors.push({ row: rowNumber, message: "Transactions: invalid date: " + normalized.date }); continue; }
-    if (!Number.isFinite(amount)) { errors.push({ row: rowNumber, message: "Transactions: invalid amount: " + normalized.amount }); continue; }
+    const quantity = optionalNumber(normalized.quantity);
+    const price = optionalNumber(normalized.price);
+    const amount = deriveAmount(normalized.amount, quantity, price, normalized.transaction_type);
+
+    if (!normalized.account_name || !normalized.asset_name) {
+      errors.push({ row: rowNumber, message: "Missing platform/account or name" });
+      return;
+    }
+    if (!supportedAccountTypes.has(normalized.asset_type as Account["type"])) {
+      errors.push({ row: rowNumber, message: "Unsupported asset_type: " + normalized.asset_type });
+      return;
+    }
+    if (!category.success) {
+      errors.push({ row: rowNumber, message: "Invalid category: " + normalized.category });
+      return;
+    }
+    if (!currency.success) {
+      errors.push({ row: rowNumber, message: "Invalid currency: " + normalized.currency });
+      return;
+    }
+    if (!isTransactionType(normalized.transaction_type)) {
+      errors.push({ row: rowNumber, message: "Invalid type: " + normalized.transaction_type });
+      return;
+    }
+    if (!isIsoDate(normalized.date)) {
+      errors.push({ row: rowNumber, message: "Invalid date: " + normalized.date });
+      return;
+    }
+    if (!Number.isFinite(amount)) {
+      errors.push({ row: rowNumber, message: "Invalid amount. Enter amount, or quantity and price." });
+      return;
+    }
+
     const accountId = ensureAccount(accounts, normalized, now);
     const instrumentId = ensureInstrument(instruments, normalized, now);
-    const sourceRecordHash = normalized.transaction_id ? stableHash({ provider: "manual_workbook", transaction_id: normalized.transaction_id }) : stableHash({ sheet: "Transactions", ...normalized, amount });
+    const sourceRecordHash = normalized.transaction_id
+      ? stableHash({ provider: "manual_transactions", transaction_id: normalized.transaction_id })
+      : stableHash({ provider: "manual_transactions", row: rowNumber, ...normalized, amount });
+
     transactions.push({
       id: slugId("tx", [sourceRecordHash]),
       accountId,
       instrumentId,
       date: normalized.date,
       type: normalized.transaction_type as Transaction["type"],
-      quantity: optionalNumber(normalized.quantity),
-      price: optionalNumber(normalized.price),
+      quantity,
+      price,
       amount,
       currency: normalized.currency,
       fees: optionalNumber(normalized.fees) ?? 0,
       taxes: optionalNumber(normalized.taxes) ?? 0,
-      source: { type: "import", importId: options.importId, provider: "manual_workbook", sourceRecordHash },
+      source: { type: "import", importId: options.importId, provider: "manual_transactions", sourceRecordHash },
+      userModified: false,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    if (price !== undefined && price > 0) {
+      priceSnapshots.push({
+        id: slugId("price", [instrumentId, normalized.date, String(price), "manual_transactions"]),
+        instrumentId,
+        price,
+        currency: normalized.currency,
+        asOfDate: normalized.date,
+        source: "manual_transactions",
+        createdAt: now
+      });
+    }
+
+    if (dynamicPositionTypes.has(normalized.asset_type as Account["type"]) && quantity !== undefined) {
+      const delta = positionQuantityDelta(normalized.transaction_type as Transaction["type"], quantity);
+      if (delta !== 0 || price !== undefined) {
+        const key = accountId + "|" + instrumentId;
+        const existing = positions.get(key) ?? {
+          accountId,
+          instrumentId,
+          label: normalized.asset_name,
+          category: category.data,
+          currency: normalized.currency,
+          quantity: 0,
+          latestDate: normalized.date,
+          notes: "Derived from manual transaction CSV. Market refresh replaces the latest transaction price when a real quote or NAV is available."
+        };
+        existing.quantity += delta;
+        if (price !== undefined && price > 0) {
+          existing.lastPrice = price;
+          existing.lastPriceDate = normalized.date;
+        }
+        if (normalized.date > existing.latestDate) existing.latestDate = normalized.date;
+        positions.set(key, existing);
+      }
+    }
+  });
+
+  for (const position of positions.values()) {
+    if (position.quantity <= 0 || position.lastPrice === undefined) continue;
+    const logicalKey = position.accountId + "|" + position.instrumentId;
+    const sourceRecordHash = stableHash({ provider: "manual_positions", logicalKey });
+    manualBalances.push({
+      id: slugId("bal", ["manual_positions", logicalKey]),
+      accountId: position.accountId,
+      instrumentId: position.instrumentId,
+      label: position.label,
+      category: position.category,
+      currency: position.currency,
+      value: roundMoney(position.quantity * position.lastPrice),
+      quantity: roundQuantity(position.quantity),
+      price: position.lastPrice,
+      asOfDate: position.lastPriceDate ?? position.latestDate,
+      notes: position.notes,
+      source: { type: "import", importId: options.importId, provider: "manual_positions", sourceRecordHash },
       userModified: false,
       createdAt: now,
       updatedAt: now
     });
   }
 
-  for (const { row, rowNumber } of priceRows) {
-    const normalized = normalizePriceRow(row);
-    const currency = currencySchema.safeParse(normalized.currency);
-    const price = Number(normalized.price);
-    if (!normalized.asset_name && !normalized.symbol && !normalized.isin) { errors.push({ row: rowNumber, message: "Prices: missing asset_name, symbol, or isin" }); continue; }
-    if (!supportedAccountTypes.has(normalized.asset_type as Account["type"])) { errors.push({ row: rowNumber, message: "Prices: unsupported asset_type: " + normalized.asset_type }); continue; }
-    if (!currency.success) { errors.push({ row: rowNumber, message: "Prices: invalid currency: " + normalized.currency }); continue; }
-    if (!isIsoDate(normalized.as_of_date)) { errors.push({ row: rowNumber, message: "Prices: invalid as_of_date: " + normalized.as_of_date }); continue; }
-    if (!Number.isFinite(price) || price <= 0) { errors.push({ row: rowNumber, message: "Prices: invalid price: " + normalized.price }); continue; }
-    const instrumentId = ensureInstrument(instruments, normalized, now);
-    priceSnapshots.push({ id: slugId("price", [instrumentId, normalized.as_of_date, String(price)]), instrumentId, price, currency: normalized.currency, asOfDate: normalized.as_of_date, source: "manual_workbook", createdAt: now });
-  }
-
-  for (const { row, rowNumber } of fxRows) {
-    const from = (row.from_currency ?? "").trim().toUpperCase();
-    const to = (row.to_currency ?? "INR").trim().toUpperCase();
-    const date = parseDateCell(row.date);
-    const rate = Number(cleanNumber(row.rate));
-    if (!currencySchema.safeParse(from).success || !currencySchema.safeParse(to).success) { errors.push({ row: rowNumber, message: "FX: invalid currency pair" }); continue; }
-    if (!isIsoDate(date)) { errors.push({ row: rowNumber, message: "FX: invalid date: " + date }); continue; }
-    if (!Number.isFinite(rate) || rate <= 0) { errors.push({ row: rowNumber, message: "FX: invalid rate: " + row.rate }); continue; }
-    priceSnapshots.push({ id: slugId("fx", [from + to, date, String(rate)]), instrumentId: from + to, price: rate, currency: to, asOfDate: date, source: "manual_workbook", createdAt: now });
-  }
-
   return { accounts, instruments, transactions, manualBalances, priceSnapshots, errors };
 }
 
-function rowsFromSheet<T extends Record<string, unknown>>(rows: WorkbookRow[]): Array<{ row: T; rowNumber: number }> {
-  if (rows.length === 0) return [];
-  const headers = rows[0].map((header) => normalizeHeader(String(header ?? "")));
-  return rows.slice(1).map((cells, index) => ({
-    rowNumber: index + 2,
-    row: Object.fromEntries(headers.map((header, cellIndex) => [header, stringifyCell(cells[cellIndex])])) as T
-  })).filter(({ row }) => Object.values(row).some((value) => String(value ?? "").trim() !== ""));
+function looksLikeTransactionTemplate(headers: string[]): boolean {
+  const headerSet = new Set(headers);
+  return headerSet.has("date") && headerSet.has("asset_type") && (headerSet.has("type") || headerSet.has("transaction_type")) && (headerSet.has("symbol_or_isin") || headerSet.has("symbol") || headerSet.has("isin") || headerSet.has("name") || headerSet.has("asset_name"));
 }
 
-function ensureAccount(accounts: Account[], row: Required<Pick<ManualCsvRow, "account_name" | "institution" | "asset_type" | "currency">>, now: string): string {
+function ensureAccount(accounts: Account[], row: Pick<NormalizedBalanceRow | NormalizedTransactionRow, "account_name" | "institution" | "asset_type" | "currency">, now: string): string {
   const accountId = slugId("acct", [row.account_name, row.asset_type, row.currency]);
   if (!accounts.some((account) => account.id === accountId)) {
     accounts.push({ id: accountId, name: row.account_name, institution: row.institution || "Manual", type: row.asset_type as Account["type"], currency: row.currency, createdAt: now, updatedAt: now });
@@ -328,94 +341,169 @@ function ensureAccount(accounts: Account[], row: Required<Pick<ManualCsvRow, "ac
   return accountId;
 }
 
-function ensureInstrument(instruments: Instrument[], row: Required<Pick<ManualCsvRow, "asset_name" | "asset_type" | "category" | "currency" | "symbol" | "isin" | "country" | "issuer">>, now: string): string {
+function ensureInstrument(instruments: Instrument[], row: Pick<NormalizedBalanceRow | NormalizedTransactionRow, "asset_name" | "asset_type" | "category" | "currency" | "symbol" | "isin" | "country" | "issuer">, now: string): string {
   const key = row.isin || row.symbol || row.asset_name;
   const instrumentId = slugId("inst", [row.asset_type, row.currency, key]);
   if (!instruments.some((instrument) => instrument.id === instrumentId)) {
-    instruments.push({ id: instrumentId, name: row.asset_name || row.symbol || row.isin, type: row.asset_type as Account["type"], symbol: row.symbol || undefined, isin: row.isin || undefined, currency: row.currency, country: row.country || inferCountry(row.currency), category: categorySchema.safeParse(row.category).success ? row.category as Instrument["category"] : "Others", issuer: row.issuer || undefined, createdAt: now, updatedAt: now });
+    instruments.push({ id: instrumentId, name: row.asset_name || row.symbol || row.isin, type: row.asset_type as Account["type"], symbol: row.symbol || undefined, isin: row.isin || undefined, currency: row.currency, country: row.country || inferCountry(row.asset_type, row.currency), category: categorySchema.safeParse(row.category).success ? row.category as Instrument["category"] : categoryForAssetType(row.asset_type), issuer: row.issuer || undefined, createdAt: now, updatedAt: now });
   }
   return instrumentId;
 }
 
-function normalizeRow(row: ManualCsvRow): Required<ManualCsvRow> {
+function normalizeBalanceRow(row: ManualCsvRow): NormalizedBalanceRow {
+  const assetType = normalizeAssetType(pick(row, "asset_type", "type_of_asset"));
+  const currency = normalizeCurrency(pick(row, "currency"), assetType);
+  const symbolFields = normalizeSymbolOrIsin(pick(row, "symbol_or_isin", "ticker", "symbol", "isin"));
+  const institution = pick(row, "institution", "platform", "broker", "bank", "provider") || "Manual";
+  const assetName = pick(row, "name", "asset_name", "holding_name", "instrument_name") || symbolFields.symbol || symbolFields.isin;
   return {
-    account_name: (row.account_name ?? "").trim(),
-    institution: (row.institution ?? "Manual").trim(),
-    asset_name: (row.asset_name ?? "").trim(),
-    asset_type: normalizeAssetType(row.asset_type),
-    category: (row.category ?? "Others").trim(),
-    currency: (row.currency ?? "INR").trim().toUpperCase(),
-    current_value: cleanNumber(row.current_value),
-    as_of_date: parseDateCell(row.as_of_date),
-    quantity: cleanNumber(row.quantity),
-    price: cleanNumber(row.price),
-    symbol: (row.symbol ?? "").trim().toUpperCase(),
-    isin: (row.isin ?? "").trim().toUpperCase(),
-    country: (row.country ?? "").trim().toUpperCase(),
-    issuer: (row.issuer ?? "").trim(),
-    holding_key: (row.holding_key ?? "").trim(),
-    notes: (row.notes ?? "").trim()
+    balance_id: pick(row, "balance_id", "holding_key", "id"),
+    account_name: pick(row, "account", "account_name") || institution,
+    institution,
+    asset_name: assetName,
+    asset_type: assetType,
+    category: normalizeCategory(pick(row, "category", "asset_category"), assetType),
+    currency,
+    current_value: cleanNumber(pick(row, "current_value", "value", "balance", "market_value")),
+    as_of_date: parseDateCell(pick(row, "as_of_date", "date", "valuation_date")),
+    quantity: cleanNumber(pick(row, "quantity", "units", "shares")),
+    price: cleanNumber(pick(row, "price", "nav", "unit_price")),
+    symbol: symbolFields.symbol || pick(row, "symbol", "ticker").toUpperCase(),
+    isin: symbolFields.isin || pick(row, "isin").toUpperCase(),
+    country: pick(row, "country", "region").toUpperCase(),
+    issuer: pick(row, "issuer", "amc", "fund_house"),
+    notes: pick(row, "notes", "description")
   };
 }
 
-function normalizeTransactionRow(row: ManualTransactionRow): Required<ManualTransactionRow> {
+function normalizeTransactionRow(row: ManualCsvRow): NormalizedTransactionRow {
+  const assetType = normalizeAssetType(pick(row, "asset_type", "type_of_asset"));
+  const currency = normalizeCurrency(pick(row, "currency"), assetType);
+  const symbolFields = normalizeSymbolOrIsin(pick(row, "symbol_or_isin", "ticker", "symbol", "isin"));
+  const institution = pick(row, "platform", "broker", "institution", "provider", "bank") || "Manual";
+  const assetName = pick(row, "name", "asset_name", "instrument_name") || symbolFields.symbol || symbolFields.isin;
   return {
-    account_name: (row.account_name ?? "").trim(),
-    institution: (row.institution ?? "Manual").trim(),
-    asset_name: (row.asset_name ?? "").trim(),
-    asset_type: normalizeAssetType(row.asset_type),
-    category: (row.category ?? "Others").trim(),
-    currency: (row.currency ?? "INR").trim().toUpperCase(),
-    date: parseDateCell(row.date),
-    transaction_type: normalizeTransactionType(row.transaction_type),
-    quantity: cleanNumber(row.quantity),
-    price: cleanNumber(row.price),
-    amount: cleanNumber(row.amount),
-    fees: cleanNumber(row.fees),
-    taxes: cleanNumber(row.taxes),
-    symbol: (row.symbol ?? "").trim().toUpperCase(),
-    isin: (row.isin ?? "").trim().toUpperCase(),
-    country: (row.country ?? "").trim().toUpperCase(),
-    issuer: (row.issuer ?? "").trim(),
-    transaction_id: (row.transaction_id ?? "").trim(),
-    notes: (row.notes ?? "").trim()
+    transaction_id: pick(row, "transaction_id", "tx_id", "id"),
+    account_name: pick(row, "account", "account_name") || institution,
+    institution,
+    asset_name: assetName,
+    asset_type: assetType,
+    category: normalizeCategory(pick(row, "category", "asset_category"), assetType),
+    currency,
+    date: parseDateCell(pick(row, "date", "transaction_date")),
+    transaction_type: normalizeTransactionType(pick(row, "type", "transaction_type", "action")),
+    quantity: cleanNumber(pick(row, "quantity", "units", "shares")),
+    price: cleanNumber(pick(row, "price", "nav", "unit_price")),
+    amount: cleanNumber(pick(row, "amount", "net_amount", "gross_amount")),
+    fees: cleanNumber(pick(row, "fees", "fee", "charges", "commission")),
+    taxes: cleanNumber(pick(row, "taxes", "tax", "withholding_tax")),
+    symbol: symbolFields.symbol || pick(row, "symbol", "ticker").toUpperCase(),
+    isin: symbolFields.isin || pick(row, "isin").toUpperCase(),
+    country: pick(row, "country", "region").toUpperCase(),
+    issuer: pick(row, "issuer", "amc", "fund_house"),
+    notes: pick(row, "notes", "description")
   };
 }
 
-function normalizePriceRow(row: ManualPriceRow): Required<ManualPriceRow> {
-  return {
-    asset_name: (row.asset_name ?? row.symbol ?? row.isin ?? "").trim(),
-    asset_type: normalizeAssetType(row.asset_type),
-    category: (row.category ?? "Others").trim(),
-    currency: (row.currency ?? "INR").trim().toUpperCase(),
-    as_of_date: parseDateCell(row.as_of_date),
-    price: cleanNumber(row.price),
-    symbol: (row.symbol ?? "").trim().toUpperCase(),
-    isin: (row.isin ?? "").trim().toUpperCase(),
-    country: (row.country ?? "").trim().toUpperCase(),
-    issuer: (row.issuer ?? "").trim()
-  };
+function pick(row: ManualCsvRow, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = row[normalizeHeader(key)];
+    if (value !== undefined && String(value).trim() !== "") return String(value).trim();
+  }
+  return "";
+}
+
+function normalizeSymbolOrIsin(value: string): { symbol: string; isin: string } {
+  const cleaned = value.trim().toUpperCase();
+  if (!cleaned) return { symbol: "", isin: "" };
+  if (/^[A-Z]{2}[A-Z0-9]{10}$/.test(cleaned)) return { symbol: "", isin: cleaned };
+  return { symbol: cleaned, isin: "" };
 }
 
 function normalizeAssetType(value?: string): string {
-  return (value ?? "other").trim().toLowerCase().replace(/[ -]/g, "_");
+  const normalized = (value ?? "other").trim().toLowerCase().replace(/[ /-]/g, "_");
+  const aliases: Record<string, Account["type"]> = {
+    mf: "mutual_fund",
+    mutualfund: "mutual_fund",
+    mutual_funds: "mutual_fund",
+    india_stock: "indian_stock",
+    indian_equity: "indian_stock",
+    us_equity: "us_stock",
+    usa_stock: "us_stock",
+    fidelity: "us_stock",
+    pf: "epf",
+    epfo: "epf",
+    epf_pf: "epf",
+    fixed_deposit: "fd",
+    deposits: "fd",
+    espp_contribution: "espp",
+    gold_etf: "gold"
+  };
+  return aliases[normalized] ?? normalized;
+}
+
+function normalizeCurrency(value: string, assetType: string): string {
+  const normalized = value.trim().toUpperCase();
+  if (/^[A-Z]{3}$/.test(normalized)) return normalized;
+  if (assetType === "us_stock" || assetType === "espp") return "USD";
+  return "INR";
+}
+
+function normalizeCategory(value: string, assetType: string): string {
+  const normalized = value.trim();
+  if (!normalized) return categoryForAssetType(assetType);
+  const title = normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
+  if (categorySchema.safeParse(title).success) return title;
+  return normalized;
+}
+
+function categoryForAssetType(assetType: string): AccountCategory {
+  if (assetType === "cash") return "Cash";
+  if (["fd", "ppf", "ssy", "epf"].includes(assetType)) return "Debt";
+  if (["mutual_fund", "indian_stock", "us_stock", "espp"].includes(assetType)) return "Equity";
+  if (assetType === "gold") return "Gold";
+  return "Others";
 }
 
 function normalizeTransactionType(value?: string): string {
-  return (value ?? "").trim().toLowerCase().replace(/[ -]/g, "_");
+  const normalized = (value ?? "").trim().toLowerCase().replace(/[ /-]/g, "_");
+  const aliases: Record<string, Transaction["type"]> = {
+    purchase: "buy",
+    bought: "buy",
+    invest: "buy",
+    investment: "buy",
+    sale: "sell",
+    sold: "sell",
+    redeem: "redemption",
+    contribution: "contribution",
+    contributed: "contribution",
+    cash_in: "deposit",
+    cash_out: "withdrawal"
+  };
+  return aliases[normalized] ?? normalized;
 }
 
 function isTransactionType(value: string): value is Transaction["type"] {
   return ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"].includes(value);
 }
 
-function normalizeHeader(value: string): string {
-  return value.trim().toLowerCase().replace(/[ -]/g, "_");
+function deriveAmount(rawAmount: string, quantity: number | undefined, price: number | undefined, transactionType: string): number {
+  if (rawAmount !== "") return Number(rawAmount);
+  if (quantity !== undefined && price !== undefined) return roundMoney(Math.abs(quantity * price));
+  if (["split"].includes(transactionType)) return 0;
+  return Number.NaN;
 }
 
-function stringifyCell(value: WorkbookCell): string {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  return value === null || value === undefined ? "" : String(value).trim();
+function positionQuantityDelta(type: Transaction["type"], quantity: number): number {
+  const absolute = Math.abs(quantity);
+  if (["buy", "sip", "switch_in", "contribution"].includes(type)) return absolute;
+  if (["sell", "redemption", "switch_out", "withdrawal", "maturity"].includes(type)) return -absolute;
+  if (type === "split") return quantity;
+  return 0;
+}
+
+function normalizeHeader(value: string): string {
+  return value.trim().toLowerCase().replace(/[ /-]/g, "_");
 }
 
 function parseDateCell(value?: string): string {
@@ -439,8 +527,16 @@ function isIsoDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
-function inferCountry(currency: string): string | undefined {
-  if (currency === "INR") return "IN";
-  if (currency === "USD") return "US";
+function inferCountry(assetType: string, currency: string): string | undefined {
+  if (assetType === "indian_stock" || currency === "INR") return "IN";
+  if (assetType === "us_stock" || currency === "USD") return "US";
   return undefined;
+}
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function roundQuantity(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1000000) / 1000000;
 }

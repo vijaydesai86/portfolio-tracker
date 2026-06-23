@@ -15,14 +15,16 @@ export type ImportDetection = {
   reason: string;
 };
 
-const manualCsvHeaders = [
-  "account_name",
-  "asset_name",
+const manualBalanceHeaders = [
   "asset_type",
-  "category",
-  "currency",
   "current_value",
   "as_of_date"
+];
+
+const manualTransactionHeaders = [
+  "date",
+  "asset_type",
+  "type"
 ];
 
 export function detectImportSource(input: ImportDetectionInput): ImportDetection {
@@ -35,12 +37,12 @@ export function detectImportSource(input: ImportDetectionInput): ImportDetection
     return detection("canonical_json", "json", "high", "Matches canonical backup JSON markers.");
   }
 
-  if (extension === "csv" && hasCsvHeaders(text, manualCsvHeaders)) {
-    return detection("manual_csv", "csv", "high", "Matches implemented manual canonical CSV headers.");
+  if (extension === "csv" && hasCsvHeaders(text, manualTransactionHeaders) && hasAnyCsvHeader(text, ["symbol_or_isin", "symbol", "isin", "name", "asset_name"])) {
+    return detection("manual_csv", "csv", "high", "Matches manual transaction CSV headers.");
   }
 
-  if (extension === "xlsx" && (fileName.includes("manual") || fileName.includes("template") || fileName.includes("portfolio"))) {
-    return detection("manual_csv", "xlsx", "medium", "Looks like a manual portfolio workbook. Parser will validate Holdings/Transactions/Prices/FX sheets.");
+  if (extension === "csv" && hasCsvHeaders(text, manualBalanceHeaders) && hasAnyCsvHeader(text, ["name", "asset_name", "balance_id"])) {
+    return detection("manual_csv", "csv", "high", "Matches manual balance CSV headers.");
   }
 
   if (extension === "csv" && isFidelityCsv(text, fileName)) {
@@ -67,7 +69,7 @@ export function detectImportSource(input: ImportDetectionInput): ImportDetection
     return detection("bank_small_savings", extension as NativeInputType, "low", "Looks like a PPF/SSY/FD statement.");
   }
 
-  return detection("manual_csv", extension || "unknown", "low", "Unknown format. Use manual workbook/canonical CSV fallback or add a verified provider fixture.");
+  return detection("manual_csv", extension || "unknown", "low", "Unknown format. Use the manual transactions or manual balances CSV template, or add a verified provider fixture.");
 }
 
 function detection(providerId: ImportProviderId, nativeInputType: NativeInputType, confidence: ImportDetection["confidence"], reason: string): ImportDetection {
@@ -86,7 +88,7 @@ function extensionOf(fileName: string): NativeInputType {
 function hasCsvHeaders(text: string, requiredHeaders: string[]): boolean {
   const firstLines = text.split(/\r?\n/).slice(0, 5);
   return firstLines.some((line) => {
-    const headers = line.split(",").map((header) => header.trim().toLowerCase());
+    const headers = line.split(",").map((header) => header.trim().toLowerCase().replace(/[ /-]/g, "_"));
     return requiredHeaders.every((header) => headers.includes(header));
   });
 }
@@ -103,5 +105,13 @@ function isFidelityCsv(text: string, fileName: string): boolean {
       (fields[0] === "Run Date" && fields[1] === "Account" && fields[2] === "Account Number") ||
       (fields[0] === "Run Date" && fields[1] === "Action")
     );
+  });
+}
+
+function hasAnyCsvHeader(text: string, candidateHeaders: string[]): boolean {
+  const firstLines = text.split(/\r?\n/).slice(0, 5);
+  return firstLines.some((line) => {
+    const headers = line.split(",").map((header) => header.trim().toLowerCase().replace(/[ /-]/g, "_"));
+    return candidateHeaders.some((header) => headers.includes(header));
   });
 }

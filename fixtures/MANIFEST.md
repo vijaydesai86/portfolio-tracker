@@ -6,14 +6,14 @@ This manifest is the source of truth for import files committed to the repositor
 
 | Path | Type | Source | Can be used for tests | Provider support implied |
 | --- | --- | --- | --- | --- |
-| `fixtures/manual/manual-balances-template.csv` | CSV | Application-defined manual import template | Yes | No provider support; manual/template only |
-| `fixtures/importable/all-assets-template.csv` | CSV | Application-defined canonical template pack | Yes | No provider support; covers all requested asset classes |
-| `fixtures/importable/equity-mf-india-us-template.csv` | CSV | Application-defined canonical template pack | Yes | No provider support; equity-focused template |
-| `fixtures/importable/debt-small-savings-template.csv` | CSV | Application-defined canonical template pack | Yes | No provider support; debt/small-savings template |
-| `fixtures/importable/cash-espp-template.csv` | CSV | Application-defined canonical template pack | Yes | No provider support; cash and ESPP contribution template |
-| `fixtures/importable/gold-others-template.csv` | CSV | Application-defined canonical template pack | Yes | No provider support; gold and others template |
-| `fixtures/importable/generic-manual-portfolio-template.xlsx` | XLSX | Application-defined manual workbook template | Yes | No provider support; preferred manual format for holdings, transactions, prices, and FX |
-| `fixtures/importable/manual-workbook-template/*.csv` | CSV sheet pack | Application-defined manual workbook schema mirrors | Yes | No provider support; readable sheet-level copy of the XLSX workbook |
+| `fixtures/importable/manual-transactions-template.csv` | CSV | Application-defined manual transaction template | Yes | No provider support; dynamic market assets only |
+| `fixtures/importable/manual-balances-template.csv` | CSV | Application-defined manual balance template | Yes | No provider support; fixed/manual assets only |
+| `fixtures/importable/all-assets-template.csv` | CSV | Application-defined manual balance template pack | Yes | No provider support; fixed/manual asset coverage |
+| `fixtures/importable/equity-mf-india-us-template.csv` | CSV | Application-defined manual transaction template pack | Yes | No provider support; mutual fund, Indian stock, US stock, and gold unit examples |
+| `fixtures/importable/debt-small-savings-template.csv` | CSV | Application-defined manual balance template pack | Yes | No provider support; debt/small-savings template |
+| `fixtures/importable/cash-espp-template.csv` | CSV | Application-defined manual balance template pack | Yes | No provider support; cash and ESPP contribution template |
+| `fixtures/importable/gold-others-template.csv` | CSV | Application-defined manual balance template pack | Yes | No provider support; gold and others template |
+| `fixtures/manual/manual-balances-template.csv` | CSV | Legacy application-defined manual import template | Yes | No provider support; manual/template only |
 
 ## Research-Only Sources
 

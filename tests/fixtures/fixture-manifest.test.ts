@@ -8,15 +8,15 @@ describe("fixture manifest", () => {
   it("lists committed importable fallback fixtures and keeps them on disk", () => {
     const manifest = readFileSync(resolve(root, "fixtures/MANIFEST.md"), "utf8");
     const paths = [
-      "fixtures/manual/manual-balances-template.csv",
-      "fixtures/importable/all-assets-template.csv"
-    ];
+      ["fixtures/manual/manual-balances-template.csv", "account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes"],
+      ["fixtures/importable/manual-transactions-template.csv", "transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price,amount,fees,taxes,currency,category,notes"],
+      ["fixtures/importable/manual-balances-template.csv", "balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,notes"],
+      ["fixtures/importable/all-assets-template.csv", "balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,notes"]
+    ] as const;
 
-    for (const fixturePath of paths) {
+    for (const [fixturePath, header] of paths) {
       expect(manifest).toContain(fixturePath);
-      expect(readFileSync(resolve(root, fixturePath), "utf8")).toContain(
-        "account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes"
-      );
+      expect(readFileSync(resolve(root, fixturePath), "utf8")).toContain(header);
     }
   });
 

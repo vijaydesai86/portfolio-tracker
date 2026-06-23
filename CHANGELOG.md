@@ -4,7 +4,11 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
-- Added a generic manual XLSX workbook importer and template with Holdings, Transactions, Prices, and FX sheets; wired browser upload/commit support; added readable CSV sheet mirrors; and fixed portfolio XIRR cash flows to include transaction fee/tax fields.
+- Replaced the complex manual XLSX workbook surface with simple manual transactions and balances CSV templates; transaction CSVs now derive current holdings from net quantity, manual balance CSVs cover fixed/manual assets, and browser/manual import flows refresh real market data after transaction imports.
+
+- Reworked dashboard hierarchy so current high-confidence analytics and allocation exploration lead the Overview while historical reconstruction charts move into a dedicated History tab with market-data coverage guidance.
+
+- Added Indian stock quote refresh support through Yahoo NSE/BSE symbol lookup for manually imported Indian stock transactions.
 
 - Changed timeline chart rendering so today's current holdings snapshot is shown as a separate marker instead of a misleading connected line segment from the last complete historical valuation point.
 
