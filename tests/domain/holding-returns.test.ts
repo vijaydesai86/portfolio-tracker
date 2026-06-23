@@ -20,6 +20,57 @@ describe("calculateHoldingReturns", () => {
     expect(row.xirr).toBeGreaterThan(17);
   });
 
+  it("does not fabricate profit for balance-only holdings without invested amount", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push({ id: "cash", name: "Cash", institution: "Manual", type: "cash", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "cash-inst", name: "Cash", type: "cash", currency: "INR", country: "IN", category: "Cash", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.manualBalances.push({ id: "bal", accountId: "cash", instrumentId: "cash-inst", label: "Cash", category: "Cash", currency: "INR", value: 50000, asOfDate: "2026-06-22", source: { type: "import", provider: "manual_balances" }, userModified: false, createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" });
+
+    const row = calculateHoldingReturns(backup).get("bal")!;
+
+    expect(row.costBasisKnown).toBe(false);
+    expect(row.invested).toBe(0);
+    expect(row.profit).toBeUndefined();
+    expect(row.returnPercent).toBeUndefined();
+    expect(row.xirr).toBeUndefined();
+  });
+
+  it("uses optional invested amount for balance-only holdings without creating XIRR", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push({ id: "ppf", name: "PPF", institution: "Post Office", type: "ppf", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "ppf-inst", name: "PPF", type: "ppf", currency: "INR", country: "IN", category: "Debt", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.manualBalances.push({ id: "bal", accountId: "ppf", instrumentId: "ppf-inst", label: "PPF", category: "Debt", currency: "INR", value: 50000, investedAmount: 45000, investedCurrency: "INR", investedAsOfDate: "2026-06-22", asOfDate: "2026-06-22", source: { type: "import", provider: "manual_balances" }, userModified: false, createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" });
+
+    const row = calculateHoldingReturns(backup).get("bal")!;
+
+    expect(row.costBasisKnown).toBe(true);
+    expect(row.hasCashFlows).toBe(false);
+    expect(row.netInvested).toBe(45000);
+    expect(row.profit).toBe(5000);
+    expect(row.returnPercent).toBeCloseTo(11.11, 2);
+    expect(row.xirr).toBeUndefined();
+  });
+
+
+  it("keeps invested as remaining cost basis after a partial sale", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push({ id: "acct", name: "Broker", institution: "Broker", type: "indian_stock", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "inst", name: "Stock", type: "indian_stock", symbol: "STOCK", currency: "INR", country: "IN", category: "Equity", issuer: "Company", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.transactions.push(
+      { id: "buy", accountId: "acct", instrumentId: "inst", date: "2026-01-01", type: "buy", quantity: 10, amount: 1000, currency: "INR", fees: 0, taxes: 0, source: { type: "import" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "sell", accountId: "acct", instrumentId: "inst", date: "2026-06-01", type: "sell", quantity: 4, amount: 600, currency: "INR", fees: 0, taxes: 0, source: { type: "import" }, userModified: false, createdAt: "2026-06-01T00:00:00.000Z", updatedAt: "2026-06-01T00:00:00.000Z" }
+    );
+    backup.manualBalances.push({ id: "bal", accountId: "acct", instrumentId: "inst", label: "Stock", category: "Equity", currency: "INR", value: 900, quantity: 6, price: 150, asOfDate: "2027-01-01", source: { type: "import", provider: "test" }, userModified: false, createdAt: "2027-01-01T00:00:00.000Z", updatedAt: "2027-01-01T00:00:00.000Z" });
+
+    const row = calculateHoldingReturns(backup).get("bal")!;
+
+    expect(row.invested).toBe(600);
+    expect(row.netInvested).toBe(600);
+    expect(row.cashOut).toBe(600);
+    expect(row.profit).toBe(300);
+    expect(row.returnPercent).toBe(50);
+  });
+
   it("returns null XIRR when holding FX is missing", () => {
     const backup = createEmptyBackup("INR");
     backup.accounts.push({ id: "acct", name: "US", institution: "Broker", type: "us_stock", currency: "USD", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });

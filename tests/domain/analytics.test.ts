@@ -207,6 +207,34 @@ describe("portfolio analytics", () => {
 
     expect(insights.xirrBase).toBeCloseTo(9.88, 1);
   });
+
+  it("does not double count broker funding and security trades as portfolio cash in", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push(
+      { id: "acct_cash", name: "Broker Cash", institution: "INDMoney", type: "cash", currency: "USD", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "acct_stock", name: "Broker Stocks", institution: "INDMoney", type: "us_stock", currency: "USD", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.instruments.push(
+      { id: "inst_cash", name: "USD Cash", type: "cash", symbol: "USD", currency: "USD", country: "US", category: "Cash", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "inst_stock", name: "AAPL", type: "us_stock", symbol: "AAPL", currency: "USD", country: "US", category: "Equity", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.transactions.push(
+      { id: "deposit", accountId: "acct_cash", instrumentId: "inst_cash", date: "2025-01-01", type: "deposit", amount: 1000, currency: "USD", fees: 0, taxes: 0, source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" },
+      { id: "buy", accountId: "acct_stock", instrumentId: "inst_stock", date: "2025-01-02", type: "buy", quantity: 10, amount: 1000, currency: "USD", fees: 0, taxes: 0, source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2025-01-02T00:00:00.000Z", updatedAt: "2025-01-02T00:00:00.000Z" }
+    );
+    backup.manualBalances.push({ id: "bal", accountId: "acct_stock", instrumentId: "inst_stock", label: "AAPL", category: "Equity", currency: "USD", value: 1200, quantity: 10, price: 120, asOfDate: "2026-01-01", source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.priceSnapshots.push(
+      { id: "fx_2025", instrumentId: "USDINR", price: 80, currency: "INR", asOfDate: "2025-01-01", source: "test", createdAt: "2025-01-01T00:00:00.000Z" },
+      { id: "fx_2026", instrumentId: "USDINR", price: 85, currency: "INR", asOfDate: "2026-01-01", source: "test", createdAt: "2026-01-01T00:00:00.000Z" }
+    );
+
+    const insights = calculatePortfolioInsights(backup);
+
+    expect(insights.transactionStats.externalCashInBase).toBe(80000);
+    expect(insights.transactionStats.tradeBuyBase).toBe(80000);
+    expect(insights.transactionStats.investedBase).toBe(80000);
+    expect(insights.xirrBase).toBeCloseTo(27.52, 1);
+  });
 });
 
 describe("INR-first multi-currency analytics", () => {

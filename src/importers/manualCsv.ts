@@ -31,6 +31,9 @@ type NormalizedBalanceRow = Required<{
   category: string;
   currency: string;
   current_value: string;
+  invested_amount: string;
+  invested_currency: string;
+  invested_as_of_date: string;
   as_of_date: string;
   quantity: string;
   price: string;
@@ -122,6 +125,9 @@ function parseBalanceCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOption
     const category = categorySchema.safeParse(normalized.category);
     const currency = currencySchema.safeParse(normalized.currency);
     const value = Number(normalized.current_value);
+    const investedAmount = optionalNumber(normalized.invested_amount);
+    const investedCurrency = normalized.invested_currency || normalized.currency;
+    const investedAsOfDate = normalized.invested_as_of_date || normalized.as_of_date;
 
     if (!normalized.account_name || !normalized.asset_name) {
       errors.push({ row: rowNumber, message: "Missing account/institution or name" });
@@ -147,6 +153,14 @@ function parseBalanceCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOption
       errors.push({ row: rowNumber, message: "Invalid as_of_date: " + normalized.as_of_date });
       return;
     }
+    if (investedAmount !== undefined && !currencySchema.safeParse(investedCurrency).success) {
+      errors.push({ row: rowNumber, message: "Invalid invested_currency: " + investedCurrency });
+      return;
+    }
+    if (investedAmount !== undefined && !isIsoDate(investedAsOfDate)) {
+      errors.push({ row: rowNumber, message: "Invalid invested_as_of_date: " + investedAsOfDate });
+      return;
+    }
 
     const accountId = ensureAccount(accounts, normalized, now);
     const instrumentId = ensureInstrument(instruments, normalized, now);
@@ -161,6 +175,9 @@ function parseBalanceCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOption
       category: category.data,
       currency: normalized.currency,
       value,
+      investedAmount,
+      investedCurrency: investedAmount === undefined ? undefined : investedCurrency,
+      investedAsOfDate: investedAmount === undefined ? undefined : investedAsOfDate,
       quantity: optionalNumber(normalized.quantity),
       price: optionalNumber(normalized.price),
       asOfDate: normalized.as_of_date,
@@ -379,6 +396,9 @@ function normalizeBalanceRow(row: ManualCsvRow): NormalizedBalanceRow {
     category: normalizeCategory(pick(row, "category", "asset_category"), assetType),
     currency,
     current_value: cleanNumber(pick(row, "current_value", "value", "balance", "market_value")),
+    invested_amount: cleanNumber(pick(row, "invested_amount", "invested", "cost_basis", "contribution_amount")),
+    invested_currency: pick(row, "invested_currency") ? normalizeCurrency(pick(row, "invested_currency"), assetType) : "",
+    invested_as_of_date: parseDateCell(pick(row, "invested_as_of_date", "invested_date", "contribution_date")) || parseDateCell(pick(row, "as_of_date", "date", "valuation_date")),
     as_of_date: parseDateCell(pick(row, "as_of_date", "date", "valuation_date")),
     quantity: cleanNumber(pick(row, "quantity", "units", "shares")),
     price: cleanNumber(pick(row, "price", "nav", "unit_price")),

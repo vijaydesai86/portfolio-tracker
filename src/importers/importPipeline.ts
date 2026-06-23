@@ -5,6 +5,7 @@ export type CommitOptions = {
   importId: string;
   fileName?: string;
   now?: string;
+  label?: string;
 };
 
 export type CommitResult = {
@@ -82,6 +83,7 @@ function commitManualParsedImport(backup: PortfolioBackup, parsed: ManualCsvResu
     id: options.importId,
     provider: options.provider,
     fileName: options.fileName,
+    label: options.label,
     status: parsed.errors.length === 0 ? "committed" : "failed",
     confidence: "high",
     createdAt: now,

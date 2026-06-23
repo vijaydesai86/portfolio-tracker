@@ -4,6 +4,7 @@ import { AlertTriangle, Download, FileJson, LayoutDashboard, Pencil, RefreshCw, 
 import { useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
+import { deleteImportRunFromBackup, deleteTransactionFromBackup } from "@/src/domain/deleteRecords";
 import { buildReadinessModules, type ReadinessModule } from "@/src/domain/assetModules";
 import { lossWatchlist, topGainContributors, type HoldingPerformanceRow } from "@/src/domain/holdingPerformance";
 import { calculateHoldingReturns, type HoldingReturn } from "@/src/domain/holdingReturns";
@@ -20,7 +21,7 @@ import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
 import { createEmptyBackup, parseBackup, type AssetCategory, type ManualBalance, type PortfolioBackup, type Transaction } from "@/src/schema/backup";
 
-const sampleTemplate = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,notes\ncash-main,2026-06-22,Manual,cash,Cash Wallet,10000,INR,Cash,liquid cash\nespp-contribution,2026-06-22,Employer,espp,ESPP Contribution,2000,USD,Equity,total contribution only\nppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,300000,INR,Debt,latest known balance`;
+const sampleTemplate = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes\ncash-main,2026-06-22,Manual,cash,Cash Wallet,10000,INR,Cash,,,,liquid cash\nespp-contribution,2026-06-22,Employer,espp,ESPP Contribution,2000,USD,Equity,2000,USD,2026-06-22,total contribution only\nppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,300000,INR,Debt,250000,INR,2026-06-22,latest known balance`;
 
 const categoryOrder: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
 const chartColors = ["#0e7490", "#2563eb", "#8b5cf6", "#d97706", "#059669", "#dc2626", "#64748b", "#0891b2"];
@@ -64,6 +65,7 @@ export function TrackerApp() {
   const [npsParse, setNpsParse] = useState<NpsParseResult[] | null>(null);
   const [stagedNps, setStagedNps] = useState<NpsCanonicalImport[] | null>(null);
   const [status, setStatus] = useState("Empty local portfolio. Import a manual CSV, CAS PDF, INDMoney XLSX, or restore a backup.");
+  const [importLabel, setImportLabel] = useState("");
   const [fxRate, setFxRate] = useState("");
   const [fxDate, setFxDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [fxCsv, setFxCsv] = useState("date,rate\n2026-06-22,83.50");
@@ -81,24 +83,29 @@ export function TrackerApp() {
   const allocation = summary.allocation;
   const holdingReturns = useMemo(() => calculateHoldingReturns(backup), [backup]);
   const performance = useMemo(() => {
-    const grossCashIn = insights.transactionStats.investedBase;
+    const grossCashIn = insights.transactionStats.externalCashInBase;
     const current = summary.netWorth;
-    const cashOut = insights.transactionStats.incomeBase;
+    const cashOut = insights.transactionStats.externalCashOutBase;
     const feesAndTax = insights.transactionStats.feesAndTaxesBase;
-    const netInvested = grossCashIn - cashOut;
-    const currentProfit = current - netInvested;
-    const totalProfit = currentProfit - feesAndTax;
+    const knownReturns = [...holdingReturns.values()].filter((row) => row.costBasisKnown && row.currentValue !== undefined);
+    const netInvested = knownReturns.reduce((sum, row) => sum + row.netInvested, 0);
+    const currentWithCostBasis = knownReturns.reduce((sum, row) => sum + (row.currentValue ?? 0), 0);
+    const currentProfit = knownReturns.reduce((sum, row) => sum + (row.profit ?? 0), 0);
+    const totalProfit = currentProfit;
+    const profitKnown = knownReturns.length > 0;
     return {
       grossCashIn,
       current,
       cashOut,
       feesAndTax,
       netInvested,
+      currentWithCostBasis,
       currentProfit,
       totalProfit,
-      absoluteReturnPercent: netInvested === 0 ? null : (totalProfit / netInvested) * 100
+      profitKnown,
+      absoluteReturnPercent: !profitKnown || netInvested === 0 ? null : (totalProfit / netInvested) * 100
     };
-  }, [insights.transactionStats, summary.netWorth]);
+  }, [holdingReturns, insights.transactionStats, summary.netWorth]);
 
   const chartData = useMemo(() => ({
     allocation: categoryOrder.map((category) => ({ name: category, value: allocation[category].value, percent: allocation[category].percent })).filter((item) => item.value > 0),
@@ -217,11 +224,11 @@ export function TrackerApp() {
 
   async function importCsv() {
     const importId = `manual_${Date.now()}`;
-    const result = commitManualCsvImport(backup, csv, { importId, fileName: "manual-template.csv" });
+    const result = commitManualCsvImport(backup, csv, { importId, fileName: "manual-template.csv", label: importLabel.trim() || "Manual balance CSV" });
     setBackup(result.backup);
     setErrors(result.errors.map((error) => `Row ${error.row}: ${error.message}`));
     const message = `Manual CSV committed: ${result.addedBalances} holding(s), ${result.addedTransactions} transaction(s), ${result.addedPrices} price row(s); ${result.skippedDuplicates} duplicate(s) skipped.`;
-    if (result.errors.length === 0 && result.addedTransactions > 0) {
+    if (result.errors.length === 0 && shouldRefreshAfterImport(result.backup, result.addedTransactions)) {
       await refreshMarketDataFor(result.backup, message);
     } else {
       setStatus(message);
@@ -270,7 +277,9 @@ export function TrackerApp() {
     const detection = detectImportSource({ fileName: file.name, mimeType: file.type, textSample });
     setNativeDetection(detection);
 
-    if (detection.providerId === "cas_pdf") {
+    if (detection.providerId === "canonical_json") {
+      setStatus(`${detection.label}: restore the backup in browser.`);
+    } else if (detection.providerId === "cas_pdf") {
       setStatus(`${detection.label}: enter the PDF password and parse in browser.`);
     } else if (detection.providerId === "manual_csv" && detection.nativeInputType === "csv") {
       setStatus(`${detection.label}: parse the manual CSV in browser.`);
@@ -291,6 +300,15 @@ export function TrackerApp() {
     }
   }
 
+  async function restoreNativeBackup() {
+    const nativeFile = nativeFiles[0];
+    if (!nativeFile) {
+      setErrors(["Select a JSON backup first."]);
+      return;
+    }
+    await restoreBackup(nativeFile);
+  }
+
   async function parseManualNativeInBrowser() {
     const nativeFile = nativeFiles[0];
     if (!nativeFile) {
@@ -307,11 +325,11 @@ export function TrackerApp() {
 
     try {
       const importId = "manual_" + Date.now();
-      const result = commitManualCsvImport(backup, await nativeFile.text(), { importId, fileName: nativeFile.name });
+      const result = commitManualCsvImport(backup, await nativeFile.text(), { importId, fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name });
       setBackup(result.backup);
       setErrors(result.errors.map((error) => "Row " + error.row + ": " + error.message));
       const message = "Manual CSV committed: " + result.addedBalances + " holding(s), " + result.addedTransactions + " transaction(s), " + result.addedPrices + " price row(s) added; " + result.skippedDuplicates + " duplicate(s) skipped.";
-      if (result.errors.length === 0 && result.addedTransactions > 0) {
+      if (result.errors.length === 0 && shouldRefreshAfterImport(result.backup, result.addedTransactions)) {
         await refreshMarketDataFor(result.backup, message);
       } else {
         setStatus(message);
@@ -453,7 +471,7 @@ export function TrackerApp() {
 
   async function commitStagedCas() {
     if (!stagedCas) return;
-    const next = applyCanonicalCasImport(backup, stagedCas);
+    const next = applyCanonicalCasImport(backup, withImportLabel(stagedCas, importLabel.trim()));
     setBackup(next);
     setErrors([]);
     setStagedCas(null);
@@ -462,7 +480,7 @@ export function TrackerApp() {
 
   async function commitStagedIndMoney() {
     if (!stagedInd) return;
-    const next = applyCanonicalIndMoneyImport(backup, stagedInd);
+    const next = applyCanonicalIndMoneyImport(backup, withImportLabel(stagedInd, importLabel.trim()));
     setBackup(next);
     setErrors([]);
     setStagedInd(null);
@@ -471,7 +489,7 @@ export function TrackerApp() {
 
   function commitStagedEpfo() {
     if (!stagedEpfo || stagedEpfo.length === 0) return;
-    const next = stagedEpfo.reduce((current, imported) => applyCanonicalEpfoImport(current, imported), backup);
+    const next = stagedEpfo.reduce((current, imported) => applyCanonicalEpfoImport(current, withImportLabel(imported, importLabel.trim())), backup);
     setBackup(next);
     setErrors([]);
     setStagedEpfo(null);
@@ -481,7 +499,7 @@ export function TrackerApp() {
 
   function commitStagedNps() {
     if (!stagedNps || stagedNps.length === 0) return;
-    const next = stagedNps.reduce((current, imported) => applyCanonicalNpsImport(current, imported), backup);
+    const next = stagedNps.reduce((current, imported) => applyCanonicalNpsImport(current, withImportLabel(imported, importLabel.trim())), backup);
     setBackup(next);
     setErrors([]);
     setStagedNps(null);
@@ -608,6 +626,25 @@ export function TrackerApp() {
     setStatus("Holding edit saved locally. Export backup to preserve browser edits outside this device.");
   }
 
+  function shouldRefreshAfterImport(portfolio: PortfolioBackup, addedTransactions: number): boolean {
+    return addedTransactions > 0 || portfolio.manualBalances.some((balance) => balance.currency !== portfolio.baseCurrency);
+  }
+
+  function withImportLabel<T extends { importRun: { label?: string; fileName?: string } }>(imported: T, label: string): T {
+    if (!label) return imported;
+    return { ...imported, importRun: { ...imported.importRun, label } };
+  }
+
+  function deleteImport(importId: string) {
+    setBackup((current) => deleteImportRunFromBackup(current, importId));
+    setStatus("Import deleted locally. Export backup to preserve this deletion outside this device.");
+  }
+
+  function deleteTransaction(transactionId: string) {
+    setBackup((current) => deleteTransactionFromBackup(current, transactionId));
+    setStatus("Transaction deleted locally. Review related holdings if the transaction backed a manually derived position.");
+  }
+
   function updateTransaction(transactionId: string, patch: Partial<Transaction>) {
     const now = new Date().toISOString();
     setBackup((current) => ({
@@ -662,8 +699,8 @@ export function TrackerApp() {
               <div className="hero-stack">
                 <div className={"profit-tile " + (performance.totalProfit >= 0 ? "positive" : "negative")}>
                   <span>Total Profit / Loss</span>
-                  <strong>{formatMoney(performance.totalProfit, backup.baseCurrency)}</strong>
-                  <small>{performance.absoluteReturnPercent === null ? "Return unavailable" : performance.absoluteReturnPercent.toFixed(2) + "% simple return after fees/tax"}</small>
+                  <strong>{performance.profitKnown ? formatMoney(performance.totalProfit, backup.baseCurrency) : "-"}</strong>
+                  <small>{performance.absoluteReturnPercent === null ? "Return unavailable" : performance.absoluteReturnPercent.toFixed(2) + "% simple return"}</small>
                 </div>
                 <div className="xirr-tile">
                   <span>XIRR</span>
@@ -684,7 +721,7 @@ export function TrackerApp() {
                 <div className="wealth-strip main-wealth-strip">
                   <Metric label="Invested" value={formatMoney(performance.netInvested, backup.baseCurrency)} />
                   <Metric label="Current Value" value={formatMoney(performance.current, backup.baseCurrency)} />
-                  <Metric label="Profit / Loss" value={formatMoney(performance.totalProfit, backup.baseCurrency)} />
+                  <Metric label="Profit / Loss" value={performance.profitKnown ? formatMoney(performance.totalProfit, backup.baseCurrency) : "-"} />
                 </div>
                 <div className="feature-grid">
                   <ChartCard title="Current Allocation Explorer"><CurrentAllocationExplorer datasets={chartData} currency={backup.baseCurrency} /></ChartCard>
@@ -694,10 +731,10 @@ export function TrackerApp() {
                   </div>
                 </div>
                 <div className="sub-analytics-strip">
-                  <MiniInsight label="Lifetime Cash In" value={formatMoney(performance.grossCashIn, backup.baseCurrency)} detail="buy, SIP, deposit, contribution" />
-                  <MiniInsight label="Lifetime Cash Out" value={formatMoney(performance.cashOut, backup.baseCurrency)} detail="sell, redemption, dividend, interest, maturity, withdrawal" />
+                  <MiniInsight label="External Cash In" value={formatMoney(performance.grossCashIn, backup.baseCurrency)} detail="broker deposits, direct buys, SIPs, contributions" />
+                  <MiniInsight label="External Cash Out" value={formatMoney(performance.cashOut, backup.baseCurrency)} detail="withdrawals, redemptions, dividends outside cash-ledger brokers" />
                   <MiniInsight label="Fees & Taxes" value={formatMoney(performance.feesAndTax, backup.baseCurrency)} detail="recorded charges and tax fields" />
-                  <MiniInsight label="Current P/L Before Fees" value={formatMoney(performance.currentProfit, backup.baseCurrency)} detail="current value minus net invested" />
+                  <MiniInsight label="Current P/L" value={performance.profitKnown ? formatMoney(performance.currentProfit, backup.baseCurrency) : "-"} detail="only where invested/cost is known" />
                 </div>
               </div>
             )}
@@ -819,7 +856,7 @@ export function TrackerApp() {
               <div className="transaction-list">
                 {filteredTransactions.length === 0 ? <p className="message">No transactions match the current search.</p> : filteredTransactions.slice(0, 300).map((tx) => (
                   transactionEditMode ?
-                    <TransactionEditRow key={tx.id} tx={tx} updateTransaction={updateTransaction} /> :
+                    <TransactionEditRow key={tx.id} tx={tx} updateTransaction={updateTransaction} deleteTransaction={deleteTransaction} /> :
                     <TransactionRow key={tx.id} tx={tx} backup={backup} />
                 ))}
               </div>
@@ -828,7 +865,7 @@ export function TrackerApp() {
           </section>
         )}
 
-        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
+        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, importLabel, setImportLabel, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
 
         {view === "backup" && (
           <section className="grid two">
@@ -846,12 +883,16 @@ function ImportsView(props: {
   csv: string;
   setCsv: (value: string) => void;
   importCsv: () => void;
+  importLabel: string;
+  setImportLabel: (value: string) => void;
+  deleteImport: (importId: string) => void;
   nativeDetection: ImportDetection | null;
   inspectNativeFile: (files: FileList | File[] | undefined) => void;
   nativeFileCount: number;
   casPassword: string;
   setCasPassword: (value: string) => void;
   parseCasPdfInBrowser: () => void;
+  restoreNativeBackup: () => void;
   parseManualNativeInBrowser: () => void;
   parseIndMoneyXlsxInBrowser: () => void;
   parseEpfoPdfInBrowser: () => void;
@@ -894,8 +935,10 @@ function ImportsView(props: {
       <div className="grid two">
         <div className="card">
           <h2>Native File Intake</h2>
+          <input placeholder="Import name" value={props.importLabel} onChange={(event) => props.setImportLabel(event.target.value)} />
           <input type="file" multiple accept=".json,.csv,.pdf,.html,.xlsx,application/json,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => props.inspectNativeFile(event.target.files ?? undefined)} />
           {props.nativeDetection && <div className="detection"><div><span>Provider</span><strong>{props.nativeDetection.label}</strong></div><div><span>Files</span><strong>{props.nativeFileCount}</strong></div><div><span>Status</span><strong>{props.nativeDetection.status}</strong></div><div><span>Type</span><strong>{props.nativeDetection.nativeInputType}</strong></div><div><span>Confidence</span><strong>{props.nativeDetection.confidence}</strong></div><p>{props.nativeDetection.reason}</p></div>}
+          {props.nativeDetection?.providerId === "canonical_json" && <div className="native-actions"><button className="primary" onClick={props.restoreNativeBackup}>Restore JSON Backup</button></div>}
           {props.nativeDetection?.providerId === "cas_pdf" && <div className="native-actions"><input type="password" placeholder="CAS PDF password" value={props.casPassword} onChange={(event) => props.setCasPassword(event.target.value)} /><button className="primary" onClick={props.parseCasPdfInBrowser}>Parse CAS PDF</button></div>}
           {props.nativeDetection?.providerId === "manual_csv" && props.nativeDetection.nativeInputType === "csv" && <div className="native-actions"><button className="primary" onClick={props.parseManualNativeInBrowser}>Parse Manual CSV</button></div>}
           {props.nativeDetection?.providerId === "indmoney_export" && <div className="native-actions"><button className="primary" onClick={props.parseIndMoneyXlsxInBrowser}>Parse INDMoney XLSX</button></div>}
@@ -912,7 +955,7 @@ function ImportsView(props: {
       <div className="grid two">
         <div className="card"><h2>USD/INR FX Rates</h2><div className="native-actions"><input type="number" step="0.0001" placeholder="USD/INR rate" value={props.fxRate} onChange={(event) => props.setFxRate(event.target.value)} /><input type="date" value={props.fxDate} onChange={(event) => props.setFxDate(event.target.value)} /><button className="primary" onClick={props.applyManualFxRate}>Add Rate</button></div><p className="message">Use a real USD/INR rate. Current holdings use the latest rate; transaction analytics use rates on or before each transaction date.</p><input type="file" accept=".csv,text/csv" onChange={(event) => props.importFxCsvFile(event.target.files?.[0])} /><textarea value={props.fxCsv} onChange={(event) => props.setFxCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importFxCsvText}>Import FX CSV</button></div></div>
         <div className="card"><h2>Manual Balance CSV</h2><p className="message">Use the committed templates for normal uploads. This text box is the same balance CSV parser for quick cash, ESPP contribution, PPF, SSY, FD, EPF, NPS, gold, and other balance entries.</p><textarea value={props.csv} onChange={(event) => props.setCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importCsv}>Stage and Commit</button></div></div>
-        <div className="card"><h2>Import History</h2>{props.backup.imports.length === 0 ? <p className="message">No imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Provider</th><th>Status</th><th>Confidence</th><th>Created</th></tr></thead><tbody>{props.backup.imports.map((run) => <tr key={run.id}><td>{run.provider}</td><td>{run.status}</td><td>{run.confidence}</td><td>{new Date(run.createdAt).toLocaleString()}</td></tr>)}</tbody></table></div>}</div>
+        <div className="card"><h2>Import History</h2>{props.backup.imports.length === 0 ? <p className="message">No imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Name</th><th>Provider</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>{props.backup.imports.map((run) => <tr key={run.id}><td>{run.label ?? run.fileName ?? run.id}</td><td>{run.provider}</td><td>{run.status}</td><td>{new Date(run.createdAt).toLocaleString()}</td><td><button className="danger-button" onClick={() => props.deleteImport(run.id)}>Delete</button></td></tr>)}</tbody></table></div>}</div>
       </div>
     </section>
   );
@@ -1090,10 +1133,12 @@ function PercentBar({ data }: { data: Array<{ name: string; value: number }> }) 
 function HoldingRow({ holding, baseCurrency, returns }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; returns?: HoldingReturn }) {
   const value = holding.valueInBase === undefined ? "FX needed" : formatMoney(holding.valueInBase, baseCurrency);
   const profitTone = (returns?.profit ?? 0) >= 0 ? "positive-text" : "negative-text";
-  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong><small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Invested</span><strong>{formatMoney(returns?.netInvested ?? 0, baseCurrency)}</strong><small>net of cash out</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{returns?.missingFx.length ? "FX needed" : "cash-flow return"}</small></div></div>;
+  const costKnown = returns?.costBasisKnown === true;
+  const xirrDetail = returns?.missingFx.length ? "FX needed" : returns?.hasCashFlows ? "cash-flow return" : "needs transactions";
+  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong><small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Invested</span><strong>{costKnown ? formatMoney(returns?.netInvested ?? 0, baseCurrency) : "-"}</strong><small>{costKnown ? "remaining cost basis" : "not provided"}</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{xirrDetail}</small></div></div>;
 }
 function HoldingEditRow({ balance, updateBalance }: { balance: ManualBalance; updateBalance: (id: string, patch: Partial<ManualBalance>) => void }) {
-  return <div className="edit-row holding-edit-row"><input value={balance.label} onChange={(event) => updateBalance(balance.id, { label: event.target.value })} /><select value={balance.category} onChange={(event) => updateBalance(balance.id, { category: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select><input value={balance.currency} onChange={(event) => updateBalance(balance.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={balance.value} onChange={(event) => updateBalance(balance.id, { value: Number(event.target.value) })} /><input type="number" step="0.000001" value={balance.quantity ?? ""} onChange={(event) => updateBalance(balance.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={balance.price ?? ""} onChange={(event) => updateBalance(balance.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="date" value={balance.asOfDate} onChange={(event) => updateBalance(balance.id, { asOfDate: event.target.value })} /><input value={balance.notes ?? ""} onChange={(event) => updateBalance(balance.id, { notes: event.target.value })} /></div>;
+  return <div className="edit-row holding-edit-row"><input value={balance.label} onChange={(event) => updateBalance(balance.id, { label: event.target.value })} /><select value={balance.category} onChange={(event) => updateBalance(balance.id, { category: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select><input value={balance.currency} onChange={(event) => updateBalance(balance.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={balance.value} onChange={(event) => updateBalance(balance.id, { value: Number(event.target.value) })} /><input type="number" step="0.01" placeholder="Invested" value={balance.investedAmount ?? ""} onChange={(event) => updateBalance(balance.id, { investedAmount: event.target.value === "" ? undefined : Number(event.target.value) })} /><input placeholder="Inv curr" value={balance.investedCurrency ?? ""} onChange={(event) => updateBalance(balance.id, { investedCurrency: event.target.value === "" ? undefined : event.target.value.toUpperCase() })} /><input type="date" value={balance.investedAsOfDate ?? balance.asOfDate} onChange={(event) => updateBalance(balance.id, { investedAsOfDate: event.target.value })} /><input type="number" step="0.000001" value={balance.quantity ?? ""} onChange={(event) => updateBalance(balance.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={balance.price ?? ""} onChange={(event) => updateBalance(balance.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="date" value={balance.asOfDate} onChange={(event) => updateBalance(balance.id, { asOfDate: event.target.value })} /><input value={balance.notes ?? ""} onChange={(event) => updateBalance(balance.id, { notes: event.target.value })} /></div>;
 }
 
 function TransactionRow({ tx, backup }: { tx: Transaction; backup: PortfolioBackup }) {
@@ -1101,9 +1146,10 @@ function TransactionRow({ tx, backup }: { tx: Transaction; backup: PortfolioBack
   return <div className="transaction-row pro-row"><div className="record-main"><strong>{tx.date} · {tx.type}</strong><span title={instrument?.name}>{displayHoldingName(instrument?.name ?? tx.instrumentId)} · {tx.source.provider ?? tx.source.type}</span></div><div className="record-value">{formatMoney(tx.amount, tx.currency)}</div><div className="record-value muted-value">{tx.quantity === undefined ? "-" : formatNumber(tx.quantity)}</div><div className="record-value muted-value">{tx.fees || tx.taxes ? formatMoney((tx.fees ?? 0) + (tx.taxes ?? 0), tx.currency) : "-"}</div></div>;
 }
 
-function TransactionEditRow({ tx, updateTransaction }: { tx: Transaction; updateTransaction: (id: string, patch: Partial<Transaction>) => void }) {
-  return <div className="edit-row transaction-edit-row"><input type="date" value={tx.date} onChange={(event) => updateTransaction(tx.id, { date: event.target.value })} /><select value={tx.type} onChange={(event) => updateTransaction(tx.id, { type: event.target.value as Transaction["type"] })}>{transactionTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select><input value={tx.currency} onChange={(event) => updateTransaction(tx.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={tx.amount} onChange={(event) => updateTransaction(tx.id, { amount: Number(event.target.value) })} /><input type="number" step="0.000001" value={tx.quantity ?? ""} onChange={(event) => updateTransaction(tx.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={tx.price ?? ""} onChange={(event) => updateTransaction(tx.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.01" value={tx.fees ?? 0} onChange={(event) => updateTransaction(tx.id, { fees: Number(event.target.value) })} /><input type="number" step="0.01" value={tx.taxes ?? 0} onChange={(event) => updateTransaction(tx.id, { taxes: Number(event.target.value) })} /></div>;
+function TransactionEditRow({ tx, updateTransaction, deleteTransaction }: { tx: Transaction; updateTransaction: (id: string, patch: Partial<Transaction>) => void; deleteTransaction: (id: string) => void }) {
+  return <div className="edit-row transaction-edit-row"><input type="date" value={tx.date} onChange={(event) => updateTransaction(tx.id, { date: event.target.value })} /><select value={tx.type} onChange={(event) => updateTransaction(tx.id, { type: event.target.value as Transaction["type"] })}>{transactionTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select><input value={tx.currency} onChange={(event) => updateTransaction(tx.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={tx.amount} onChange={(event) => updateTransaction(tx.id, { amount: Number(event.target.value) })} /><input type="number" step="0.000001" value={tx.quantity ?? ""} onChange={(event) => updateTransaction(tx.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={tx.price ?? ""} onChange={(event) => updateTransaction(tx.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.01" value={tx.fees ?? 0} onChange={(event) => updateTransaction(tx.id, { fees: Number(event.target.value) })} /><input type="number" step="0.01" value={tx.taxes ?? 0} onChange={(event) => updateTransaction(tx.id, { taxes: Number(event.target.value) })} /><button className="danger-button" onClick={() => deleteTransaction(tx.id)}>Delete</button></div>;
 }
+
 
 function daysSince(date: string): number {
   const parsed = Date.parse(date + "T00:00:00.000Z");

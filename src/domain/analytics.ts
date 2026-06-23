@@ -49,6 +49,14 @@ export type PortfolioInsights = {
     investedByCurrency: Record<string, number>;
     incomeByCurrency: Record<string, number>;
     feesAndTaxesByCurrency: Record<string, number>;
+    externalCashInBase: number;
+    externalCashOutBase: number;
+    tradeBuyBase: number;
+    tradeSellBase: number;
+    externalCashInByCurrency: Record<string, number>;
+    externalCashOutByCurrency: Record<string, number>;
+    tradeBuyByCurrency: Record<string, number>;
+    tradeSellByCurrency: Record<string, number>;
     missingFx: string[];
   };
   xirrBase: number | null;
@@ -88,7 +96,7 @@ export function calculatePortfolioInsights(backup: PortfolioBackup): PortfolioIn
   const holdings = backup.manualBalances.map((balance) => buildHoldingInsight(balance, backup, missing));
   const totalsByCategory = categories.map((category) => ({ name: category, ...summary.allocation[category] }));
   const terminalFlowsByCurrency = terminalFlows(backup.manualBalances);
-  const txFlowsByCurrency = transactionFlows(backup.transactions);
+  const txFlowsByCurrency = transactionFlows(backup.transactions, backup);
   const xirrByCurrency: Record<string, number | null> = {};
 
   for (const currency of new Set([...Object.keys(txFlowsByCurrency), ...Object.keys(terminalFlowsByCurrency)])) {
@@ -210,9 +218,17 @@ function transactionStats(transactions: Transaction[], backup: PortfolioBackup, 
   const investedByCurrency: Record<string, number> = {};
   const incomeByCurrency: Record<string, number> = {};
   const feesAndTaxesByCurrency: Record<string, number> = {};
+  const externalCashInByCurrency: Record<string, number> = {};
+  const externalCashOutByCurrency: Record<string, number> = {};
+  const tradeBuyByCurrency: Record<string, number> = {};
+  const tradeSellByCurrency: Record<string, number> = {};
   let investedBase = 0;
   let incomeBase = 0;
   let feesAndTaxesBase = 0;
+  let externalCashInBase = 0;
+  let externalCashOutBase = 0;
+  let tradeBuyBase = 0;
+  let tradeSellBase = 0;
 
   for (const tx of transactions) {
     const converted = tryConvertToBase(tx.amount, tx.currency, backup, tx.date);
@@ -222,25 +238,43 @@ function transactionStats(transactions: Transaction[], backup: PortfolioBackup, 
       missingFx.add(tx.currency + "/" + backup.baseCurrency + " on/after " + tx.date);
     }
 
-    if (["buy", "sip", "deposit", "contribution"].includes(tx.type)) {
-      add(investedByCurrency, tx.currency, tx.amount);
-      if (converted !== undefined) investedBase += converted;
+    const amount = Math.abs(tx.amount);
+    const role = portfolioFlowRole(tx, backup);
+    if (role === "capital_in") {
+      add(investedByCurrency, tx.currency, amount);
+      add(externalCashInByCurrency, tx.currency, amount);
+      if (converted !== undefined) {
+        investedBase += Math.abs(converted);
+        externalCashInBase += Math.abs(converted);
+      }
     }
-    if (["sell", "redemption", "dividend", "interest", "maturity", "withdrawal"].includes(tx.type)) {
-      add(incomeByCurrency, tx.currency, tx.amount);
-      if (converted !== undefined) incomeBase += converted;
+    if (role === "capital_out") {
+      add(incomeByCurrency, tx.currency, amount);
+      add(externalCashOutByCurrency, tx.currency, amount);
+      if (converted !== undefined) {
+        incomeBase += Math.abs(converted);
+        externalCashOutBase += Math.abs(converted);
+      }
+    }
+    if (tradeBuyTypes.has(tx.type)) {
+      add(tradeBuyByCurrency, tx.currency, amount);
+      if (converted !== undefined) tradeBuyBase += Math.abs(converted);
+    }
+    if (tradeSellTypes.has(tx.type)) {
+      add(tradeSellByCurrency, tx.currency, amount);
+      if (converted !== undefined) tradeSellBase += Math.abs(converted);
     }
     if (["fee", "tax"].includes(tx.type)) {
-      add(feesAndTaxesByCurrency, tx.currency, tx.amount);
-      if (converted !== undefined) feesAndTaxesBase += converted;
+      add(feesAndTaxesByCurrency, tx.currency, amount);
+      if (converted !== undefined) feesAndTaxesBase += Math.abs(converted);
     }
     if (tx.fees) {
-      add(feesAndTaxesByCurrency, tx.currency, tx.fees);
-      if (convertedFees !== undefined) feesAndTaxesBase += convertedFees;
+      add(feesAndTaxesByCurrency, tx.currency, Math.abs(tx.fees));
+      if (convertedFees !== undefined) feesAndTaxesBase += Math.abs(convertedFees);
     }
     if (tx.taxes) {
-      add(feesAndTaxesByCurrency, tx.currency, tx.taxes);
-      if (convertedTaxes !== undefined) feesAndTaxesBase += convertedTaxes;
+      add(feesAndTaxesByCurrency, tx.currency, Math.abs(tx.taxes));
+      if (convertedTaxes !== undefined) feesAndTaxesBase += Math.abs(convertedTaxes);
     }
   }
 
@@ -252,14 +286,22 @@ function transactionStats(transactions: Transaction[], backup: PortfolioBackup, 
     investedByCurrency: roundRecord(investedByCurrency),
     incomeByCurrency: roundRecord(incomeByCurrency),
     feesAndTaxesByCurrency: roundRecord(feesAndTaxesByCurrency),
+    externalCashInBase: roundMoney(externalCashInBase),
+    externalCashOutBase: roundMoney(externalCashOutBase),
+    tradeBuyBase: roundMoney(tradeBuyBase),
+    tradeSellBase: roundMoney(tradeSellBase),
+    externalCashInByCurrency: roundRecord(externalCashInByCurrency),
+    externalCashOutByCurrency: roundRecord(externalCashOutByCurrency),
+    tradeBuyByCurrency: roundRecord(tradeBuyByCurrency),
+    tradeSellByCurrency: roundRecord(tradeSellByCurrency),
     missingFx: []
   };
 }
 
-function transactionFlows(transactions: Transaction[]): Record<string, Array<{ date: string; amount: number }>> {
+function transactionFlows(transactions: Transaction[], backup: PortfolioBackup): Record<string, Array<{ date: string; amount: number }>> {
   const flows: Record<string, Array<{ date: string; amount: number }>> = {};
   for (const tx of transactions) {
-    const signed = signedTransactionAmount(tx);
+    const signed = signedPortfolioTransactionAmount(tx, backup);
     if (signed === 0) continue;
     flows[tx.currency] ??= [];
     flows[tx.currency].push({ date: tx.date, amount: signed });
@@ -270,7 +312,7 @@ function transactionFlows(transactions: Transaction[]): Record<string, Array<{ d
 function transactionFlowsInBase(transactions: Transaction[], backup: PortfolioBackup, missingFx: Set<string>): Array<{ date: string; amount: number }> {
   const flows: Array<{ date: string; amount: number }> = [];
   for (const tx of transactions) {
-    const signed = signedTransactionAmount(tx);
+    const signed = signedPortfolioTransactionAmount(tx, backup);
     if (signed === 0) continue;
     const converted = tryConvertToBase(signed, tx.currency, backup, tx.date);
     if (converted === undefined) {
@@ -306,12 +348,51 @@ function terminalFlowsInBase(balances: ManualBalance[], backup: PortfolioBackup,
   return flows;
 }
 
-function signedTransactionAmount(tx: Transaction): number {
+const capitalInTypes = new Set<Transaction["type"]>(["buy", "sip", "deposit", "contribution"]);
+const capitalOutTypes = new Set<Transaction["type"]>(["sell", "redemption", "dividend", "interest", "maturity", "withdrawal"]);
+const tradeBuyTypes = new Set<Transaction["type"]>(["buy", "sip"]);
+const tradeSellTypes = new Set<Transaction["type"]>(["sell", "redemption"]);
+
+type PortfolioFlowRole = "capital_in" | "capital_out" | "internal" | "fee_tax" | "none";
+
+export function signedPortfolioTransactionAmount(tx: Transaction, backup: PortfolioBackup): number {
   const charges = Math.abs(tx.fees ?? 0) + Math.abs(tx.taxes ?? 0);
-  if (["buy", "sip", "deposit", "contribution"].includes(tx.type)) return -(Math.abs(tx.amount) + charges);
-  if (["sell", "redemption", "dividend", "interest", "maturity", "withdrawal"].includes(tx.type)) return Math.abs(tx.amount) - charges;
-  if (["fee", "tax"].includes(tx.type)) return -Math.abs(tx.amount);
+  const role = portfolioFlowRole(tx, backup);
+  if (role === "capital_in") return -(Math.abs(tx.amount) + charges);
+  if (role === "capital_out") return Math.abs(tx.amount) - charges;
+  if (role === "fee_tax") return -Math.abs(tx.amount);
   return 0;
+}
+
+function portfolioFlowRole(tx: Transaction, backup: PortfolioBackup): PortfolioFlowRole {
+  if (["split", "interest_accrual", "switch_in", "switch_out"].includes(tx.type)) return "none";
+  if (["fee", "tax"].includes(tx.type)) return "fee_tax";
+
+  const isCash = isCashTransaction(tx, backup);
+  const providerHasCashLedger = transactionProviderHasCashLedger(tx, backup);
+
+  if (tx.type === "deposit") return isCash ? "capital_in" : providerHasCashLedger ? "internal" : "capital_in";
+  if (tx.type === "withdrawal") return isCash ? "capital_out" : providerHasCashLedger ? "internal" : "capital_out";
+  if (tx.type === "contribution") return "capital_in";
+  if (capitalInTypes.has(tx.type)) return providerHasCashLedger && !isCash ? "internal" : "capital_in";
+  if (capitalOutTypes.has(tx.type)) return providerHasCashLedger && !isCash ? "internal" : "capital_out";
+  return "none";
+}
+
+function transactionProviderHasCashLedger(tx: Transaction, backup: PortfolioBackup): boolean {
+  const key = transactionProviderKey(tx, backup);
+  return backup.transactions.some((item) => transactionProviderKey(item, backup) === key && isCashTransaction(item, backup) && ["deposit", "withdrawal"].includes(item.type));
+}
+
+function transactionProviderKey(tx: Transaction, backup: PortfolioBackup): string {
+  const account = backup.accounts.find((item) => item.id === tx.accountId);
+  return tx.source.provider ?? account?.institution ?? tx.accountId;
+}
+
+function isCashTransaction(tx: Transaction, backup: PortfolioBackup): boolean {
+  const account = backup.accounts.find((item) => item.id === tx.accountId);
+  const instrument = backup.instruments.find((item) => item.id === tx.instrumentId);
+  return account?.type === "cash" || instrument?.type === "cash";
 }
 
 function assetKind(instrument?: Instrument, account?: Account): string {

@@ -4,6 +4,10 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Fixed portfolio cash-flow math so brokers with cash ledgers do not double-count deposits and internal stock buys/sells, changed holding invested/P&L to remaining cost basis with FIFO partial-sale reduction, and added regression tests for both cases.
+
+- Extended manual balance CSVs with optional invested amount fields, stopped fabricating P/L for balance-only rows without cost basis, auto-refreshes FX after foreign-currency balance imports, and added named import deletion plus transaction deletion controls.
+
 - Replaced the complex manual XLSX workbook surface with simple manual transactions and balances CSV templates; transaction CSVs now derive current holdings from net quantity, manual balance CSVs cover fixed/manual assets, and browser/manual import flows refresh real market data after transaction imports.
 
 - Reworked dashboard hierarchy so current high-confidence analytics and allocation exploration lead the Overview while historical reconstruction charts move into a dedicated History tab with market-data coverage guidance.

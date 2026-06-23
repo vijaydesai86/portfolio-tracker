@@ -1,4 +1,4 @@
-import { calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
+import { calculatePortfolioSummary, signedPortfolioTransactionAmount, tryConvertToBase } from "@/src/domain/analytics";
 import type { Account, AssetCategory, Instrument, ManualBalance, PortfolioBackup, PriceSnapshot, Transaction } from "@/src/schema/backup";
 
 export type TimelineBreakdowns = {
@@ -75,13 +75,15 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
     const amount = converted === undefined ? undefined : Math.abs(converted);
     const dimensions = transactionDimensions(tx, backup);
 
-    if (amount !== undefined && cashInTypes.has(tx.type)) {
-      invested += amount;
-      addBreakdowns(investedBreakdown, dimensions, amount);
+    const signedPortfolioFlow = signedPortfolioTransactionAmount(tx, backup);
+    const convertedPortfolioFlow = signedPortfolioFlow === 0 ? undefined : tryConvertToBase(signedPortfolioFlow, tx.currency, backup, tx.date);
+    if (convertedPortfolioFlow !== undefined && convertedPortfolioFlow < 0) {
+      invested += Math.abs(convertedPortfolioFlow);
+      addBreakdowns(investedBreakdown, dimensions, Math.abs(convertedPortfolioFlow));
     }
-    if (amount !== undefined && cashOutTypes.has(tx.type)) {
-      invested -= amount;
-      addBreakdowns(investedBreakdown, dimensions, -amount);
+    if (convertedPortfolioFlow !== undefined && convertedPortfolioFlow > 0) {
+      invested -= convertedPortfolioFlow;
+      addBreakdowns(investedBreakdown, dimensions, -convertedPortfolioFlow);
     }
 
     if (tx.quantity !== undefined) {

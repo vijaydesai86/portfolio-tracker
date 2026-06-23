@@ -66,6 +66,22 @@ fidelity-us-buy-template	5/15/2026	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	
     expect(result.manualBalances[0]).toMatchObject({ label: "Arm Holdings PLC - ADR", quantity: 730, price: 350, value: 255500, currency: "USD" });
   });
 
+  it("parses optional invested fields on balance CSV rows", () => {
+    const csv = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes
+ppf-main,22-06-2026,Post Office,ppf,Public Provident Fund,50000,INR,Debt,45000,INR,22-06-2026,manual balance`;
+
+    const result = parseManualCsv(csv, { importId: "import_invested" });
+
+    expect(result.errors).toEqual([]);
+    expect(result.manualBalances[0]).toMatchObject({
+      value: 50000,
+      investedAmount: 45000,
+      investedCurrency: "INR",
+      investedAsOfDate: "2026-06-22",
+      asOfDate: "2026-06-22"
+    });
+  });
+
   it("rejects invalid categories and keeps rows out of staged data", () => {
     const csv = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category
 bad,2026-06-22,Manual,other,Bad Asset,100,INR,RealEstate`;

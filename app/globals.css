@@ -2071,3 +2071,30 @@ textarea {
     text-align: left;
   }
 }
+
+/* destructive inline actions */
+.danger-button {
+  border-color: #fecaca;
+  background: #fff5f5;
+  color: #b42318;
+}
+
+.danger-button:hover {
+  border-color: #fca5a5;
+  background: #fee2e2;
+}
+
+.holding-edit-row {
+  grid-template-columns: minmax(220px, 1.4fr) 120px 86px 120px 120px 86px 132px 110px 110px 132px minmax(160px, 1fr);
+}
+
+.transaction-edit-row {
+  grid-template-columns: 130px 140px 90px 120px 120px 120px 100px 100px 92px;
+}
+
+@media (max-width: 1300px) {
+  .holding-edit-row,
+  .transaction-edit-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

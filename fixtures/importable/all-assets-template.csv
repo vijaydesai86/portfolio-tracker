@@ -1,10 +1,10 @@
-balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,notes
-cash-main,2026-06-22,Manual,cash,Cash Balance,0,INR,Cash,Latest cash balance
-espp-contribution,2026-06-22,Employer,espp,ESPP Contribution,0,USD,Equity,Employee contribution only as requested
-ppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,0,INR,Debt,Latest statement balance
-ssy-main,2026-06-22,Bank or Post Office,ssy,Sukanya Samriddhi Account,0,INR,Debt,Latest statement balance
-epf-main,2026-06-22,EPFO,epf,EPF Balance,0,INR,Debt,Use native PF import when available; this is manual balance fallback
-nps-main,2026-06-22,NPS,nps,NPS Manual Balance,0,INR,Others,Use native NPS CSV import when available; this is manual balance fallback
-fd-main,2026-06-22,Bank,fd,Fixed Deposit,0,INR,Debt,Use current value or maturity value consistently
-manual-gold-main,2026-06-22,Manual,gold,Manual Gold Holding,0,INR,Gold,Use for physical gold or manually valued gold
-other-main,2026-06-22,Manual,other,Other Asset,0,INR,Others,Use only when no better asset type fits
+balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes
+cash-main,2026-06-22,Manual,cash,Cash Balance,0,INR,Cash,,,,Latest cash balance
+espp-contribution,2026-06-22,Employer,espp,ESPP Contribution,0,USD,Equity,,,,Employee contribution only as requested
+ppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,0,INR,Debt,,,,Latest statement balance
+ssy-main,2026-06-22,Bank or Post Office,ssy,Sukanya Samriddhi Account,0,INR,Debt,,,,Latest statement balance
+epf-main,2026-06-22,EPFO,epf,EPF Balance,0,INR,Debt,,,,Use native PF import when available; this is manual balance fallback
+nps-main,2026-06-22,NPS,nps,NPS Manual Balance,0,INR,Others,,,,Use native NPS CSV import when available; this is manual balance fallback
+fd-main,2026-06-22,Bank,fd,Fixed Deposit,0,INR,Debt,,,,Use current value or maturity value consistently
+manual-gold-main,2026-06-22,Manual,gold,Manual Gold Holding,0,INR,Gold,,,,Use for physical gold or manually valued gold
+other-main,2026-06-22,Manual,other,Other Asset,0,INR,Others,,,,Use only when no better asset type fits

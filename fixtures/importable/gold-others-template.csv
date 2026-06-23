@@ -1,3 +1,3 @@
-balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,notes
-manual-gold-main,2026-06-22,Manual,gold,Manual Gold Holding,0,INR,Gold,Manual gold balance
-other-main,2026-06-22,Manual,other,Other Asset,0,INR,Others,Manual catch-all asset
+balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes
+manual-gold-main,2026-06-22,Manual,gold,Manual Gold Holding,0,INR,Gold,,,,Manual gold balance
+other-main,2026-06-22,Manual,other,Other Asset,0,INR,Others,,,,Manual catch-all asset

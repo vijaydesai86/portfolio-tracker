@@ -61,7 +61,7 @@ Current automated CAS support includes browser PDF upload, password entry, clien
 - EPFO/PF yearly PDF browser import is implemented and private-file verified. The private raw PDF and extracted text must never be committed.
 - NPS yearly CSV statement browser import is implemented and private-file verified. NPS PDF/XLSX remains detected-only until real fixtures are available.
 - Live market refresh uses AMFI NAVAll for mutual funds, Stooq/Yahoo for US stock quotes, Yahoo NSE/BSE lookup for Indian stock quotes, and Frankfurter/Open ER API/currency-api/Stooq for USD/INR. Never replace failed market fetches with fabricated fallback prices; manual FX must be user-supplied real data.
-- Manual CSV import is implemented for `manual-transactions-template.csv` and `manual-balances-template.csv`. Do not ask users to maintain prices or FX in normal manual files; dynamic market assets should use transaction facts, while fixed/manual assets should use current balances.
+- Manual CSV import is implemented for `manual-transactions-template.csv` and `manual-balances-template.csv`. Do not ask users to maintain FX in normal manual files; dynamic market assets should use transaction facts, while fixed/manual assets should use current balances. Balance rows may include optional `invested_amount`, `invested_currency`, and `invested_as_of_date`; if absent, invested/P&L/XIRR must remain unavailable instead of treating current value as profit.
 
 ## INR-First Analytics Rule
 
@@ -69,7 +69,7 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 
 ## Portfolio Analytics Rule
 
-- Dashboard profit labels must distinguish lifetime cash in, lifetime cash out, net invested, current P/L, fees/tax, total P/L, and XIRR. Portfolio XIRR cash flows must include fee/tax fields on transactions: buy/contribution fees increase outflow, and sell/dividend/income fees reduce inflow. Main analytics should keep invested, current value, and profit/loss primary; supporting cash-flow analytics can show cash in/out and fees/taxes. Holdings analytics should show per-holding allocation, invested/net invested, P/L, simple return, and XIRR when transaction history and FX support it.
+- Dashboard profit labels must distinguish external cash in, external cash out, remaining cost basis, current P/L, fees/tax, total P/L, and XIRR. Portfolio XIRR cash flows must not double-count broker cash-ledger deposits and the security trades funded by those deposits. For brokers with explicit cash ledgers, use external deposits/withdrawals for portfolio-level flows and keep buys/sells as internal trades for cost basis. For statements without separate cash ledgers, buys/SIPs/contributions and redemptions are portfolio capital flows. Holdings analytics should show per-holding allocation, remaining cost basis, P/L, simple return, and XIRR when transaction history and FX support it.
 - New analytics panels must remain adaptive to future asset modules: PF/EPF, PPF/SSY, NPS, FD, cash, ESPP, Indian stocks, US stocks, and mutual funds.
 
 - Asset modules must be classified from structured account/instrument types, never from free-text fund or provider names.
