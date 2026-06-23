@@ -454,20 +454,29 @@ export function TrackerApp() {
       ...portfolio.transactions.filter((tx) => tx.currency === "USD").map((tx) => tx.date),
       ...portfolio.manualBalances.filter((balance) => balance.currency === "USD").map((balance) => balance.asOfDate)
     ].filter(Boolean).sort();
+    const historyDates = [
+      ...portfolio.transactions.map((tx) => tx.date),
+      ...portfolio.manualBalances.map((balance) => balance.asOfDate)
+    ].filter(Boolean).sort();
 
     if (isins.length === 0 && symbols.length === 0 && fxDates.length === 0) {
       setStatus(prefix ?? "No mutual fund ISINs, US stock symbols, or USD cash flows available for market refresh.");
       return;
     }
 
-    setStatus(prefix ? prefix + " Refreshing live market data and FX..." : "Refreshing live market data and FX...");
+    setStatus(prefix ? prefix + " Refreshing live and historical market data..." : "Refreshing live and historical market data...");
     setErrors([]);
     const params = new URLSearchParams();
     if (isins.length > 0) params.set("isins", [...new Set(isins)].join(","));
     if (symbols.length > 0) params.set("symbols", [...new Set(symbols)].join(","));
+    const today = new Date().toISOString().slice(0, 10);
     if (fxDates.length > 0) {
       params.set("fxStart", fxDates[0]);
-      params.set("fxEnd", new Date().toISOString().slice(0, 10));
+      params.set("fxEnd", today);
+    }
+    if (historyDates.length > 0 && (isins.length > 0 || symbols.length > 0)) {
+      params.set("historyStart", historyDates[0]);
+      params.set("historyEnd", today);
     }
 
     try {
@@ -477,7 +486,7 @@ export function TrackerApp() {
       setErrors(payload.errors);
       setStatus(
         (prefix ? prefix + " " : "") +
-          `Market refresh complete: ${payload.navs.length} NAV(s), ${payload.stocks.length} US quote(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s).`
+          `Market refresh complete: ${payload.navs.length} NAV snapshot(s), ${payload.stocks.length} US price snapshot(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s).`
       );
     } catch (error) {
       setErrors([error instanceof Error ? error.message : "Market refresh failed"]);
@@ -577,7 +586,7 @@ export function TrackerApp() {
             <p>{status}</p>
           </div>
           <div className="actions">
-            <button onClick={refreshMarketData} title="Refresh NAV, quotes, and FX"><RefreshCw size={16} /> Refresh</button>
+            <button onClick={refreshMarketData} title="Refresh live and historical NAV, quotes, and FX"><RefreshCw size={16} /> Refresh</button>
             <button onClick={exportBackup} title="Export canonical JSON backup"><Download size={16} /> Export</button>
             <button onClick={resetPortfolio} title="Reset local portfolio"><RotateCcw size={16} /> Reset</button>
           </div>
@@ -594,7 +603,7 @@ export function TrackerApp() {
                 <p>{insights.holdings.length} holdings, {backup.transactions.length} transactions, {importProviders} source(s). Analytics are split into overview, allocation, growth, and risk so deeper views stay navigable as PF, NPS, stocks, cash, FD, PPF, SSY, and ESPP expand.</p>
                 <div className="hero-meta-row">
                   <span>{backup.baseCurrency} base</span>
-                  <span>{timeline.coverage.pricedDates}/{timeline.coverage.totalDates} priced timeline point(s)</span>
+                  <span>{timeline.coverage.pricedDates}/{timeline.coverage.totalDates} complete valuation date(s)</span>
                   <span>{summary.missingFx.length === 0 ? "FX covered" : summary.missingFx.length + " FX pair gap(s)"}</span>
                 </div>
               </div>
@@ -654,8 +663,8 @@ export function TrackerApp() {
                 </div>
                 <div className="analytics-grid">
                   <ChartCard title="Allocation Map"><DonutChart data={chartData.allocation} /></ChartCard>
-                  <ChartCard title="Asset Class Growth"><BreakdownGrowthChart points={timeline.points} field="category" keys={categoryTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                  <ChartCard title="Region Growth"><BreakdownGrowthChart points={timeline.points} field="region" keys={regionTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Asset Class Value History"><BreakdownGrowthChart points={timeline.points} field="category" keys={categoryTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Region Value History"><BreakdownGrowthChart points={timeline.points} field="region" keys={regionTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="By Region"><HorizontalBar data={chartData.region} currency={backup.baseCurrency} /></ChartCard>
                 </div>
               </div>
@@ -664,8 +673,8 @@ export function TrackerApp() {
             {analyticsTab === "growth" && (
               <div className="analytics-tab-panel">
                 <div className="analytics-grid">
-                  <ChartCard title="Asset Type Growth"><BreakdownGrowthChart points={timeline.points} field="assetKind" keys={assetKindTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                  <ChartCard title="Issuer / AMC Growth"><BreakdownGrowthChart points={timeline.points} field="issuer" keys={issuerTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Asset Type Value History"><BreakdownGrowthChart points={timeline.points} field="assetKind" keys={assetKindTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Issuer / AMC Value History"><BreakdownGrowthChart points={timeline.points} field="issuer" keys={issuerTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="Performance Bridge"><HorizontalBar data={performanceBridge} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="Top AMC / Institution"><HorizontalBar data={chartData.issuer} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="Data Source Mix"><HorizontalBar data={chartData.provider} currency={backup.baseCurrency} /></ChartCard>
@@ -862,36 +871,45 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 
 function PortfolioGrowthChart({ points, currency }: { points: PortfolioTimelinePoint[]; currency: string }) {
   if (points.length === 0) return <p className="message">Import transactions and balances to build a growth timeline.</p>;
+  const completeValuePoints = points.filter((point) => point.current !== null).length;
   return (
-    <ResponsiveContainer width="100%" height={320}>
-      <LineChart data={points} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
-        <CartesianGrid stroke="#e2e8f0" vertical={false} />
-        <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={28} />
-        <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
-        <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), name === "invested" ? "Invested" : name === "current" ? "Current Value" : "Profit"]} labelFormatter={(label) => String(label)} />
-        <Legend />
-        <Line type="monotone" dataKey="invested" stroke="#475569" strokeWidth={2.5} dot={false} name="Invested" />
-        <Line type="monotone" dataKey="current" stroke="#0f766e" strokeWidth={3} dot={false} connectNulls name="Current Value" />
-        <Line type="monotone" dataKey="profit" stroke="#2563eb" strokeWidth={2} dot={false} connectNulls name="Profit" />
-      </LineChart>
-    </ResponsiveContainer>
+    <div className="timeline-chart-block">
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={points} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
+          <CartesianGrid stroke="#e2e8f0" vertical={false} />
+          <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={28} />
+          <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
+          <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), String(name)]} labelFormatter={(label) => String(label)} />
+          <Legend />
+          <Line type="monotone" dataKey="invested" stroke="#475569" strokeWidth={2.5} dot={false} name="Invested" />
+          <Line type="monotone" dataKey="current" stroke="#0f766e" strokeWidth={3} dot={{ r: 3 }} connectNulls={false} name="Complete Current Value" />
+        </LineChart>
+      </ResponsiveContainer>
+      <p className="chart-note">Current value is reconstructed from units held on each date and real historical NAV, stock quote, PF book-value, NPS statement NAV, and FX snapshots. Coverage: {completeValuePoints}/{points.length} complete valuation date(s).</p>
+    </div>
   );
 }
 
 function BreakdownGrowthChart({ points, field, keys, currency }: { points: PortfolioTimelinePoint[]; field: keyof Pick<PortfolioTimelinePoint, "category" | "region" | "assetKind" | "issuer">; keys: string[]; currency: string }) {
-  if (points.length === 0 || keys.length === 0) return <p className="message">No priced timeline data yet for this breakdown.</p>;
-  const data = points.map((point) => Object.fromEntries([["date", point.date], ...keys.map((key) => [key, point[field][key] ?? null])]));
+  if (points.length === 0 || keys.length === 0) return <p className="message">No dated valuation snapshots yet for this breakdown.</p>;
+  const completePoints = points.filter((point) => point.current !== null);
+  const data = completePoints.map((point) => Object.fromEntries([["date", point.date], ...keys.map((key) => [key, point[field][key] ?? null])]));
+  const populatedPoints = data.filter((row) => keys.some((key) => typeof row[key] === "number")).length;
+  if (populatedPoints < 2) return <p className="message">Not enough historical valuation snapshots yet. Import yearly statements or historical NAV/price data to build a trend.</p>;
   return (
-    <ResponsiveContainer width="100%" height={310}>
-      <LineChart data={data} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
-        <CartesianGrid stroke="#e2e8f0" vertical={false} />
-        <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={28} />
-        <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
-        <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), displayHoldingName(String(name))]} labelFormatter={(label) => String(label)} />
-        <Legend formatter={(value) => displayHoldingName(String(value))} />
-        {keys.map((key, index) => <Line key={key} type="monotone" dataKey={key} stroke={chartColors[index % chartColors.length]} strokeWidth={2.4} dot={false} connectNulls />)}
-      </LineChart>
-    </ResponsiveContainer>
+    <div className="timeline-chart-block">
+      <ResponsiveContainer width="100%" height={292}>
+        <LineChart data={data} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
+          <CartesianGrid stroke="#e2e8f0" vertical={false} />
+          <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={28} />
+          <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
+          <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), displayHoldingName(String(name))]} labelFormatter={(label) => String(label)} />
+          <Legend formatter={(value) => displayHoldingName(String(value))} />
+          {keys.map((key, index) => <Line key={key} type="monotone" dataKey={key} stroke={chartColors[index % chartColors.length]} strokeWidth={2.4} dot={{ r: 2 }} connectNulls={false} />)}
+        </LineChart>
+      </ResponsiveContainer>
+      <p className="chart-note">This chart uses complete portfolio valuation dates only. Missing lines mean historical NAV, quote, or FX data is not yet available for every active holding.</p>
+    </div>
   );
 }
 

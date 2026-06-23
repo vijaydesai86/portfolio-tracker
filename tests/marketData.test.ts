@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyMarketDataPayload, parseAmfiNavAll, parseCurrencyApiLatestFx, parseExchangeRateApiLatestFx, parseFrankfurterHistoricalFx, parseFrankfurterLatestFx, parseFxFromStooqCsv, parseHistoricalFxFromStooqCsv, parseStooqCsv, parseYahooChartQuote } from "@/src/marketData/marketData";
+import { applyMarketDataPayload, parseAmfiNavAll, parseCurrencyApiLatestFx, parseExchangeRateApiLatestFx, parseFrankfurterHistoricalFx, parseFrankfurterLatestFx, parseFxFromStooqCsv, parseHistoricalFxFromStooqCsv, parseMfapiHistoricalNav, parseStooqCsv, parseStooqHistoricalStockCsv, parseYahooChartQuote, parseYahooHistoricalPrices } from "@/src/marketData/marketData";
 import { createEmptyBackup } from "@/src/schema/backup";
 
 describe("market data parsers", () => {
@@ -91,4 +91,28 @@ it("parses Yahoo chart quote responses", () => {
     asOfDate: "2026-06-19",
     source: "yahoo_chart"
   });
+});
+
+
+it("parses historical mutual fund NAV and stock price responses", () => {
+  expect(parseMfapiHistoricalNav({
+    meta: { fund_house: "HDFC Mutual Fund", scheme_code: "123", scheme_name: "HDFC Flexi Cap Fund" },
+    data: [
+      { date: "03-01-2026", nav: "100.25" },
+      { date: "02-01-2026", nav: "99.75" }
+    ]
+  }, "INF179K01ABC")).toEqual([
+    { isin: "INF179K01ABC", schemeCode: "123", schemeName: "HDFC Flexi Cap Fund", amc: "HDFC Mutual Fund", nav: 99.75, asOfDate: "2026-01-02", source: "mfapi_history" },
+    { isin: "INF179K01ABC", schemeCode: "123", schemeName: "HDFC Flexi Cap Fund", amc: "HDFC Mutual Fund", nav: 100.25, asOfDate: "2026-01-03", source: "mfapi_history" }
+  ]);
+
+  expect(parseStooqHistoricalStockCsv("Date,Open,High,Low,Close,Volume\n2026-01-02,100,111,99,110.5,123", "AAPL")).toEqual([
+    { symbol: "AAPL", price: 110.5, currency: "USD", asOfDate: "2026-01-02", source: "stooq_history" }
+  ]);
+
+  expect(parseYahooHistoricalPrices({
+    chart: { result: [{ meta: { symbol: "AAPL", currency: "USD" }, timestamp: [1767312000, 1767398400], indicators: { quote: [{ close: [110.5, null] }] } }] }
+  }, "AAPL")).toEqual([
+    { symbol: "AAPL", price: 110.5, currency: "USD", asOfDate: "2026-01-02", source: "yahoo_history" }
+  ]);
 });

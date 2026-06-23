@@ -8,6 +8,7 @@ export type NavQuote = {
   amc?: string;
   nav: number;
   asOfDate: string;
+  source?: string;
 };
 
 export type StockQuote = {
@@ -62,6 +63,26 @@ export function parseAmfiNavAll(text: string, requestedIsins = new Set<string>()
   return results;
 }
 
+export function parseMfapiHistoricalNav(data: unknown, isin: string, source = "mfapi_history"): NavQuote[] {
+  const object = asRecord(data);
+  const meta = asRecord(object?.meta);
+  const rows = Array.isArray(object?.data) ? object.data : [];
+  const schemeCode = String(meta?.scheme_code ?? "");
+  const schemeName = typeof meta?.scheme_name === "string" ? meta.scheme_name : "";
+  const amc = typeof meta?.fund_house === "string" ? meta.fund_house : undefined;
+  if (!isin || !schemeCode || !schemeName) return [];
+
+  return rows
+    .flatMap((row): NavQuote[] => {
+      const record = asRecord(row);
+      const nav = Number(record?.nav);
+      const asOfDate = parseMfapiDate(typeof record?.date === "string" ? record.date : "");
+      if (!isValidRate(nav) || !isIsoDate(asOfDate)) return [];
+      return [{ isin, schemeCode, schemeName, amc, nav, asOfDate, source }];
+    })
+    .sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
+}
+
 export function parseStooqCsv(text: string, currency = "USD", source = "stooq"): StockQuote[] {
   const lines = text.trim().split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return [];
@@ -76,6 +97,23 @@ export function parseStooqCsv(text: string, currency = "USD", source = "stooq"):
     const price = Number(fields[closeIndex]);
     if (!Number.isFinite(price) || price <= 0) return [];
     return [{ symbol: fields[symbolIndex].replace(/\.US$/i, "").toUpperCase(), price, currency, asOfDate: fields[dateIndex], source }];
+  });
+}
+
+export function parseStooqHistoricalStockCsv(text: string, symbol: string, currency = "USD"): StockQuote[] {
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = splitCsvLine(lines[0]).map((header) => header.toLowerCase());
+  const dateIndex = headers.indexOf("date");
+  const closeIndex = headers.indexOf("close");
+  if (dateIndex < 0 || closeIndex < 0) return [];
+
+  return lines.slice(1).flatMap((line) => {
+    const fields = splitCsvLine(line);
+    const price = Number(fields[closeIndex]);
+    const asOfDate = fields[dateIndex];
+    if (!isIsoDate(asOfDate) || !isValidRate(price)) return [];
+    return [{ symbol: symbol.replace(/\.US$/i, "").toUpperCase(), price, currency, asOfDate, source: "stooq_history" }];
   });
 }
 
@@ -144,6 +182,29 @@ export function parseCurrencyApiLatestFx(data: unknown, from = "USD", to = "INR"
   return { pair: from + to, from, to, rate, asOfDate, source: "currency_api" };
 }
 
+export function parseYahooHistoricalPrices(data: unknown, requestedSymbol: string): StockQuote[] {
+  const object = asRecord(data);
+  const chart = asRecord(object?.chart);
+  const result = Array.isArray(chart?.result) ? asRecord(chart.result[0]) : undefined;
+  const meta = asRecord(result?.meta);
+  const symbol = typeof meta?.symbol === "string" ? meta.symbol : requestedSymbol;
+  const currency = typeof meta?.currency === "string" ? meta.currency : "USD";
+  const timestamps = Array.isArray(result?.timestamp) ? result.timestamp : [];
+  const indicators = asRecord(result?.indicators);
+  const quotes = Array.isArray(indicators?.quote) ? asRecord(indicators.quote[0]) : undefined;
+  const closes = Array.isArray(quotes?.close) ? quotes.close : [];
+  if (!symbol || timestamps.length === 0 || closes.length === 0) return [];
+
+  return timestamps.flatMap((timestamp, index): StockQuote[] => {
+    const seconds = Number(timestamp);
+    const price = Number(closes[index]);
+    if (!Number.isFinite(seconds) || !isValidRate(price)) return [];
+    const asOfDate = new Date(seconds * 1000).toISOString().slice(0, 10);
+    if (!isIsoDate(asOfDate)) return [];
+    return [{ symbol: symbol.replace(/\.US$/i, "").toUpperCase(), price, currency, asOfDate, source: "yahoo_history" }];
+  }).sort((a, b) => a.asOfDate.localeCompare(b.asOfDate));
+}
+
 export function parseYahooChartQuote(data: unknown, requestedSymbol?: string): StockQuote | undefined {
   const object = asRecord(data);
   const chart = asRecord(object?.chart);
@@ -174,7 +235,7 @@ export function applyMarketDataPayload(backup: PortfolioBackup, payload: MarketD
       price: nav.nav,
       currency: "INR",
       asOfDate: nav.asOfDate,
-      source: "amfi_navall",
+      source: nav.source ?? "amfi_navall",
       createdAt: now
     });
     next = updateBalances(next, instrument.id, nav.nav, nav.asOfDate, "INR");
@@ -225,6 +286,12 @@ function updateBalances(backup: PortfolioBackup, instrumentId: string, price: nu
       };
     })
   };
+}
+
+function parseMfapiDate(value: string): string {
+  const match = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!match) return value;
+  return match[3] + "-" + match[2] + "-" + match[1];
 }
 
 function parseAmfiDate(value: string): string {

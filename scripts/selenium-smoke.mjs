@@ -33,8 +33,8 @@ try {
     await driver.wait(async () => {
       const body = await driver.findElement(By.css("body")).getText();
       if (label === "Overview") return body.includes("Portfolio Growth");
-      if (label === "Allocation") return body.includes("Asset Class Growth");
-      if (label === "Growth") return body.includes("Asset Type Growth");
+      if (label === "Allocation") return body.includes("Asset Class Value History");
+      if (label === "Growth") return body.includes("Asset Type Value History");
       return body.includes("Top 5 Concentration");
     }, 15000);
   }

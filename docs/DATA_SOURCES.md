@@ -18,8 +18,8 @@ This document tracks external sources used for imports, market data, fixtures, a
 
 ## Implemented Market Refresh Sources
 
-- AMFI `NAVAll.txt` is used by the server route for Indian mutual fund NAV refresh and matched by ISIN. The route tries both `portal.amfiindia.com` and `www.amfiindia.com` mirrors.
-- US stock quote refresh uses real quote providers only. The route tries Stooq CSV batch quotes and Yahoo Finance chart quotes. If both providers time out or return unusable data, the UI reports that and leaves imported prices in place.
+- AMFI `NAVAll.txt` is used by the server route for Indian mutual fund NAV refresh and matched by ISIN. The route tries both `portal.amfiindia.com` and `www.amfiindia.com` mirrors. Historical mutual-fund NAV refresh resolves AMFI scheme codes by ISIN and then requests dated NAV history from MFAPI, with AMFI historical NAV as a fallback; if those fail, the app reports the missing historical NAVs instead of interpolating.
+- US stock quote refresh uses real quote providers only. The route tries Stooq CSV batch quotes and Yahoo Finance chart quotes. Historical US stock refresh requests daily Stooq/Yahoo chart prices from the first imported transaction/balance date through today. If providers time out or return unusable data, the UI reports that and leaves imported prices in place.
 - USD/INR refresh uses real no-key providers with provider-specific source tags. Latest FX prefers Frankfurter, then Open ER API, then currency-api, then Stooq. Historical transaction-date FX prefers Frankfurter range data, then Stooq daily data.
 - The app does not fabricate market prices. If a source times out or returns unusable data, the UI reports the error and leaves existing values in place.
 

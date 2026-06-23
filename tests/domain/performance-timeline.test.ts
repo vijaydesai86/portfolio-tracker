@@ -33,4 +33,27 @@ describe("portfolio performance timeline", () => {
     expect(latest).toMatchObject({ invested: 1000, current: 1050, profit: 50 });
     expect(latest.category).toMatchObject({ Debt: 1050 });
   });
+
+  it("does not show portfolio current value for partial valuation dates", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push(
+      { id: "acct1", name: "MF1", institution: "AMC", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "acct2", name: "MF2", institution: "AMC", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.instruments.push(
+      { id: "inst1", name: "Fund 1", type: "mutual_fund", currency: "INR", country: "IN", category: "Equity", issuer: "AMC", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "inst2", name: "Fund 2", type: "mutual_fund", currency: "INR", country: "IN", category: "Debt", issuer: "AMC", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.transactions.push(
+      { id: "buy1", accountId: "acct1", instrumentId: "inst1", date: "2026-01-01", type: "buy", quantity: 10, amount: 1000, currency: "INR", fees: 0, taxes: 0, source: { type: "import" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "buy2", accountId: "acct2", instrumentId: "inst2", date: "2026-01-01", type: "buy", quantity: 20, amount: 2000, currency: "INR", fees: 0, taxes: 0, source: { type: "import" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.priceSnapshots.push({ id: "p1", instrumentId: "inst1", price: 120, currency: "INR", asOfDate: "2026-02-01", source: "test", createdAt: "2026-02-01T00:00:00.000Z" });
+
+    const latest = buildPortfolioTimeline(backup).points.at(-1)!;
+
+    expect(latest.current).toBeNull();
+    expect(latest.profit).toBeNull();
+    expect(latest.category).toMatchObject({ Equity: 1200 });
+  });
 });

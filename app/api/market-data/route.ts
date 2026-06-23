@@ -7,8 +7,11 @@ import {
   parseFrankfurterLatestFx,
   parseFxFromStooqCsv,
   parseHistoricalFxFromStooqCsv,
+  parseMfapiHistoricalNav,
   parseStooqCsv,
+  parseStooqHistoricalStockCsv,
   parseYahooChartQuote,
+  parseYahooHistoricalPrices,
   type FxQuote,
   type MarketDataPayload,
   type NavQuote,
@@ -30,12 +33,16 @@ export async function GET(request: NextRequest) {
   const symbols = searchParams.get("symbols")?.split(",").map((item) => item.trim().toUpperCase()).filter(Boolean) ?? [];
   const fxStart = normalizeDate(searchParams.get("fxStart"));
   const fxEnd = normalizeDate(searchParams.get("fxEnd")) ?? todayIso();
+  const historyStart = normalizeDate(searchParams.get("historyStart"));
+  const historyEnd = normalizeDate(searchParams.get("historyEnd")) ?? todayIso();
   const errors: string[] = [];
   const payload: MarketDataPayload = { navs: [], stocks: [], fxs: [], errors };
 
   await Promise.all([
     isins.length > 0 ? loadNavs([...new Set(isins)], payload, errors) : Promise.resolve(),
+    isins.length > 0 && historyStart ? loadHistoricalNavs([...new Set(isins)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
     symbols.length > 0 ? loadStockQuotes([...new Set(symbols)], payload, errors) : Promise.resolve(),
+    symbols.length > 0 && historyStart ? loadHistoricalStockQuotes([...new Set(symbols)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
     symbols.length > 0 || fxStart ? loadLatestUsdInr(payload, errors) : Promise.resolve(),
     fxStart ? loadHistoricalUsdInr(fxStart, fxEnd, payload, errors) : Promise.resolve()
   ]);
@@ -58,7 +65,7 @@ async function loadNavs(isins: string[], payload: MarketDataPayload, errors: str
 
   const result = await firstUsable(providers, (quotes) => quotes.length > 0);
   if (result.value) {
-    payload.navs = result.value;
+    payload.navs = mergeNavQuotes(payload.navs, result.value);
     return;
   }
 
@@ -67,6 +74,55 @@ async function loadNavs(isins: string[], payload: MarketDataPayload, errors: str
   } else {
     errors.push("AMFI NAV fetch failed: " + result.errors.join("; "));
   }
+}
+
+async function loadHistoricalNavs(isins: string[], start: string, end: string, payload: MarketDataPayload, errors: string[]) {
+  const requested = new Set(isins);
+  const latest = await firstUsable<NavQuote[]>([
+    {
+      name: "AMFI NAVAll portal scheme map",
+      run: async () => parseAmfiNavAll(await fetchText("https://portal.amfiindia.com/spages/NAVAll.txt"), requested)
+    },
+    {
+      name: "AMFI NAVAll www scheme map",
+      run: async () => parseAmfiNavAll(await fetchText("https://www.amfiindia.com/spages/NAVAll.txt"), requested)
+    }
+  ], (quotes) => quotes.length > 0);
+
+  const schemeByIsin = new Map((latest.value ?? []).map((quote) => [quote.isin, quote.schemeCode]));
+  const mfapiQuotes = await Promise.allSettled(
+    [...schemeByIsin.entries()].map(async ([isin, schemeCode]) => {
+      const quotes = parseMfapiHistoricalNav(await fetchJson("https://api.mfapi.in/mf/" + encodeURIComponent(schemeCode)), isin);
+      return quotes.filter((quote) => quote.asOfDate >= start && quote.asOfDate <= end);
+    })
+  );
+  const historical = mfapiQuotes.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+
+  if (historical.length > 0) {
+    payload.navs = mergeNavQuotes(payload.navs, historical);
+    const found = new Set(historical.map((quote) => quote.isin));
+    const missing = isins.filter((isin) => !found.has(isin));
+    if (missing.length > 0) errors.push("Historical mutual fund NAV missing for: " + missing.join(", "));
+    return;
+  }
+
+  const amfiHistory = await firstUsable<NavQuote[]>([
+    {
+      name: "AMFI historical NAV portal",
+      run: async () => parseAmfiNavAll(await fetchText("https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx?frmdt=" + amfiDate(start) + "&todt=" + amfiDate(end)), requested).map((quote) => ({ ...quote, source: "amfi_history" }))
+    },
+    {
+      name: "AMFI historical NAV www",
+      run: async () => parseAmfiNavAll(await fetchText("https://www.amfiindia.com/spages/DownloadNAVHistoryReport_Po.aspx?frmdt=" + amfiDate(start) + "&todt=" + amfiDate(end)), requested).map((quote) => ({ ...quote, source: "amfi_history" }))
+    }
+  ], (quotes) => quotes.length > 0);
+
+  if (amfiHistory.value) {
+    payload.navs = mergeNavQuotes(payload.navs, amfiHistory.value);
+    return;
+  }
+
+  errors.push("Historical mutual fund NAV fetch failed: " + [...latest.errors, ...mfapiQuotes.flatMap((result) => result.status === "rejected" ? [errorMessage(result.reason)] : []), ...amfiHistory.errors].join("; "));
 }
 
 async function loadStockQuotes(symbols: string[], payload: MarketDataPayload, errors: string[]) {
@@ -96,12 +152,25 @@ async function loadStockQuotes(symbols: string[], payload: MarketDataPayload, er
     }
   }
 
-  payload.stocks = [...quotesBySymbol.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
+  payload.stocks = mergeStockQuotes(payload.stocks, [...quotesBySymbol.values()]);
   const missing = symbols.filter((symbol) => !quotesBySymbol.has(symbol));
   if (payload.stocks.length === 0) {
     errors.push("US quote fetch failed: " + (providerErrors.length > 0 ? providerErrors.join("; ") : "no provider returned usable real quotes"));
   } else if (missing.length > 0) {
     errors.push("US quote missing for: " + missing.join(", "));
+  }
+}
+
+async function loadHistoricalStockQuotes(symbols: string[], start: string, end: string, payload: MarketDataPayload, errors: string[]) {
+  const results = await Promise.allSettled(symbols.map((symbol) => fetchHistoricalStockQuotes(symbol, start, end)));
+  const quotes = results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+  if (quotes.length > 0) payload.stocks = mergeStockQuotes(payload.stocks, quotes);
+
+  const found = new Set(quotes.map((quote) => quote.symbol));
+  const missing = symbols.filter((symbol) => !found.has(symbol.toUpperCase()));
+  if (missing.length > 0) {
+    const providerErrors = results.flatMap((result) => (result.status === "rejected" ? [errorMessage(result.reason)] : []));
+    errors.push("Historical US quote missing for " + missing.join(", ") + (providerErrors.length > 0 ? ": " + providerErrors.join("; ") : ""));
   }
 }
 
@@ -149,6 +218,31 @@ async function loadHistoricalUsdInr(fxStart: string, fxEnd: string, payload: Mar
   } else {
     errors.push("Historical USD/INR fetch failed: " + result.errors.join("; "));
   }
+}
+
+async function fetchHistoricalStockQuotes(symbol: string, start: string, end: string): Promise<StockQuote[]> {
+  const result = await firstUsable<StockQuote[]>([
+    { name: "Stooq US historical quotes", run: () => fetchStooqStockHistory(symbol, start, end) },
+    { name: "Yahoo Finance historical chart", run: () => fetchYahooStockHistory(symbol, start, end) }
+  ], (quotes) => quotes.length > 0);
+  if (result.value) return result.value;
+  throw new Error(symbol + ": " + result.errors.join("; "));
+}
+
+async function fetchStooqStockHistory(symbol: string, start: string, end: string): Promise<StockQuote[]> {
+  const url = "https://stooq.com/q/d/l/?s=" + encodeURIComponent(symbol.toLowerCase() + ".us") + "&i=d&d1=" + compactDate(start) + "&d2=" + compactDate(end);
+  const quotes = parseStooqHistoricalStockCsv(await fetchText(url), symbol, "USD");
+  if (quotes.length === 0) throw new Error("Stooq historical response did not contain usable prices");
+  return quotes;
+}
+
+async function fetchYahooStockHistory(symbol: string, start: string, end: string): Promise<StockQuote[]> {
+  const period1 = unixSeconds(start + "T00:00:00.000Z");
+  const period2 = unixSeconds(end + "T23:59:59.000Z");
+  const data = await fetchJson("https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + "?period1=" + period1 + "&period2=" + period2 + "&interval=1d&events=history");
+  const quotes = parseYahooHistoricalPrices(data, symbol);
+  if (quotes.length === 0) throw new Error("Yahoo historical response did not contain usable prices");
+  return quotes;
 }
 
 async function fetchStooqStockQuotes(symbols: string[]): Promise<StockQuote[]> {
@@ -223,6 +317,28 @@ function normalizeDate(value: string | null): string | undefined {
 
 function compactDate(value: string): string {
   return value.replaceAll("-", "");
+}
+
+function amfiDate(value: string): string {
+  const [year, month, day] = value.split("-");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return day + "-" + months[Number(month) - 1] + "-" + year;
+}
+
+function unixSeconds(value: string): number {
+  return Math.floor(new Date(value).getTime() / 1000);
+}
+
+function mergeNavQuotes(existing: NavQuote[], incoming: NavQuote[]): NavQuote[] {
+  const map = new Map(existing.map((quote) => [quote.isin + ":" + quote.asOfDate, quote]));
+  for (const quote of incoming) map.set(quote.isin + ":" + quote.asOfDate, quote);
+  return [...map.values()].sort((a, b) => a.isin.localeCompare(b.isin) || a.asOfDate.localeCompare(b.asOfDate));
+}
+
+function mergeStockQuotes(existing: StockQuote[], incoming: StockQuote[]): StockQuote[] {
+  const map = new Map(existing.map((quote) => [quote.symbol + ":" + quote.asOfDate, quote]));
+  for (const quote of incoming) map.set(quote.symbol + ":" + quote.asOfDate, quote);
+  return [...map.values()].sort((a, b) => a.symbol.localeCompare(b.symbol) || a.asOfDate.localeCompare(b.asOfDate));
 }
 
 function todayIso(): string {

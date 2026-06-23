@@ -73,11 +73,14 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
   }
 
   const currentBreakdown = emptyBreakdowns();
+  const activePositions = new Set<string>();
+  const valuedPositions = new Set<string>();
   const valuedInstruments = new Set<string>();
   let current = 0;
 
   for (const [instrumentId, quantity] of units.entries()) {
     if (Math.abs(quantity) < 0.000001) continue;
+    activePositions.add("instrument:" + instrumentId);
     const price = latestPrice(backup.priceSnapshots, instrumentId, date);
     if (!price) continue;
     const value = tryConvertToBase(quantity * price.price, price.currency, backup, price.asOfDate);
@@ -86,25 +89,33 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
     current += value;
     addBreakdowns(currentBreakdown, dimensions, value);
     valuedInstruments.add(instrumentId);
+    valuedPositions.add("instrument:" + instrumentId);
   }
 
   for (const [instrumentId, value] of capitalizedValue.entries()) {
-    if (valuedInstruments.has(instrumentId) || value <= 0) continue;
+    if (value <= 0) continue;
+    activePositions.add("instrument:" + instrumentId);
+    if (valuedInstruments.has(instrumentId)) continue;
     const dimensions = instrumentDimensions(instrumentId, backup);
     current += value;
     addBreakdowns(currentBreakdown, dimensions, value);
     valuedInstruments.add(instrumentId);
+    valuedPositions.add("instrument:" + instrumentId);
   }
 
   for (const balance of backup.manualBalances.filter((item) => item.asOfDate <= date)) {
+    const positionKey = balance.instrumentId ? "instrument:" + balance.instrumentId : "balance:" + balance.id;
+    activePositions.add(positionKey);
     if (balance.instrumentId && valuedInstruments.has(balance.instrumentId)) continue;
     const value = tryConvertToBase(balance.value, balance.currency, backup, balance.asOfDate);
     if (value === undefined) continue;
     current += value;
     addBreakdowns(currentBreakdown, balanceDimensions(balance, backup), value);
+    valuedPositions.add(positionKey);
   }
 
-  const roundedCurrent = current > 0 ? roundMoney(current) : null;
+  const hasCompleteValuation = activePositions.size > 0 && valuedPositions.size === activePositions.size;
+  const roundedCurrent = hasCompleteValuation && current > 0 ? roundMoney(current) : null;
   return {
     date,
     invested: roundMoney(invested),

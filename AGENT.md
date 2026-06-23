@@ -77,3 +77,4 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 - PF/NPS yearly imports must retain all transactions from every imported year while keeping current balances from the latest statement date only. Do not depend on private filenames; parse by verified statement format.
 - Keep PF categorized as Debt and NPS categorized from explicit scheme type: E as Equity, C/G as Debt, A as Others.
 - Timeline current-value charts must not fabricate historical prices. Use imported statement balances, real price/NAV snapshots, and transaction units only; show invested flow even when historical current value is unavailable.
+- Portfolio timeline current value must be reconstructed from units held on each date, capitalized PF transactions/interest, NPS statement NAV snapshots, and real historical NAV/quote/FX snapshots. Plot current value and breakdowns only on complete valuation dates where every active holding has a value.
