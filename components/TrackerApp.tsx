@@ -2,10 +2,11 @@
 
 import { AlertTriangle, Download, FileJson, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, TrendingDown, TrendingUp, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
 import { buildReadinessModules, type ReadinessModule } from "@/src/domain/assetModules";
 import { lossWatchlist, topGainContributors, type HoldingPerformanceRow } from "@/src/domain/holdingPerformance";
+import { calculateHoldingReturns, type HoldingReturn } from "@/src/domain/holdingReturns";
 import { buildPortfolioTimeline, type PortfolioTimelinePoint } from "@/src/domain/performanceTimeline";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
@@ -22,7 +23,7 @@ import { createEmptyBackup, parseBackup, type AssetCategory, type ManualBalance,
 const sampleTemplate = `account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes\nCash Wallet,Cash Wallet,cash,Cash,INR,10000,2026-06-22,liquid cash\nEmployer ESPP,ESPP Contribution,espp,Equity,USD,2000,2026-06-22,total contribution\nPPF,Public Provident Fund,ppf,Debt,INR,300000,2026-06-22,manual balance`;
 
 const categoryOrder: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
-const chartColors = ["#2563eb", "#64748b", "#b7791f", "#7c3aed", "#0f766e", "#db2777", "#ea580c", "#0891b2"];
+const chartColors = ["#0e7490", "#2563eb", "#8b5cf6", "#d97706", "#059669", "#dc2626", "#64748b", "#0891b2"];
 const assetClassCards = [
   { key: "Equity", title: "Equity", description: "MF, Indian stocks, US stocks, ESPP" },
   { key: "Debt", title: "Debt", description: "Debt MF, PF, PPF, SSY, NPS debt, FD" },
@@ -35,13 +36,7 @@ const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redempti
 
 type View = "dashboard" | "holdings" | "transactions" | "imports" | "backup";
 type AnalyticsTab = "overview" | "allocation" | "growth" | "risk";
-type HoldingSort = "value" | "gain" | "name" | "category" | "source";
-
-type HoldingCost = {
-  invested: number;
-  profit?: number;
-  returnPercent?: number;
-};
+type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
 
 
 type DashboardSignal = {
@@ -84,7 +79,7 @@ export function TrackerApp() {
   const insights = useMemo(() => calculatePortfolioInsights(backup), [backup]);
   const timeline = useMemo(() => buildPortfolioTimeline(backup), [backup]);
   const allocation = summary.allocation;
-  const holdingCosts = useMemo(() => calculateHoldingCosts(backup), [backup]);
+  const holdingReturns = useMemo(() => calculateHoldingReturns(backup), [backup]);
   const performance = useMemo(() => {
     const grossCashIn = insights.transactionStats.investedBase;
     const current = summary.netWorth;
@@ -121,15 +116,28 @@ export function TrackerApp() {
       .filter((holding) => categoryFilter === "All" || holding.category === categoryFilter)
       .filter((holding) => !q || [holding.label, holding.assetKind, holding.region, holding.provider, holding.institution, holding.issuer].join(" ").toLowerCase().includes(q))
       .sort((a, b) => {
-        const aCost = holdingCosts.get(a.id);
-        const bCost = holdingCosts.get(b.id);
+        const aReturn = holdingReturns.get(a.id);
+        const bReturn = holdingReturns.get(b.id);
         if (holdingSort === "name") return displayHoldingName(a.label).localeCompare(displayHoldingName(b.label));
         if (holdingSort === "category") return a.category.localeCompare(b.category) || (b.valueInBase ?? 0) - (a.valueInBase ?? 0);
         if (holdingSort === "source") return a.provider.localeCompare(b.provider) || (b.valueInBase ?? 0) - (a.valueInBase ?? 0);
-        if (holdingSort === "gain") return (bCost?.profit ?? -Infinity) - (aCost?.profit ?? -Infinity);
+        if (holdingSort === "gain") return (bReturn?.profit ?? -Infinity) - (aReturn?.profit ?? -Infinity);
+        if (holdingSort === "xirr") return (bReturn?.xirr ?? -Infinity) - (aReturn?.xirr ?? -Infinity);
+        if (holdingSort === "allocation") return (bReturn?.allocationPercent ?? 0) - (aReturn?.allocationPercent ?? 0);
         return (b.valueInBase ?? 0) - (a.valueInBase ?? 0);
       });
-  }, [categoryFilter, holdingCosts, holdingQuery, holdingSort, insights.holdings]);
+  }, [categoryFilter, holdingReturns, holdingQuery, holdingSort, insights.holdings]);
+
+  const holdingPageAnalytics = useMemo(() => {
+    const totalValue = filteredHoldings.reduce((sum, holding) => sum + (holding.valueInBase ?? 0), 0);
+    const totalProfit = filteredHoldings.reduce((sum, holding) => sum + (holdingReturns.get(holding.id)?.profit ?? 0), 0);
+    const xirrRows = filteredHoldings.map((holding) => holdingReturns.get(holding.id)?.xirr).filter((xirr): xirr is number => typeof xirr === "number");
+    const topAllocation = filteredHoldings[0] ? holdingReturns.get(filteredHoldings[0].id)?.allocationPercent ?? 0 : 0;
+    const valueChart = filteredHoldings.slice(0, 8).map((holding) => ({ name: holding.label, value: holding.valueInBase ?? 0 })).filter((item) => item.value > 0);
+    const profitChart = filteredHoldings.map((holding) => ({ name: holding.label, value: holdingReturns.get(holding.id)?.profit ?? 0 })).filter((item) => item.value > 0).sort((a, b) => b.value - a.value).slice(0, 8);
+    const xirrChart = filteredHoldings.map((holding) => ({ name: holding.label, value: holdingReturns.get(holding.id)?.xirr ?? 0 })).filter((item) => item.value > 0).sort((a, b) => b.value - a.value).slice(0, 8);
+    return { totalValue, totalProfit, xirrRows, topAllocation, valueChart, profitChart, xirrChart };
+  }, [filteredHoldings, holdingReturns]);
 
   const filteredTransactions = useMemo(() => {
     const q = transactionQuery.trim().toLowerCase();
@@ -149,16 +157,16 @@ export function TrackerApp() {
   });
 
   const holdingPerformance = useMemo<HoldingPerformanceRow[]>(() => insights.holdings.map((holding) => {
-    const cost = holdingCosts.get(holding.id);
+    const returns = holdingReturns.get(holding.id);
     return {
       id: holding.id,
       name: displayHoldingName(holding.label),
       value: holding.valueInBase ?? 0,
-      profit: cost?.profit,
-      returnPercent: cost?.returnPercent,
+      profit: returns?.profit,
+      returnPercent: returns?.returnPercent,
       meta: [holding.assetKind, holding.region, holding.provider].filter(Boolean).join(" · ")
     };
-  }), [holdingCosts, insights.holdings]);
+  }), [holdingReturns, insights.holdings]);
 
   const topGainers = useMemo(() => topGainContributors(holdingPerformance), [holdingPerformance]);
   const topLosers = useMemo(() => lossWatchlist(holdingPerformance), [holdingPerformance]);
@@ -205,7 +213,7 @@ export function TrackerApp() {
   const categoryTimelineKeys = categoryOrder.filter((category) => timeline.points.some((point) => (point.category[category] ?? 0) > 0));
   const regionTimelineKeys = topTimelineKeys(timeline.points, "region", 5);
   const assetKindTimelineKeys = topTimelineKeys(timeline.points, "assetKind", 6);
-  const issuerTimelineKeys = topTimelineKeys(timeline.points, "issuer", 8);
+  const issuerTimelineKeys = topTimelineKeys(timeline.points, "issuer", 5);
 
   function importCsv() {
     const importId = `manual_${Date.now()}`;
@@ -718,6 +726,8 @@ export function TrackerApp() {
                   <select value={holdingSort} onChange={(event) => setHoldingSort(event.target.value as HoldingSort)}>
                     <option value="value">Sort by value</option>
                     <option value="gain">Sort by gain</option>
+                    <option value="xirr">Sort by XIRR</option>
+                    <option value="allocation">Sort by allocation</option>
                     <option value="name">Sort by name</option>
                     <option value="category">Sort by category</option>
                     <option value="source">Sort by source</option>
@@ -725,13 +735,26 @@ export function TrackerApp() {
                 </div>
               </div>
               {filteredHoldings.length === 0 ? <p className="message">No holdings match the current filters.</p> : (
-                <div className="holding-list">
-                  {filteredHoldings.map((holding) => (
-                    holdingEditMode ?
-                      <HoldingEditRow key={holding.id} balance={backup.manualBalances.find((balance) => balance.id === holding.id)!} updateBalance={updateBalance} /> :
-                      <HoldingRow key={holding.id} holding={holding} baseCurrency={backup.baseCurrency} cost={holdingCosts.get(holding.id)} />
-                  ))}
-                </div>
+                <>
+                  <div className="holding-command-strip">
+                    <MiniInsight label="Filtered Value" value={formatMoney(holdingPageAnalytics.totalValue, backup.baseCurrency)} detail={String(filteredHoldings.length) + " holding(s)"} />
+                    <MiniInsight label="Filtered P/L" value={formatMoney(holdingPageAnalytics.totalProfit, backup.baseCurrency)} detail="current value minus net invested" />
+                    <MiniInsight label="XIRR Coverage" value={String(holdingPageAnalytics.xirrRows.length) + "/" + String(filteredHoldings.length)} detail="holdings with usable cash-flow return" />
+                    <MiniInsight label="Largest Weight" value={holdingPageAnalytics.topAllocation.toFixed(1) + "%"} detail="top visible holding allocation" />
+                  </div>
+                  <div className="holding-visual-grid">
+                    <ChartCard title="Top Holdings"><HorizontalBar data={holdingPageAnalytics.valueChart} currency={backup.baseCurrency} /></ChartCard>
+                    <ChartCard title="Top Profit Contributors"><HorizontalBar data={holdingPageAnalytics.profitChart} currency={backup.baseCurrency} /></ChartCard>
+                    <ChartCard title="Top Holding XIRR"><PercentBar data={holdingPageAnalytics.xirrChart} /></ChartCard>
+                  </div>
+                  <div className="holding-list pro-holding-list">
+                    {filteredHoldings.map((holding) => (
+                      holdingEditMode ?
+                        <HoldingEditRow key={holding.id} balance={backup.manualBalances.find((balance) => balance.id === holding.id)!} updateBalance={updateBalance} /> :
+                        <HoldingRow key={holding.id} holding={holding} baseCurrency={backup.baseCurrency} returns={holdingReturns.get(holding.id)} />
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </section>
@@ -881,11 +904,11 @@ function PortfolioGrowthChart({ points, currency }: { points: PortfolioTimelineP
           <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
           <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), String(name)]} labelFormatter={(label) => String(label)} />
           <Legend />
-          <Line type="monotone" dataKey="invested" stroke="#475569" strokeWidth={2.5} dot={false} name="Invested" />
-          <Line type="monotone" dataKey="current" stroke="#0f766e" strokeWidth={3} dot={{ r: 3 }} connectNulls={false} name="Complete Current Value" />
+          <Line type="monotone" dataKey="invested" stroke="#64748b" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} name="Invested" />
+          <Line type="monotone" dataKey="current" stroke="#0f766e" strokeWidth={3.2} dot={false} activeDot={{ r: 5 }} connectNulls={false} name="Current Value" />
         </LineChart>
       </ResponsiveContainer>
-      <p className="chart-note">Current value is reconstructed from units held on each date and real historical NAV, stock quote, PF book-value, NPS statement NAV, and FX snapshots. Coverage: {completeValuePoints}/{points.length} complete valuation date(s).</p>
+      <p className="chart-note">Sampled at month-end plus latest date. Current value is reconstructed from units held and the latest real NAV, stock quote, PF book-value, NPS statement NAV, and FX snapshot available on or before each point. Coverage: {completeValuePoints}/{points.length} complete valuation point(s).</p>
     </div>
   );
 }
@@ -899,16 +922,16 @@ function BreakdownGrowthChart({ points, field, keys, currency }: { points: Portf
   return (
     <div className="timeline-chart-block">
       <ResponsiveContainer width="100%" height={292}>
-        <LineChart data={data} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
+        <AreaChart data={data} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
           <CartesianGrid stroke="#e2e8f0" vertical={false} />
           <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={28} />
           <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
           <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), displayHoldingName(String(name))]} labelFormatter={(label) => String(label)} />
           <Legend formatter={(value) => displayHoldingName(String(value))} />
-          {keys.map((key, index) => <Line key={key} type="monotone" dataKey={key} stroke={chartColors[index % chartColors.length]} strokeWidth={2.4} dot={{ r: 2 }} connectNulls={false} />)}
-        </LineChart>
+          {keys.map((key, index) => <Area key={key} type="monotone" dataKey={key} stackId="value" stroke={chartColors[index % chartColors.length]} fill={chartColors[index % chartColors.length]} fillOpacity={0.18} strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls={false} />)}
+        </AreaChart>
       </ResponsiveContainer>
-      <p className="chart-note">This chart uses complete portfolio valuation dates only. Missing lines mean historical NAV, quote, or FX data is not yet available for every active holding.</p>
+      <p className="chart-note">Stacked month-end history using complete portfolio valuation points only. Missing history means NAV, quote, or FX data is not yet available for every active holding.</p>
     </div>
   );
 }
@@ -935,14 +958,52 @@ function DonutChart({ data }: { data: Array<{ name: string; value: number; perce
 
 function HorizontalBar({ data, currency }: { data: Array<{ name: string; value: number }>; currency: string }) {
   if (data.length === 0) return <p className="message">No data yet.</p>;
-  return <ResponsiveContainer width="100%" height={260}><BarChart data={data} layout="vertical" margin={{ left: 8, right: 24, top: 8, bottom: 8 }}><XAxis type="number" tickFormatter={(value) => compactMoney(Number(value))} /><YAxis type="category" dataKey="name" width={112} tickFormatter={(value) => displayHoldingName(String(value))} /><Tooltip formatter={(value) => formatMoney(Number(value ?? 0), currency)} /><Bar dataKey="value" fill="#2563eb" radius={[0, 6, 6, 0]} /></BarChart></ResponsiveContainer>;
+  const chartData = data.slice(0, 8).map((item) => ({ ...item, fullName: item.name, shortName: chartLabel(item.name) }));
+  const dense = chartData.length > 5;
+  return (
+    <div className="smart-bar-chart">
+      <ResponsiveContainer width="100%" height={dense ? 318 : 286}>
+        <BarChart data={chartData} margin={{ left: 8, right: 16, top: 30, bottom: dense ? 34 : 24 }} barCategoryGap={dense ? "18%" : "26%"}>
+          <CartesianGrid stroke="#e4ebf1" vertical={false} />
+          <XAxis dataKey="shortName" interval={0} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} height={dense ? 58 : 44} />
+          <YAxis tickFormatter={(value) => compactMoney(Number(value))} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} width={66} />
+          <Tooltip cursor={{ fill: "rgba(14, 116, 144, 0.08)" }} formatter={(value, _name, item) => [formatMoney(Number(value ?? 0), currency), item?.payload?.fullName ?? "Value"]} labelFormatter={() => ""} />
+          <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={56}>
+            {chartData.map((_, index) => <Cell key={index} fill={chartColors[index % chartColors.length]} />)}
+            <LabelList dataKey="value" position="top" formatter={(value: unknown) => compactMoney(Number(value ?? 0))} style={{ fill: "#334155", fontSize: 11, fontWeight: 700 }} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      {data.length > chartData.length && <p className="chart-note compact-note">Showing top {chartData.length} of {data.length} items to keep the chart readable.</p>}
+    </div>
+  );
 }
 
-function HoldingRow({ holding, baseCurrency, cost }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; cost?: HoldingCost }) {
+function PercentBar({ data }: { data: Array<{ name: string; value: number }> }) {
+  if (data.length === 0) return <p className="message">No positive holding XIRR yet.</p>;
+  const chartData = data.slice(0, 8).map((item) => ({ ...item, fullName: item.name, shortName: chartLabel(item.name) }));
+  return (
+    <div className="smart-bar-chart">
+      <ResponsiveContainer width="100%" height={286}>
+        <BarChart data={chartData} margin={{ left: 8, right: 16, top: 30, bottom: 34 }} barCategoryGap="22%">
+          <CartesianGrid stroke="#e4ebf1" vertical={false} />
+          <XAxis dataKey="shortName" interval={0} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} height={58} />
+          <YAxis tickFormatter={(value) => Number(value).toFixed(0) + "%"} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} width={54} />
+          <Tooltip cursor={{ fill: "rgba(14, 116, 144, 0.08)" }} formatter={(value, _name, item) => [Number(value ?? 0).toFixed(2) + "%", item?.payload?.fullName ?? "XIRR"]} labelFormatter={() => ""} />
+          <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={56}>
+            {chartData.map((_, index) => <Cell key={index} fill={chartColors[index % chartColors.length]} />)}
+            <LabelList dataKey="value" position="top" formatter={(value: unknown) => Number(value ?? 0).toFixed(1) + "%"} style={{ fill: "#334155", fontSize: 11, fontWeight: 700 }} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+function HoldingRow({ holding, baseCurrency, returns }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; returns?: HoldingReturn }) {
   const value = holding.valueInBase === undefined ? "FX needed" : formatMoney(holding.valueInBase, baseCurrency);
-  return <div className="holding-row pro-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-money"><strong>{value}</strong><span>{holding.currency === baseCurrency ? "" : formatMoney(holding.value, holding.currency)}</span></div><div className="holding-money"><strong className={(cost?.profit ?? 0) >= 0 ? "positive-text" : "negative-text"}>{cost?.profit === undefined ? "-" : formatMoney(cost.profit, baseCurrency)}</strong><span>{cost?.returnPercent === undefined ? "P/L" : `${cost.returnPercent.toFixed(1)}%`}</span></div></div>;
+  const profitTone = (returns?.profit ?? 0) >= 0 ? "positive-text" : "negative-text";
+  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong><small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Invested</span><strong>{formatMoney(returns?.netInvested ?? 0, baseCurrency)}</strong><small>net of cash out</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{returns?.missingFx.length ? "FX needed" : "cash-flow return"}</small></div></div>;
 }
-
 function HoldingEditRow({ balance, updateBalance }: { balance: ManualBalance; updateBalance: (id: string, patch: Partial<ManualBalance>) => void }) {
   return <div className="edit-row holding-edit-row"><input value={balance.label} onChange={(event) => updateBalance(balance.id, { label: event.target.value })} /><select value={balance.category} onChange={(event) => updateBalance(balance.id, { category: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select><input value={balance.currency} onChange={(event) => updateBalance(balance.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={balance.value} onChange={(event) => updateBalance(balance.id, { value: Number(event.target.value) })} /><input type="number" step="0.000001" value={balance.quantity ?? ""} onChange={(event) => updateBalance(balance.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={balance.price ?? ""} onChange={(event) => updateBalance(balance.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="date" value={balance.asOfDate} onChange={(event) => updateBalance(balance.id, { asOfDate: event.target.value })} /><input value={balance.notes ?? ""} onChange={(event) => updateBalance(balance.id, { notes: event.target.value })} /></div>;
 }
@@ -954,30 +1015,6 @@ function TransactionRow({ tx, backup }: { tx: Transaction; backup: PortfolioBack
 
 function TransactionEditRow({ tx, updateTransaction }: { tx: Transaction; updateTransaction: (id: string, patch: Partial<Transaction>) => void }) {
   return <div className="edit-row transaction-edit-row"><input type="date" value={tx.date} onChange={(event) => updateTransaction(tx.id, { date: event.target.value })} /><select value={tx.type} onChange={(event) => updateTransaction(tx.id, { type: event.target.value as Transaction["type"] })}>{transactionTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select><input value={tx.currency} onChange={(event) => updateTransaction(tx.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={tx.amount} onChange={(event) => updateTransaction(tx.id, { amount: Number(event.target.value) })} /><input type="number" step="0.000001" value={tx.quantity ?? ""} onChange={(event) => updateTransaction(tx.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={tx.price ?? ""} onChange={(event) => updateTransaction(tx.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.01" value={tx.fees ?? 0} onChange={(event) => updateTransaction(tx.id, { fees: Number(event.target.value) })} /><input type="number" step="0.01" value={tx.taxes ?? 0} onChange={(event) => updateTransaction(tx.id, { taxes: Number(event.target.value) })} /></div>;
-}
-
-function calculateHoldingCosts(backup: PortfolioBackup): Map<string, HoldingCost> {
-  const costByInstrument = new Map<string, number>();
-  for (const tx of backup.transactions) {
-    const converted = tryConvertToBase(tx.amount, tx.currency, backup, tx.date);
-    if (converted === undefined) continue;
-    const current = costByInstrument.get(tx.instrumentId) ?? 0;
-    if (["buy", "sip", "deposit", "contribution"].includes(tx.type)) costByInstrument.set(tx.instrumentId, current + Math.abs(converted));
-    if (["sell", "redemption", "withdrawal", "maturity"].includes(tx.type)) costByInstrument.set(tx.instrumentId, current - Math.abs(converted));
-  }
-  const costs = new Map<string, HoldingCost>();
-  for (const balance of backup.manualBalances) {
-    if (!balance.instrumentId) continue;
-    const invested = Math.max(0, costByInstrument.get(balance.instrumentId) ?? 0);
-    const current = tryConvertToBase(balance.value, balance.currency, backup);
-    if (invested === 0 || current === undefined) {
-      costs.set(balance.id, { invested });
-      continue;
-    }
-    const profit = current - invested;
-    costs.set(balance.id, { invested, profit, returnPercent: (profit / invested) * 100 });
-  }
-  return costs;
 }
 
 function daysSince(date: string): number {
@@ -992,6 +1029,23 @@ function topTimelineKeys(points: PortfolioTimelinePoint[], field: keyof Pick<Por
     for (const [key, value] of Object.entries(point[field])) totals.set(key, Math.max(totals.get(key) ?? 0, value));
   }
   return [...totals.entries()].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([key]) => key);
+}
+
+function chartLabel(value: string): string {
+  const cleaned = displayHoldingName(value)
+    .replace(/Mutual Fund/gi, "MF")
+    .replace(/Institution/gi, "Inst")
+    .replace(/Conservative Hybrid/gi, "Conservative")
+    .replace(/Dynamic Asset Allocation/gi, "Dynamic AA")
+    .replace(/Ultra Short Term/gi, "Ultra ST")
+    .replace(/Nifty 50 Index/gi, "Nifty 50")
+    .replace(/Direct Growth/gi, "Direct")
+    .replace(/Transactions Ledger/gi, "Ledger")
+    .replace(/indmoney_export/gi, "INDMoney")
+    .replace(/cas_pdf/gi, "CAS")
+    .replace(/nps_statement/gi, "NPS")
+    .replace(/epfo_passbook/gi, "EPFO");
+  return cleaned.length <= 18 ? cleaned : cleaned.slice(0, 16).trimEnd() + "...";
 }
 
 function shortDate(value: string): string {

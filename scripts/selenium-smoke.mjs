@@ -20,6 +20,17 @@ const driver = await new Builder()
   .setFirefoxService(service)
   .build();
 
+async function jsClick(xpath, timeout = 15000) {
+  const element = await driver.wait(until.elementLocated(By.xpath(xpath)), timeout);
+  await driver.executeScript("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", element);
+  await driver.sleep(250);
+  await driver.executeScript("arguments[0].dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));", element);
+}
+
+async function waitForBodyText(text, timeout = 15000) {
+  await driver.wait(async () => (await driver.findElement(By.css("body")).getText()).toLowerCase().includes(text.toLowerCase()), timeout);
+}
+
 try {
   await driver.get(url);
   await driver.wait(until.elementLocated(By.css("h1")), 15000);
@@ -28,23 +39,39 @@ try {
     throw new Error(`Unexpected page heading: ${title}`);
   }
   for (const label of ["Overview", "Allocation", "Growth", "Risk"]) {
-    const tab = await driver.wait(until.elementLocated(By.xpath(`//button[.//strong[normalize-space(.)='${label}']]`)), 15000);
-    await tab.click();
+    await jsClick(`//button[.//strong[normalize-space(.)='${label}']]`);
     await driver.wait(async () => {
-      const body = await driver.findElement(By.css("body")).getText();
-      if (label === "Overview") return body.includes("Portfolio Growth");
-      if (label === "Allocation") return body.includes("Asset Class Value History");
-      if (label === "Growth") return body.includes("Asset Type Value History");
-      return body.includes("Top 5 Concentration");
+      const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
+      if (label === "Overview") return body.includes("portfolio growth");
+      if (label === "Allocation") return body.includes("asset class value history");
+      if (label === "Growth") return body.includes("asset type value history");
+      return body.includes("top 5 concentration");
     }, 15000);
   }
+  await jsClick("//button[contains(., 'Imports')]");
+  await waitForBodyText("Native File Intake");
+  await jsClick("//button[normalize-space(.)='Stage and Commit']");
+  await waitForBodyText("Import complete");
+  await jsClick("//button[contains(., 'Holdings')]");
+  await waitForBodyText("XIRR Coverage");
+  await driver.wait(async () => {
+    const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
+    return body.includes("xirr coverage") && body.includes("top holding xirr") && body.includes("sort by xirr");
+  }, 15000);
   fs.writeFileSync(screenshotPath, await driver.takeScreenshot(), "base64");
   console.log(`Selenium smoke passed: ${title}`);
   console.log(`Screenshot: ${screenshotPath}`);
+} catch (error) {
+  try {
+    fs.writeFileSync(screenshotPath.replace(/\.png$/, "-failed.png"), await driver.takeScreenshot(), "base64");
+    console.error(await driver.findElement(By.css("body")).getText());
+  } catch {}
+  throw error;
 } finally {
   await Promise.race([
     driver.quit(),
     new Promise((resolve) => setTimeout(resolve, 3000))
   ]);
-  process.exit(0);
 }
+
+process.exit(0);

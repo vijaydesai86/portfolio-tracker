@@ -83,7 +83,7 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
     activePositions.add("instrument:" + instrumentId);
     const price = latestPrice(backup.priceSnapshots, instrumentId, date);
     if (!price) continue;
-    const value = tryConvertToBase(quantity * price.price, price.currency, backup, price.asOfDate);
+    const value = tryConvertToBase(quantity * price.price, price.currency, backup, date);
     if (value === undefined) continue;
     const dimensions = instrumentDimensions(instrumentId, backup);
     current += value;
@@ -107,7 +107,7 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
     const positionKey = balance.instrumentId ? "instrument:" + balance.instrumentId : "balance:" + balance.id;
     activePositions.add(positionKey);
     if (balance.instrumentId && valuedInstruments.has(balance.instrumentId)) continue;
-    const value = tryConvertToBase(balance.value, balance.currency, backup, balance.asOfDate);
+    const value = tryConvertToBase(balance.value, balance.currency, backup, date);
     if (value === undefined) continue;
     current += value;
     addBreakdowns(currentBreakdown, balanceDimensions(balance, backup), value);
@@ -129,13 +129,55 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
 }
 
 function timelineDates(backup: PortfolioBackup): string[] {
-  const dates = new Set<string>();
-  for (const tx of backup.transactions) dates.add(tx.date);
-  for (const balance of backup.manualBalances) dates.add(balance.asOfDate);
+  const sourceDates = new Set<string>();
+  for (const tx of backup.transactions) sourceDates.add(tx.date);
+  for (const balance of backup.manualBalances) sourceDates.add(balance.asOfDate);
   for (const snapshot of backup.priceSnapshots) {
-    if (!isFxSnapshot(snapshot)) dates.add(snapshot.asOfDate);
+    if (!isFxSnapshot(snapshot)) sourceDates.add(snapshot.asOfDate);
   }
-  return [...dates].filter(Boolean).sort();
+
+  const sortedSourceDates = [...sourceDates].filter(Boolean).sort();
+  if (sortedSourceDates.length === 0) return [];
+
+  const start = sortedSourceDates[0];
+  const end = maxIsoDate(todayIso(), sortedSourceDates.at(-1)!);
+  const dates = new Set<string>([start, end]);
+  let cursor = monthEnd(start);
+  while (cursor < end) {
+    if (cursor >= start) dates.add(cursor);
+    cursor = nextMonthEnd(cursor);
+  }
+
+  return [...dates].sort();
+}
+
+function monthEnd(date: string): string {
+  const parsed = parseIsoDate(date);
+  const monthEndDate = new Date(Date.UTC(parsed.year, parsed.month + 1, 0));
+  return toIsoDate(monthEndDate);
+}
+
+function nextMonthEnd(date: string): string {
+  const parsed = parseIsoDate(date);
+  const next = new Date(Date.UTC(parsed.year, parsed.month + 2, 0));
+  return toIsoDate(next);
+}
+
+function parseIsoDate(date: string): { year: number; month: number; day: number } {
+  const [year, month, day] = date.split("-").map(Number);
+  return { year, month: month - 1, day };
+}
+
+function toIsoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function maxIsoDate(left: string, right: string): string {
+  return left >= right ? left : right;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function latestPrice(snapshots: PriceSnapshot[], instrumentId: string, date: string): PriceSnapshot | undefined {

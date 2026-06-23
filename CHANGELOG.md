@@ -4,6 +4,12 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Rebuilt the Holdings workspace with filtered summary metrics, top-holding/profit/XIRR charts, per-holding allocation, invested amount, P/L, simple return, XIRR, and richer responsive holding rows.
+
+- Reworked bar-chart rendering into a vertical, color-coded dashboard chart with compact labels, top-value labels, richer spacing, and readable tooltips.
+
+- Changed performance timeline rendering to month-end plus latest-date sampling, with carried-forward real prices converted using FX on the sampled valuation date so the latest graph point matches current INR value.
+
 - Added historical market-data refresh for mutual-fund NAVs and US stock prices, then rebuilt timeline charts to reconstruct dated portfolio value from units, PF book value, NPS statement NAVs, and real FX/NAV/quote snapshots.
 
 - Fixed performance timeline semantics so portfolio current value appears only on complete valuation dates, removed the misleading profit line from sparse growth charts, and relabeled breakdown charts around complete valuation history.

@@ -68,7 +68,7 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 
 ## Portfolio Analytics Rule
 
-- Dashboard profit labels must distinguish lifetime cash in, lifetime cash out, net invested, current P/L, fees/tax, total P/L, and XIRR. Main analytics should keep invested, current value, and profit/loss primary; supporting cash-flow analytics can show cash in/out and fees/taxes.
+- Dashboard profit labels must distinguish lifetime cash in, lifetime cash out, net invested, current P/L, fees/tax, total P/L, and XIRR. Main analytics should keep invested, current value, and profit/loss primary; supporting cash-flow analytics can show cash in/out and fees/taxes. Holdings analytics should show per-holding allocation, invested/net invested, P/L, simple return, and XIRR when transaction history and FX support it.
 - New analytics panels must remain adaptive to future asset modules: PF/EPF, PPF/SSY, NPS, FD, cash, ESPP, Indian stocks, US stocks, and mutual funds.
 
 - Asset modules must be classified from structured account/instrument types, never from free-text fund or provider names.
@@ -77,4 +77,4 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 - PF/NPS yearly imports must retain all transactions from every imported year while keeping current balances from the latest statement date only. Do not depend on private filenames; parse by verified statement format.
 - Keep PF categorized as Debt and NPS categorized from explicit scheme type: E as Equity, C/G as Debt, A as Others.
 - Timeline current-value charts must not fabricate historical prices. Use imported statement balances, real price/NAV snapshots, and transaction units only; show invested flow even when historical current value is unavailable.
-- Portfolio timeline current value must be reconstructed from units held on each date, capitalized PF transactions/interest, NPS statement NAV snapshots, and real historical NAV/quote/FX snapshots. Plot current value and breakdowns only on complete valuation dates where every active holding has a value.
+- Portfolio timeline current value must be reconstructed from units held on sampled month-end/latest dates, capitalized PF transactions/interest, NPS statement NAV snapshots, and real historical NAV/quote/FX snapshots. Plot current value and breakdowns only on complete valuation dates where every active holding has a value. For foreign assets, convert local value using FX on the sampled valuation date, not the stale quote date.

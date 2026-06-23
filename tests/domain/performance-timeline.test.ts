@@ -56,4 +56,43 @@ describe("portfolio performance timeline", () => {
     expect(latest.profit).toBeNull();
     expect(latest.category).toMatchObject({ Equity: 1200 });
   });
+
+  it("samples month-end plus latest date and carries real prices forward", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push({ id: "acct", name: "MF", institution: "AMC", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "inst", name: "Fund", type: "mutual_fund", currency: "INR", country: "IN", category: "Equity", issuer: "AMC", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.transactions.push({ id: "buy", accountId: "acct", instrumentId: "inst", date: "2026-01-15", type: "buy", quantity: 10, amount: 1000, currency: "INR", fees: 0, taxes: 0, source: { type: "import" }, userModified: false, createdAt: "2026-01-15T00:00:00.000Z", updatedAt: "2026-01-15T00:00:00.000Z" });
+    backup.priceSnapshots.push(
+      { id: "p1", instrumentId: "inst", price: 100, currency: "INR", asOfDate: "2026-01-31", source: "test", createdAt: "2026-01-31T00:00:00.000Z" },
+      { id: "p2", instrumentId: "inst", price: 150, currency: "INR", asOfDate: "2026-03-31", source: "test", createdAt: "2026-03-31T00:00:00.000Z" }
+    );
+
+    const timeline = buildPortfolioTimeline(backup);
+    const dates = timeline.points.map((point) => point.date);
+    const latest = timeline.points.at(-1)!;
+
+    expect(dates.slice(0, 4)).toEqual(["2026-01-15", "2026-01-31", "2026-02-28", "2026-03-31"]);
+    expect(latest.date).toBe(new Date().toISOString().slice(0, 10));
+    expect(latest.current).toBe(1500);
+  });
+
+  it("uses latest FX on the sampled valuation date for carried-forward USD prices", () => {
+    const backup = createEmptyBackup("INR");
+    const today = new Date().toISOString().slice(0, 10);
+    backup.accounts.push({ id: "acct", name: "US Broker", institution: "Broker", type: "us_stock", currency: "USD", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "inst", name: "AAPL", type: "us_stock", symbol: "AAPL", currency: "USD", country: "US", category: "Equity", issuer: "Apple", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.transactions.push({ id: "buy", accountId: "acct", instrumentId: "inst", date: "2026-01-01", type: "buy", quantity: 10, amount: 100, currency: "USD", fees: 0, taxes: 0, source: { type: "import" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.priceSnapshots.push(
+      { id: "fx_buy", instrumentId: "USDINR", price: 75, currency: "INR", asOfDate: "2026-01-01", source: "test", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "quote", instrumentId: "inst", price: 20, currency: "USD", asOfDate: "2026-01-31", source: "test", createdAt: "2026-01-31T00:00:00.000Z" },
+      { id: "fx_old", instrumentId: "USDINR", price: 80, currency: "INR", asOfDate: "2026-01-31", source: "test", createdAt: "2026-01-31T00:00:00.000Z" },
+      { id: "fx_today", instrumentId: "USDINR", price: 90, currency: "INR", asOfDate: today, source: "test", createdAt: today + "T00:00:00.000Z" }
+    );
+
+    const latest = buildPortfolioTimeline(backup).points.at(-1)!;
+
+    expect(latest.date).toBe(today);
+    expect(latest.current).toBe(18000);
+  });
+
 });
