@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
 import { buildReadinessModules, type ReadinessModule } from "@/src/domain/assetModules";
+import { lossWatchlist, topGainContributors, type HoldingPerformanceRow } from "@/src/domain/holdingPerformance";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
 import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type CasCanonicalImport, type CasParseResult } from "@/src/importers/casText";
@@ -40,14 +41,6 @@ type HoldingCost = {
   returnPercent?: number;
 };
 
-type HoldingPerformance = {
-  id: string;
-  name: string;
-  value: number;
-  profit?: number;
-  returnPercent?: number;
-  meta: string;
-};
 
 type DashboardSignal = {
   label: string;
@@ -151,7 +144,7 @@ export function TrackerApp() {
     return { ...asset, value: bucket.value, percent: bucket.percent, count };
   });
 
-  const holdingPerformance = useMemo<HoldingPerformance[]>(() => insights.holdings.map((holding) => {
+  const holdingPerformance = useMemo<HoldingPerformanceRow[]>(() => insights.holdings.map((holding) => {
     const cost = holdingCosts.get(holding.id);
     return {
       id: holding.id,
@@ -163,8 +156,8 @@ export function TrackerApp() {
     };
   }), [holdingCosts, insights.holdings]);
 
-  const topGainers = useMemo(() => holdingPerformance.filter((item) => item.profit !== undefined).slice().sort((a, b) => (b.profit ?? 0) - (a.profit ?? 0)).slice(0, 5), [holdingPerformance]);
-  const topLosers = useMemo(() => holdingPerformance.filter((item) => item.profit !== undefined).slice().sort((a, b) => (a.profit ?? 0) - (b.profit ?? 0)).slice(0, 5), [holdingPerformance]);
+  const topGainers = useMemo(() => topGainContributors(holdingPerformance), [holdingPerformance]);
+  const topLosers = useMemo(() => lossWatchlist(holdingPerformance), [holdingPerformance]);
   const totalFxIssues = new Set([...summary.missingFx, ...insights.transactionStats.missingFx]).size;
   const staleHoldings = insights.holdings.filter((holding) => daysSince(holding.asOfDate) > 7).length;
   const reviewCategoryCount = insights.holdings.filter((holding) => holding.category === "Others").length;
@@ -623,7 +616,7 @@ export function TrackerApp() {
 
             <div className="focus-grid">
               <HoldingRankPanel title="Top Gain Contributors" direction="gain" items={topGainers} currency={backup.baseCurrency} />
-              <HoldingRankPanel title="Loss / Drag Watchlist" direction="loss" items={topLosers} currency={backup.baseCurrency} />
+              <HoldingRankPanel title="Loss Watchlist" direction="loss" items={topLosers} currency={backup.baseCurrency} />
               <div className="readiness-panel cardless-panel">
                 <div className="panel-heading"><span>Asset Modules</span><strong>Extensible intake</strong></div>
                 <div className="module-list">{readinessModules.map((module) => <ReadinessRow module={module} currency={backup.baseCurrency} key={module.label} />)}</div>
@@ -794,9 +787,10 @@ function SignalCard({ signal }: { signal: DashboardSignal }) {
   return <div className={"signal-item " + signal.tone}><Icon size={18} /><div><span>{signal.label}</span><strong>{signal.value}</strong><small>{signal.detail}</small></div></div>;
 }
 
-function HoldingRankPanel({ title, direction, items, currency }: { title: string; direction: "gain" | "loss"; items: HoldingPerformance[]; currency: string }) {
+function HoldingRankPanel({ title, direction, items, currency }: { title: string; direction: "gain" | "loss"; items: HoldingPerformanceRow[]; currency: string }) {
   const Icon = direction === "gain" ? TrendingUp : TrendingDown;
-  return <div className="rank-panel cardless-panel"><div className="panel-heading"><span>{title}</span><Icon size={18} /></div>{items.length === 0 ? <p className="message">Cost basis is unavailable until matching transactions and FX are complete.</p> : <div className="rank-list">{items.map((item) => <div className="rank-row" key={item.id}><div><strong title={item.name}>{item.name}</strong><span>{item.meta}</span></div><div className={(item.profit ?? 0) >= 0 ? "positive-text" : "negative-text"}><strong>{formatMoney(item.profit ?? 0, currency)}</strong><span>{item.returnPercent === undefined ? "-" : item.returnPercent.toFixed(1) + "%"}</span></div></div>)}</div>}</div>;
+  const emptyMessage = direction === "loss" ? "No holdings with negative P/L." : "Cost basis is unavailable until matching transactions and FX are complete.";
+  return <div className="rank-panel cardless-panel"><div className="panel-heading"><span>{title}</span><Icon size={18} /></div>{items.length === 0 ? <p className="message">{emptyMessage}</p> : <div className="rank-list">{items.map((item) => <div className="rank-row" key={item.id}><div><strong title={item.name}>{item.name}</strong><span>{item.meta}</span></div><div className={(item.profit ?? 0) >= 0 ? "positive-text" : "negative-text"}><strong>{formatMoney(item.profit ?? 0, currency)}</strong><span>{item.returnPercent === undefined ? "-" : item.returnPercent.toFixed(1) + "%"}</span></div></div>)}</div>}</div>;
 }
 
 function ReadinessRow({ module, currency }: { module: ReadinessModule; currency: string }) {

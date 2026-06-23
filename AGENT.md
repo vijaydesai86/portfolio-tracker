@@ -72,3 +72,4 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 - New analytics panels must remain adaptive to future asset modules: PF/EPF, PPF/SSY, NPS, FD, cash, ESPP, Indian stocks, US stocks, and mutual funds.
 
 - Asset modules must be classified from structured account/instrument types, never from free-text fund or provider names.
+- Performance panels must be semantically strict: a loss watchlist must filter to negative P/L only and must not show low positive gains as losses.

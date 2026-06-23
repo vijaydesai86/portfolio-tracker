@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Fixed the dashboard loss watchlist so it only shows holdings with negative P/L instead of the lowest positive gains.
+
 - Added browser EPFO/PF yearly PDF import and NPS yearly CSV statement import with canonical balances, transactions, private-file parser tests, and Selenium upload/commit smoke coverage.
 
 - Refined dashboard KPI hierarchy so invested/current/profit stay primary, moved lifetime cash in/out and fees/taxes into supporting analytics, and fixed asset-module categorization to use structured account/instrument types instead of fragile name matching.
