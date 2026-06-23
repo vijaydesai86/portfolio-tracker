@@ -307,8 +307,10 @@ function terminalFlowsInBase(balances: ManualBalance[], backup: PortfolioBackup,
 }
 
 function signedTransactionAmount(tx: Transaction): number {
-  if (["buy", "sip", "deposit", "contribution", "fee", "tax"].includes(tx.type)) return -Math.abs(tx.amount);
-  if (["sell", "redemption", "dividend", "interest", "maturity", "withdrawal"].includes(tx.type)) return Math.abs(tx.amount);
+  const charges = Math.abs(tx.fees ?? 0) + Math.abs(tx.taxes ?? 0);
+  if (["buy", "sip", "deposit", "contribution"].includes(tx.type)) return -(Math.abs(tx.amount) + charges);
+  if (["sell", "redemption", "dividend", "interest", "maturity", "withdrawal"].includes(tx.type)) return Math.abs(tx.amount) - charges;
+  if (["fee", "tax"].includes(tx.type)) return -Math.abs(tx.amount);
   return 0;
 }
 

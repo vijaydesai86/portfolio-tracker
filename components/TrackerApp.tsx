@@ -14,7 +14,7 @@ import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type Ca
 import { applyCanonicalIndMoneyImport, buildCanonicalIndMoneyImport, parseIndMoneyWorkbook, type IndMoneyCanonicalImport, type IndMoneyParseResult } from "@/src/importers/indmoneyXlsx";
 import { applyCanonicalEpfoImport, buildCanonicalEpfoImport, parseEpfoPassbookText, type EpfoCanonicalImport, type EpfoPassbookParseResult } from "@/src/importers/epfoPassbook";
 import { applyCanonicalNpsImport, buildCanonicalNpsImport, parseNpsCsv, type NpsCanonicalImport, type NpsParseResult } from "@/src/importers/npsStatement";
-import { commitManualCsvImport } from "@/src/importers/importPipeline";
+import { commitManualCsvImport, commitManualWorkbookImport } from "@/src/importers/importPipeline";
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
@@ -267,6 +267,10 @@ export function TrackerApp() {
 
     if (detection.providerId === "cas_pdf") {
       setStatus(`${detection.label}: enter the PDF password and parse in browser.`);
+    } else if (detection.providerId === "manual_csv" && detection.nativeInputType === "xlsx") {
+      setStatus(`${detection.label}: parse the manual XLSX workbook in browser.`);
+    } else if (detection.providerId === "manual_csv" && detection.nativeInputType === "csv") {
+      setStatus(`${detection.label}: parse the manual CSV in browser.`);
     } else if (detection.providerId === "indmoney_export") {
       setStatus(`${detection.label}: parse the XLSX ledger in browser.`);
     } else if (detection.providerId === "epfo_passbook") {
@@ -279,6 +283,30 @@ export function TrackerApp() {
       setStatus(`${detection.label}: implemented import path detected.`);
     } else {
       setStatus(`${detection.label}: native file detected, parser not implemented yet.`);
+    }
+  }
+
+  async function parseManualNativeInBrowser() {
+    const nativeFile = nativeFiles[0];
+    if (!nativeFile) {
+      setErrors(["Select a manual workbook or CSV first."]);
+      return;
+    }
+    setErrors([]);
+    setStatus("Parsing manual portfolio file in browser...");
+
+    try {
+      const importId = "manual_" + Date.now();
+      const lowerName = nativeFile.name.toLowerCase();
+      const result = lowerName.endsWith(".xlsx")
+        ? await commitManualWorkbookImport(backup, nativeFile, { importId, fileName: nativeFile.name })
+        : commitManualCsvImport(backup, await nativeFile.text(), { importId, fileName: nativeFile.name });
+      setBackup(result.backup);
+      setErrors(result.errors.map((error) => "Row " + error.row + ": " + error.message));
+      setStatus("Manual import complete: " + result.addedBalances + " holding(s), " + result.addedTransactions + " transaction(s), " + result.addedPrices + " price/FX row(s) added; " + result.skippedDuplicates + " duplicate(s) skipped.");
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : "Unable to parse manual portfolio file"]);
+      setStatus("Manual portfolio import failed.");
     }
   }
 
@@ -782,7 +810,7 @@ export function TrackerApp() {
           </section>
         )}
 
-        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
+        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
 
         {view === "backup" && (
           <section className="grid two">
@@ -806,6 +834,7 @@ function ImportsView(props: {
   casPassword: string;
   setCasPassword: (value: string) => void;
   parseCasPdfInBrowser: () => void;
+  parseManualNativeInBrowser: () => void;
   parseIndMoneyXlsxInBrowser: () => void;
   parseEpfoPdfInBrowser: () => void;
   parseNpsCsvInBrowser: () => void;
@@ -850,6 +879,7 @@ function ImportsView(props: {
           <input type="file" multiple accept=".json,.csv,.pdf,.html,.xlsx,application/json,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => props.inspectNativeFile(event.target.files ?? undefined)} />
           {props.nativeDetection && <div className="detection"><div><span>Provider</span><strong>{props.nativeDetection.label}</strong></div><div><span>Files</span><strong>{props.nativeFileCount}</strong></div><div><span>Status</span><strong>{props.nativeDetection.status}</strong></div><div><span>Type</span><strong>{props.nativeDetection.nativeInputType}</strong></div><div><span>Confidence</span><strong>{props.nativeDetection.confidence}</strong></div><p>{props.nativeDetection.reason}</p></div>}
           {props.nativeDetection?.providerId === "cas_pdf" && <div className="native-actions"><input type="password" placeholder="CAS PDF password" value={props.casPassword} onChange={(event) => props.setCasPassword(event.target.value)} /><button className="primary" onClick={props.parseCasPdfInBrowser}>Parse CAS PDF</button></div>}
+          {props.nativeDetection?.providerId === "manual_csv" && ["csv", "xlsx"].includes(props.nativeDetection.nativeInputType) && <div className="native-actions"><button className="primary" onClick={props.parseManualNativeInBrowser}>Parse Manual {props.nativeDetection.nativeInputType.toUpperCase()}</button></div>}
           {props.nativeDetection?.providerId === "indmoney_export" && <div className="native-actions"><button className="primary" onClick={props.parseIndMoneyXlsxInBrowser}>Parse INDMoney XLSX</button></div>}
           {props.nativeDetection?.nativeInputType === "pdf" && props.nativeDetection.providerId !== "cas_pdf" && <div className="native-actions"><button className="primary" onClick={props.parseEpfoPdfInBrowser}>Parse PF PDF{props.nativeFileCount > 1 ? "s" : ""}</button></div>}
           {props.nativeDetection?.providerId === "nps_statement" && props.nativeDetection.nativeInputType === "csv" && <div className="native-actions"><button className="primary" onClick={props.parseNpsCsvInBrowser}>Parse NPS CSV{props.nativeFileCount > 1 ? "s" : ""}</button></div>}
@@ -894,29 +924,32 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 
 function PortfolioGrowthChart({ points, currency }: { points: PortfolioTimelinePoint[]; currency: string }) {
   if (points.length === 0) return <p className="message">Import transactions and balances to build a growth timeline.</p>;
+  const chartData = timelineChartData(points);
   const completeValuePoints = points.filter((point) => point.current !== null).length;
   return (
     <div className="timeline-chart-block">
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={points} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
+        <LineChart data={chartData} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
           <CartesianGrid stroke="#e2e8f0" vertical={false} />
-          <XAxis dataKey="date" ticks={timelineTicks(points)} tickFormatter={timelineTickLabel} minTickGap={26} />
+          <XAxis dataKey="ts" type="number" scale="time" domain={["dataMin", "dataMax"]} ticks={timelineTicks(chartData)} tickFormatter={timelineTickLabel} minTickGap={26} />
           <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
-          <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), String(name)]} labelFormatter={(label) => String(label)} />
+          <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), String(name)]} labelFormatter={(label) => dateLabel(Number(label))} />
           <Legend />
           <Line type="monotone" dataKey="invested" stroke="#64748b" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} name="Invested" />
-          <Line type="monotone" dataKey="current" stroke="#0f766e" strokeWidth={3.2} dot={false} activeDot={{ r: 5 }} connectNulls name="Current Value" />
+          <Line type="monotone" dataKey="historicalCurrent" stroke="#0f766e" strokeWidth={3.2} dot={false} activeDot={{ r: 5 }} connectNulls={false} name="Historical Current" />
+          <Line type="monotone" dataKey="latestCurrent" stroke="#0f766e" strokeWidth={0} dot={{ r: 5, fill: "#0f766e", strokeWidth: 2, stroke: "#ffffff" }} activeDot={{ r: 6 }} name="Today Snapshot" />
         </LineChart>
       </ResponsiveContainer>
-      <p className="chart-note">Sampled at month-end plus today's current snapshot. The final point matches the dashboard current value; historical points use the latest real NAV, quote, PF book value, NPS statement NAV, and FX rate available on or before each point. Coverage: {completeValuePoints}/{points.length} valuation point(s).</p>
+      <p className="chart-note">Sampled at month-end plus today's current snapshot. The final marker matches the dashboard current value; historical current value is not connected to today when the latest point is a different current-holdings snapshot. Coverage: {completeValuePoints}/{points.length} valuation point(s).</p>
     </div>
   );
 }
 
 function BreakdownGrowthChart({ points, field, keys, currency }: { points: PortfolioTimelinePoint[]; field: keyof Pick<PortfolioTimelinePoint, "category" | "region" | "assetKind" | "issuer">; keys: string[]; currency: string }) {
   if (points.length === 0 || keys.length === 0) return <p className="message">No dated valuation snapshots yet for this breakdown.</p>;
-  const completePoints = points.filter((point) => point.current !== null);
-  const data = completePoints.map((point) => Object.fromEntries([["date", point.date], ...keys.map((key) => [key, point[field][key] ?? null])]));
+  const today = todayIso();
+  const completePoints = points.filter((point) => point.current !== null && point.date !== today);
+  const data = completePoints.map((point) => Object.fromEntries([["ts", toTimestamp(point.date)], ["date", point.date], ...keys.map((key) => [key, point[field][key] ?? null])])) as Array<Record<string, number | string | null>>;
   const populatedPoints = data.filter((row) => keys.some((key) => typeof row[key] === "number")).length;
   if (populatedPoints < 2) return <p className="message">Not enough historical valuation snapshots yet. Import yearly statements or historical NAV/price data to build a trend.</p>;
   return (
@@ -924,14 +957,14 @@ function BreakdownGrowthChart({ points, field, keys, currency }: { points: Portf
       <ResponsiveContainer width="100%" height={292}>
         <AreaChart data={data} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
           <CartesianGrid stroke="#e2e8f0" vertical={false} />
-          <XAxis dataKey="date" ticks={timelineTicks(completePoints)} tickFormatter={timelineTickLabel} minTickGap={26} />
+          <XAxis dataKey="ts" type="number" scale="time" domain={["dataMin", "dataMax"]} ticks={timelineTicks(data as Array<{ ts: number }>)} tickFormatter={timelineTickLabel} minTickGap={26} />
           <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
-          <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), displayHoldingName(String(name))]} labelFormatter={(label) => String(label)} />
+          <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), displayHoldingName(String(name))]} labelFormatter={(label) => dateLabel(Number(label))} />
           <Legend formatter={(value) => displayHoldingName(String(value))} />
-          {keys.map((key, index) => <Area key={key} type="monotone" dataKey={key} stackId="value" stroke={chartColors[index % chartColors.length]} fill={chartColors[index % chartColors.length]} fillOpacity={0.18} strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls />)}
+          {keys.map((key, index) => <Area key={key} type="monotone" dataKey={key} stackId="value" stroke={chartColors[index % chartColors.length]} fill={chartColors[index % chartColors.length]} fillOpacity={0.18} strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls={false} />)}
         </AreaChart>
       </ResponsiveContainer>
-      <p className="chart-note">Stacked month-end history using complete portfolio valuation points only. Missing history means NAV, quote, or FX data is not yet available for every active holding.</p>
+      <p className="chart-note">Stacked month-end history using complete portfolio valuation points only. Today's snapshot is shown in dashboard totals and allocation bars, not connected as a fake historical segment.</p>
     </div>
   );
 }
@@ -1110,27 +1143,55 @@ function compactChartLabel(value: string, max = 24): string {
   return label || cleaned.slice(0, max).trimEnd();
 }
 
-function timelineTicks(points: PortfolioTimelinePoint[]): string[] {
+type TimelineChartPoint = PortfolioTimelinePoint & { ts: number; historicalCurrent: number | null; latestCurrent: number | null };
+
+function timelineChartData(points: PortfolioTimelinePoint[]): TimelineChartPoint[] {
+  const today = todayIso();
+  return points.map((point) => ({
+    ...point,
+    ts: toTimestamp(point.date),
+    historicalCurrent: point.date === today ? null : point.current,
+    latestCurrent: point.date === today ? point.current : null
+  }));
+}
+
+function timelineTicks(points: Array<{ ts: number }>): number[] {
   if (points.length === 0) return [];
-  const ticks: string[] = [];
+  const ticks: number[] = [];
   const years = new Set<string>();
   for (const point of points) {
-    const year = point.date.slice(0, 4);
+    const year = new Date(point.ts).getUTCFullYear().toString();
     if (!years.has(year)) {
       years.add(year);
-      ticks.push(point.date);
+      ticks.push(point.ts);
     }
   }
-  const latest = points.at(-1)?.date;
+  const latest = points.at(-1)?.ts;
   if (latest && !ticks.includes(latest)) ticks.push(latest);
   return ticks;
 }
 
-function timelineTickLabel(value: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  if (value === today) return "Today";
-  const match = value.match(/^(\d{4})-/);
-  return match ? match[1] : value;
+function timelineTickLabel(value: number): string {
+  const today = todayIso();
+  if (dateFromTimestamp(value) === today) return "Today";
+  return new Date(value).getUTCFullYear().toString();
+}
+
+function toTimestamp(date: string): number {
+  return Date.parse(date + "T00:00:00.000Z");
+}
+
+function dateFromTimestamp(value: number): string {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function dateLabel(value: number): string {
+  const date = dateFromTimestamp(value);
+  return date === todayIso() ? date + " (today)" : date;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function latestAsOfDate(dates: string[]): string {

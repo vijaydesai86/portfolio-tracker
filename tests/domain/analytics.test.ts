@@ -195,6 +195,18 @@ describe("portfolio analytics", () => {
     expect(insights.transactionStats.incomeBase).toBe(0);
     expect(insights.holdings[0]).toMatchObject({ assetKind: "PF", valueInBase: 1050 });
   });
+
+  it("includes transaction fee and tax fields in portfolio XIRR cash flows", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push({ id: "acct", name: "Broker", institution: "Broker", type: "indian_stock", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "inst", name: "Stock", type: "indian_stock", currency: "INR", country: "IN", category: "Equity", issuer: "Company", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.transactions.push({ id: "buy", accountId: "acct", instrumentId: "inst", date: "2026-01-01", type: "buy", quantity: 10, amount: 1000, currency: "INR", fees: 10, taxes: 0, source: { type: "import" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.manualBalances.push({ id: "bal", accountId: "acct", instrumentId: "inst", label: "Stock", category: "Equity", currency: "INR", value: 1110, asOfDate: "2027-01-01", source: { type: "import" }, userModified: false, createdAt: "2027-01-01T00:00:00.000Z", updatedAt: "2027-01-01T00:00:00.000Z" });
+
+    const insights = calculatePortfolioInsights(backup);
+
+    expect(insights.xirrBase).toBeCloseTo(9.88, 1);
+  });
 });
 
 describe("INR-first multi-currency analytics", () => {

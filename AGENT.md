@@ -60,7 +60,8 @@ Current automated CAS support includes browser PDF upload, password entry, clien
 - INDMoney Transactions Ledger XLSX browser import is implemented and private-file verified.
 - EPFO/PF yearly PDF browser import is implemented and private-file verified. The private raw PDF and extracted text must never be committed.
 - NPS yearly CSV statement browser import is implemented and private-file verified. NPS PDF/XLSX remains detected-only until real fixtures are available.
-- Live market refresh uses AMFI NAVAll for mutual funds, Stooq/Yahoo for US stock quotes, and Frankfurter/Open ER API/currency-api/Stooq for USD/INR. Never replace failed market fetches with fabricated fallback prices; manual FX import must be user-supplied real data.
+- Live market refresh uses AMFI NAVAll for mutual funds, Stooq/Yahoo for US stock quotes, and Frankfurter/Open ER API/currency-api/Stooq for USD/INR. Never replace failed market fetches with fabricated fallback prices; manual FX/imported workbook FX must be user-supplied real data.
+- Generic manual XLSX workbook import is implemented for `Holdings`, `Transactions`, `Prices`, and `FX` sheets. XLSX is the preferred manual format; legacy CSV is balance-only fallback.
 
 ## INR-First Analytics Rule
 
@@ -68,7 +69,7 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 
 ## Portfolio Analytics Rule
 
-- Dashboard profit labels must distinguish lifetime cash in, lifetime cash out, net invested, current P/L, fees/tax, total P/L, and XIRR. Main analytics should keep invested, current value, and profit/loss primary; supporting cash-flow analytics can show cash in/out and fees/taxes. Holdings analytics should show per-holding allocation, invested/net invested, P/L, simple return, and XIRR when transaction history and FX support it.
+- Dashboard profit labels must distinguish lifetime cash in, lifetime cash out, net invested, current P/L, fees/tax, total P/L, and XIRR. Portfolio XIRR cash flows must include fee/tax fields on transactions: buy/contribution fees increase outflow, and sell/dividend/income fees reduce inflow. Main analytics should keep invested, current value, and profit/loss primary; supporting cash-flow analytics can show cash in/out and fees/taxes. Holdings analytics should show per-holding allocation, invested/net invested, P/L, simple return, and XIRR when transaction history and FX support it.
 - New analytics panels must remain adaptive to future asset modules: PF/EPF, PPF/SSY, NPS, FD, cash, ESPP, Indian stocks, US stocks, and mutual funds.
 
 - Asset modules must be classified from structured account/instrument types, never from free-text fund or provider names.
@@ -76,5 +77,5 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 - PF interest credited inside the account is capitalized interest, not cash returned to the user. Represent it without changing invested cash-flow totals or double-counting profit.
 - PF/NPS yearly imports must retain all transactions from every imported year while keeping current balances from the latest statement date only. Do not depend on private filenames; parse by verified statement format.
 - Keep PF categorized as Debt and NPS categorized from explicit scheme type: E as Equity, C/G as Debt, A as Others.
-- Timeline current-value charts must not fabricate historical prices. Use imported statement balances, real price/NAV snapshots, and transaction units only; show invested flow even when historical current value is unavailable. Timeline axes must be clamped to today, and the latest plotted current value and breakdowns must match the dashboard current-holdings snapshot.
+- Timeline current-value charts must not fabricate historical prices. Use imported statement balances, real price/NAV snapshots, and transaction units only; show invested flow even when historical current value is unavailable. Timeline axes must be clamped to today. If today is a holdings snapshot rather than a continuous reconstructed valuation point, render it as a separate snapshot marker instead of connecting it as a fake line segment.
 - Portfolio timeline current value must be reconstructed from units held on sampled month-end/latest dates, capitalized PF transactions/interest, NPS statement NAV snapshots, and real historical NAV/quote/FX snapshots. Plot current value and breakdowns only on complete valuation dates where every active holding has a value. For foreign assets, convert local value using FX on the sampled valuation date, not the stale quote date.

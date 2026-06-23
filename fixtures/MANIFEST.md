@@ -12,6 +12,8 @@ This manifest is the source of truth for import files committed to the repositor
 | `fixtures/importable/debt-small-savings-template.csv` | CSV | Application-defined canonical template pack | Yes | No provider support; debt/small-savings template |
 | `fixtures/importable/cash-espp-template.csv` | CSV | Application-defined canonical template pack | Yes | No provider support; cash and ESPP contribution template |
 | `fixtures/importable/gold-others-template.csv` | CSV | Application-defined canonical template pack | Yes | No provider support; gold and others template |
+| `fixtures/importable/generic-manual-portfolio-template.xlsx` | XLSX | Application-defined manual workbook template | Yes | No provider support; preferred manual format for holdings, transactions, prices, and FX |
+| `fixtures/importable/manual-workbook-template/*.csv` | CSV sheet pack | Application-defined manual workbook schema mirrors | Yes | No provider support; readable sheet-level copy of the XLSX workbook |
 
 ## Research-Only Sources
 

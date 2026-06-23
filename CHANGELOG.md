@@ -4,6 +4,10 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Added a generic manual XLSX workbook importer and template with Holdings, Transactions, Prices, and FX sheets; wired browser upload/commit support; added readable CSV sheet mirrors; and fixed portfolio XIRR cash flows to include transaction fee/tax fields.
+
+- Changed timeline chart rendering so today's current holdings snapshot is shown as a separate marker instead of a misleading connected line segment from the last complete historical valuation point.
+
 - Fixed portfolio timeline chart correctness by clamping timeline dates to today, forcing the latest plotted current value and breakdowns to match the dashboard current-holdings snapshot, normalizing invalid chart buckets, and replacing hard-truncated chart labels with readable finance aliases.
 
 - Rebuilt the Holdings workspace with filtered summary metrics, top-holding/profit/XIRR charts, per-holding allocation, invested amount, P/L, simple return, XIRR, and richer responsive holding rows.

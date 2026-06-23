@@ -39,6 +39,10 @@ export function detectImportSource(input: ImportDetectionInput): ImportDetection
     return detection("manual_csv", "csv", "high", "Matches implemented manual canonical CSV headers.");
   }
 
+  if (extension === "xlsx" && (fileName.includes("manual") || fileName.includes("template") || fileName.includes("portfolio"))) {
+    return detection("manual_csv", "xlsx", "medium", "Looks like a manual portfolio workbook. Parser will validate Holdings/Transactions/Prices/FX sheets.");
+  }
+
   if (extension === "csv" && isFidelityCsv(text, fileName)) {
     return detection("fidelity_csv", "csv", "high", "Matches Fidelity positions or history CSV headers.");
   }
@@ -63,7 +67,7 @@ export function detectImportSource(input: ImportDetectionInput): ImportDetection
     return detection("bank_small_savings", extension as NativeInputType, "low", "Looks like a PPF/SSY/FD statement.");
   }
 
-  return detection("manual_csv", extension || "unknown", "low", "Unknown format. Use manual canonical CSV fallback or add a verified provider fixture.");
+  return detection("manual_csv", extension || "unknown", "low", "Unknown format. Use manual workbook/canonical CSV fallback or add a verified provider fixture.");
 }
 
 function detection(providerId: ImportProviderId, nativeInputType: NativeInputType, confidence: ImportDetection["confidence"], reason: string): ImportDetection {

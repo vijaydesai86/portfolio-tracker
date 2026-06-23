@@ -26,8 +26,8 @@ Portfolio Tracker is a local-first multi-asset portfolio tracker and goal planne
 - Tabbed analytics cockpit with Overview, Allocation, Growth, and Risk sections; main KPIs for invested amount, current value, profit/loss, and XIRR; supporting cash-flow analytics; month-end invested versus reconstructed current-value history from units and real dated NAV/quote/FX snapshots; latest timeline value clamped to today and tied to the same current-holdings snapshot as dashboard totals; complete-valuation drilldowns by asset class, region, asset kind, and issuer; allocation, concentration, source, and institution analytics.
 - The loss watchlist is sign-strict: it only includes holdings with negative P/L, while low positive gains remain outside the loss panel.
 - Separate Holdings and Transactions workspaces. Holdings now has filtered summary metrics, top-holding/profit/XIRR charts, per-holding allocation, invested amount, P/L, simple return, XIRR, search/sort, explicit edit mode, category overrides, and quantity/price/value edits. Transactions remain searchable with inline corrections.
-- Implemented manual CSV fallback for holdings, cash, simple ESPP contribution buckets, PPF, SSY, NPS, EPF, FD, gold, and other manual balances.
-- Importable canonical CSV fallback templates under `fixtures/importable/` covering every requested asset class.
+- Implemented generic manual XLSX workbook import for holdings, transactions, manual price/NAV snapshots, and FX rates across cash, FD, ESPP, PPF, SSY, NPS, EPF/PF, Indian stocks, US stocks/Fidelity-style manual entries, gold, and other assets. Legacy manual CSV remains available for simple balance-only fallback.
+- Importable manual templates under `fixtures/importable/`, including `generic-manual-portfolio-template.xlsx` and readable CSV sheet mirrors, cover every requested asset class without committing fake market prices.
 - Import pipeline with validation, deduplication, review-oriented error reporting, commit history, and manual-edit preservation.
 - Adaptive dashboard modules for future PF/EPF, PPF/SSY, NPS, FD, cash, ESPP, Indian stock, US stock, and mutual-fund inputs; empty modules stay visible as capability placeholders until data exists.
 - Initial verified data-source work starts with the fixture manifest and source notes under `fixtures/`.
@@ -35,7 +35,7 @@ Portfolio Tracker is a local-first multi-asset portfolio tracker and goal planne
 
 ## Performance Math
 
-The dashboard does not treat lifetime cash in as the only invested number. Sells, redemptions, dividends, interest, maturities, and withdrawals reduce net invested for current profit/loss. The headline model is: invested, current value, profit/loss, and XIRR. Supporting cash-flow analytics show lifetime cash in, lifetime cash out, fees/taxes, and current P/L before fees. Timeline charts sample historical month ends, never extend beyond today because of future-dated source rows, and require the latest plotted current value to match the dashboard current value.
+The dashboard does not treat lifetime cash in as the only invested number. Sells, redemptions, dividends, interest, maturities, and withdrawals reduce net invested for current profit/loss. The headline model is: invested, current value, profit/loss, and XIRR. Supporting cash-flow analytics show lifetime cash in, lifetime cash out, fees/taxes, and current P/L before fees. Timeline charts sample historical month ends, never extend beyond today because of future-dated source rows, and show today's current snapshot as a separate marker when it comes from the latest holdings snapshot rather than a continuous historical valuation line. XIRR cash flows include buy-side fees/taxes as outflows and sell/income fees/taxes as reductions to inflows.
 
 ## Asset Module Classification
 
@@ -45,7 +45,7 @@ Asset modules are classified from structured account/instrument types such as `m
 
 PF/NPS yearly files can be imported as batches by selecting multiple files from the same import family. File names are not part of the parser contract; the supported contract is the real statement format. Do not mix unrelated documents or different import families in one batch.
 
-Automated provider parsing is not claimed without real, legally usable fixtures. Current parsing support is canonical JSON restore, the application-defined manual CSV fallback, browser CAS PDF import, browser INDMoney Transactions Ledger XLSX import, browser EPFO/PF yearly PDF import, and browser NPS yearly CSV statement import. Native file detection exists for Fidelity, NPS PDF/XLSX, FD, PPF, and SSY families so the app can route files correctly while provider parsers are added test-first.
+Automated provider parsing is not claimed without real, legally usable fixtures. Current parsing support is canonical JSON restore, the application-defined generic manual XLSX workbook and manual CSV fallback, browser CAS PDF import, browser INDMoney Transactions Ledger XLSX import, browser EPFO/PF yearly PDF import, and browser NPS yearly CSV statement import. Native file detection exists for Fidelity, NPS PDF/XLSX, FD, PPF, and SSY families so the app can route files correctly while provider parsers are added test-first.
 
 See `fixtures/MANIFEST.md` for the exact list of committed importable files and `fixtures/PROVIDER_FIXTURE_AUDIT.md` for the provider fixture search log.
 
