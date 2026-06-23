@@ -1594,3 +1594,126 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+.pro-analytics {
+  gap: 18px;
+}
+
+.analytics-hero-v3 {
+  border: 1px solid #cbd5e1;
+  background: linear-gradient(135deg, #ffffff 0%, #eef7f4 52%, #f8fafc 100%);
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+}
+
+.analytics-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  background: #e8eef5;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.analytics-tabs button {
+  min-height: 58px;
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  color: #475569;
+}
+
+.analytics-tabs button.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.analytics-tabs strong {
+  font-size: 14px;
+}
+
+.analytics-tabs span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.analytics-tab-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.55fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.risk-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.risk-grid .readiness-panel {
+  grid-column: 1 / -1;
+}
+
+.chart-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 0;
+  min-height: 360px;
+}
+
+.chart-card h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.analytics-grid .chart-card {
+  min-height: 350px;
+}
+
+.main-wealth-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.sub-analytics-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 1200px) {
+  .feature-grid,
+  .analytics-grid,
+  .risk-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .analytics-tabs,
+  .main-wealth-strip,
+  .sub-analytics-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .analytics-tabs button {
+    min-height: 48px;
+  }
+}

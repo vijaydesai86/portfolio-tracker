@@ -2,10 +2,11 @@
 
 import { AlertTriangle, Download, FileJson, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, TrendingDown, TrendingUp, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
 import { buildReadinessModules, type ReadinessModule } from "@/src/domain/assetModules";
 import { lossWatchlist, topGainContributors, type HoldingPerformanceRow } from "@/src/domain/holdingPerformance";
+import { buildPortfolioTimeline, type PortfolioTimelinePoint } from "@/src/domain/performanceTimeline";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
 import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type CasCanonicalImport, type CasParseResult } from "@/src/importers/casText";
@@ -33,6 +34,7 @@ const assetClassCards = [
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
 type View = "dashboard" | "holdings" | "transactions" | "imports" | "backup";
+type AnalyticsTab = "overview" | "allocation" | "growth" | "risk";
 type HoldingSort = "value" | "gain" | "name" | "category" | "source";
 
 type HoldingCost = {
@@ -76,9 +78,11 @@ export function TrackerApp() {
   const [holdingSort, setHoldingSort] = useState<HoldingSort>("value");
   const [holdingEditMode, setHoldingEditMode] = useState(false);
   const [transactionEditMode, setTransactionEditMode] = useState(false);
+  const [analyticsTab, setAnalyticsTab] = useState<AnalyticsTab>("overview");
 
   const summary = useMemo(() => calculatePortfolioSummary(backup), [backup]);
   const insights = useMemo(() => calculatePortfolioInsights(backup), [backup]);
+  const timeline = useMemo(() => buildPortfolioTimeline(backup), [backup]);
   const allocation = summary.allocation;
   const holdingCosts = useMemo(() => calculateHoldingCosts(backup), [backup]);
   const performance = useMemo(() => {
@@ -198,6 +202,10 @@ export function TrackerApp() {
     }
   ];
   const readinessModules: ReadinessModule[] = buildReadinessModules(insights.holdings);
+  const categoryTimelineKeys = categoryOrder.filter((category) => timeline.points.some((point) => (point.category[category] ?? 0) > 0));
+  const regionTimelineKeys = topTimelineKeys(timeline.points, "region", 5);
+  const assetKindTimelineKeys = topTimelineKeys(timeline.points, "assetKind", 6);
+  const issuerTimelineKeys = topTimelineKeys(timeline.points, "issuer", 8);
 
   function importCsv() {
     const importId = `manual_${Date.now()}`;
@@ -578,16 +586,16 @@ export function TrackerApp() {
         {errors.length > 0 && <div className="error-list global-errors">{errors.map((error) => <div key={error}>{error}</div>)}</div>}
 
         {view === "dashboard" && (
-          <section className="analytics-command">
-            <div className="command-hero">
+          <section className="analytics-command pro-analytics">
+            <div className="command-hero analytics-hero-v3">
               <div className="hero-ledger">
-                <span className="eyebrow">INR wealth cockpit</span>
+                <span className="eyebrow">Portfolio command center</span>
                 <h2>{formatMoney(performance.current, backup.baseCurrency)}</h2>
-                <p>{insights.holdings.length} holdings, {backup.transactions.length} transactions, {importProviders} source(s). Built to expand into PF, NPS, PPF, SSY, FD, cash, ESPP, Indian stocks, US stocks, and mutual funds without changing the dashboard model.</p>
+                <p>{insights.holdings.length} holdings, {backup.transactions.length} transactions, {importProviders} source(s). Analytics are split into overview, allocation, growth, and risk so deeper views stay navigable as PF, NPS, stocks, cash, FD, PPF, SSY, and ESPP expand.</p>
                 <div className="hero-meta-row">
                   <span>{backup.baseCurrency} base</span>
+                  <span>{timeline.coverage.pricedDates}/{timeline.coverage.totalDates} priced timeline point(s)</span>
                   <span>{summary.missingFx.length === 0 ? "FX covered" : summary.missingFx.length + " FX pair gap(s)"}</span>
-                  <span>{backup.priceSnapshots.length} price / FX snapshot(s)</span>
                 </div>
               </div>
               <div className="hero-stack">
@@ -604,63 +612,85 @@ export function TrackerApp() {
               </div>
             </div>
 
-            <div className="wealth-strip main-wealth-strip">
-              <Metric label="Invested" value={formatMoney(performance.netInvested, backup.baseCurrency)} />
-              <Metric label="Current Value" value={formatMoney(performance.current, backup.baseCurrency)} />
-              <Metric label="Profit / Loss" value={formatMoney(performance.totalProfit, backup.baseCurrency)} />
-            </div>
-
-            <div className="sub-analytics-strip">
-              <MiniInsight label="Lifetime Cash In" value={formatMoney(performance.grossCashIn, backup.baseCurrency)} detail="buy, SIP, deposit, contribution" />
-              <MiniInsight label="Lifetime Cash Out" value={formatMoney(performance.cashOut, backup.baseCurrency)} detail="sell, redemption, dividend, interest, maturity, withdrawal" />
-              <MiniInsight label="Fees & Taxes" value={formatMoney(performance.feesAndTax, backup.baseCurrency)} detail="recorded charges and tax fields" />
-              <MiniInsight label="Current P/L Before Fees" value={formatMoney(performance.currentProfit, backup.baseCurrency)} detail="current value minus net invested" />
-            </div>
+            <AnalyticsTabs active={analyticsTab} setActive={setAnalyticsTab} />
 
             {(summary.missingFx.length > 0 || insights.transactionStats.missingFx.length > 0) && (
               <div className="notice critical-notice">Missing FX/NAV inputs affect INR analytics: {[...new Set([...summary.missingFx, ...insights.transactionStats.missingFx])].join(", ")}. Refresh market data or import real rates under Imports.</div>
             )}
 
-            <div className="control-grid">
-              <ChartCard title="Allocation Map"><DonutChart data={chartData.allocation} /></ChartCard>
-              <ChartCard title="Performance Bridge"><HorizontalBar data={performanceBridge} currency={backup.baseCurrency} /></ChartCard>
-              <div className="signal-panel cardless-panel">
-                <div className="panel-heading"><span>Portfolio Signals</span><strong>{dashboardSignals.filter((signal) => signal.tone === "warn").length} action(s)</strong></div>
-                <div className="signal-list">{dashboardSignals.map((signal) => <SignalCard signal={signal} key={signal.label} />)}</div>
-              </div>
-            </div>
-
-            <div className="asset-class-grid asset-command-grid">
-              {assetClassSummary.map((asset) => (
-                <div className={"asset-class-card asset-" + asset.key} key={asset.key}>
-                  <div><span>{asset.title}</span><strong>{formatMoney(asset.value, backup.baseCurrency)}</strong></div>
-                  <small>{asset.count} holding(s) · {asset.percent.toFixed(1)}%</small>
-                  <p>{asset.description}</p>
+            {analyticsTab === "overview" && (
+              <div className="analytics-tab-panel">
+                <div className="wealth-strip main-wealth-strip">
+                  <Metric label="Invested" value={formatMoney(performance.netInvested, backup.baseCurrency)} />
+                  <Metric label="Current Value" value={formatMoney(performance.current, backup.baseCurrency)} />
+                  <Metric label="Profit / Loss" value={formatMoney(performance.totalProfit, backup.baseCurrency)} />
                 </div>
-              ))}
-            </div>
-
-            <div className="focus-grid">
-              <HoldingRankPanel title="Top Gain Contributors" direction="gain" items={topGainers} currency={backup.baseCurrency} />
-              <HoldingRankPanel title="Loss Watchlist" direction="loss" items={topLosers} currency={backup.baseCurrency} />
-              <div className="readiness-panel cardless-panel">
-                <div className="panel-heading"><span>Asset Modules</span><strong>Extensible intake</strong></div>
-                <div className="module-list">{readinessModules.map((module) => <ReadinessRow module={module} currency={backup.baseCurrency} key={module.label} />)}</div>
+                <div className="feature-grid">
+                  <ChartCard title="Portfolio Growth"><PortfolioGrowthChart points={timeline.points} currency={backup.baseCurrency} /></ChartCard>
+                  <div className="signal-panel cardless-panel">
+                    <div className="panel-heading"><span>Portfolio Signals</span><strong>{dashboardSignals.filter((signal) => signal.tone === "warn").length} action(s)</strong></div>
+                    <div className="signal-list">{dashboardSignals.map((signal) => <SignalCard signal={signal} key={signal.label} />)}</div>
+                  </div>
+                </div>
+                <div className="sub-analytics-strip">
+                  <MiniInsight label="Lifetime Cash In" value={formatMoney(performance.grossCashIn, backup.baseCurrency)} detail="buy, SIP, deposit, contribution" />
+                  <MiniInsight label="Lifetime Cash Out" value={formatMoney(performance.cashOut, backup.baseCurrency)} detail="sell, redemption, dividend, interest, maturity, withdrawal" />
+                  <MiniInsight label="Fees & Taxes" value={formatMoney(performance.feesAndTax, backup.baseCurrency)} detail="recorded charges and tax fields" />
+                  <MiniInsight label="Current P/L Before Fees" value={formatMoney(performance.currentProfit, backup.baseCurrency)} detail="current value minus net invested" />
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className="analytics-grid terminal-grid">
-              <ChartCard title="By Asset Type"><HorizontalBar data={chartData.assetType} currency={backup.baseCurrency} /></ChartCard>
-              <ChartCard title="By Region"><HorizontalBar data={chartData.region} currency={backup.baseCurrency} /></ChartCard>
-              <ChartCard title="Top AMC / Institution"><HorizontalBar data={chartData.issuer} currency={backup.baseCurrency} /></ChartCard>
-              <ChartCard title="Data Source Mix"><HorizontalBar data={chartData.provider} currency={backup.baseCurrency} /></ChartCard>
-              <ChartCard title="Institution Accounts"><HorizontalBar data={chartData.institution} currency={backup.baseCurrency} /></ChartCard>
-              <div className="insight-summary cardless-panel">
-                <MiniInsight label="Largest Holding" value={largestHolding ? displayHoldingName(largestHolding.label) : "-"} detail={largestHolding?.valueInBase === undefined ? "" : formatMoney(largestHolding.valueInBase, backup.baseCurrency)} />
-                <MiniInsight label="Top 5 Concentration" value={topFivePercent.toFixed(1) + "%"} detail={formatMoney(topFiveValue, backup.baseCurrency)} />
-                <MiniInsight label="Dominant Category" value={chartData.category[0]?.name ?? "-"} detail={chartData.category[0] ? formatMoney(chartData.category[0].value, backup.baseCurrency) : ""} />
+            {analyticsTab === "allocation" && (
+              <div className="analytics-tab-panel">
+                <div className="asset-class-grid asset-command-grid">
+                  {assetClassSummary.map((asset) => (
+                    <div className={"asset-class-card asset-" + asset.key} key={asset.key}>
+                      <div><span>{asset.title}</span><strong>{formatMoney(asset.value, backup.baseCurrency)}</strong></div>
+                      <small>{asset.count} holding(s) · {asset.percent.toFixed(1)}%</small>
+                      <p>{asset.description}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="analytics-grid">
+                  <ChartCard title="Allocation Map"><DonutChart data={chartData.allocation} /></ChartCard>
+                  <ChartCard title="Asset Class Growth"><BreakdownGrowthChart points={timeline.points} field="category" keys={categoryTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Region Growth"><BreakdownGrowthChart points={timeline.points} field="region" keys={regionTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="By Region"><HorizontalBar data={chartData.region} currency={backup.baseCurrency} /></ChartCard>
+                </div>
               </div>
-            </div>
+            )}
+
+            {analyticsTab === "growth" && (
+              <div className="analytics-tab-panel">
+                <div className="analytics-grid">
+                  <ChartCard title="Asset Type Growth"><BreakdownGrowthChart points={timeline.points} field="assetKind" keys={assetKindTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Issuer / AMC Growth"><BreakdownGrowthChart points={timeline.points} field="issuer" keys={issuerTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Performance Bridge"><HorizontalBar data={performanceBridge} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Top AMC / Institution"><HorizontalBar data={chartData.issuer} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Data Source Mix"><HorizontalBar data={chartData.provider} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Institution Accounts"><HorizontalBar data={chartData.institution} currency={backup.baseCurrency} /></ChartCard>
+                </div>
+              </div>
+            )}
+
+            {analyticsTab === "risk" && (
+              <div className="analytics-tab-panel">
+                <div className="risk-grid">
+                  <div className="insight-summary cardless-panel">
+                    <MiniInsight label="Largest Holding" value={largestHolding ? displayHoldingName(largestHolding.label) : "-"} detail={largestHolding?.valueInBase === undefined ? "" : formatMoney(largestHolding.valueInBase, backup.baseCurrency)} />
+                    <MiniInsight label="Top 5 Concentration" value={topFivePercent.toFixed(1) + "%"} detail={formatMoney(topFiveValue, backup.baseCurrency)} />
+                    <MiniInsight label="Dominant Category" value={chartData.category[0]?.name ?? "-"} detail={chartData.category[0] ? formatMoney(chartData.category[0].value, backup.baseCurrency) : ""} />
+                  </div>
+                  <HoldingRankPanel title="Top Gain Contributors" direction="gain" items={topGainers} currency={backup.baseCurrency} />
+                  <HoldingRankPanel title="Loss Watchlist" direction="loss" items={topLosers} currency={backup.baseCurrency} />
+                  <div className="readiness-panel cardless-panel">
+                    <div className="panel-heading"><span>Asset Modules</span><strong>Extensible intake</strong></div>
+                    <div className="module-list">{readinessModules.map((module) => <ReadinessRow module={module} currency={backup.baseCurrency} key={module.label} />)}</div>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         )}
 
@@ -808,6 +838,16 @@ function ImportsView(props: {
   );
 }
 
+function AnalyticsTabs({ active, setActive }: { active: AnalyticsTab; setActive: (tab: AnalyticsTab) => void }) {
+  const tabs: Array<{ id: AnalyticsTab; label: string; detail: string }> = [
+    { id: "overview", label: "Overview", detail: "wealth, return, signals" },
+    { id: "allocation", label: "Allocation", detail: "asset class and geography" },
+    { id: "growth", label: "Growth", detail: "asset type, issuer, source" },
+    { id: "risk", label: "Risk", detail: "concentration and review" }
+  ];
+  return <div className="analytics-tabs" role="tablist">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} onClick={() => setActive(tab.id)}><strong>{tab.label}</strong><span>{tab.detail}</span></button>)}</div>;
+}
+
 function Metric({ label, value }: { label: string; value: string }) {
   return <div className="card"><div className="metric-label">{label}</div><div className="metric-value">{value}</div></div>;
 }
@@ -818,6 +858,41 @@ function MiniInsight({ label, value, detail }: { label: string; value: string; d
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return <div className="chart-card"><h2>{title}</h2>{children}</div>;
+}
+
+function PortfolioGrowthChart({ points, currency }: { points: PortfolioTimelinePoint[]; currency: string }) {
+  if (points.length === 0) return <p className="message">Import transactions and balances to build a growth timeline.</p>;
+  return (
+    <ResponsiveContainer width="100%" height={320}>
+      <LineChart data={points} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
+        <CartesianGrid stroke="#e2e8f0" vertical={false} />
+        <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={28} />
+        <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
+        <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), name === "invested" ? "Invested" : name === "current" ? "Current Value" : "Profit"]} labelFormatter={(label) => String(label)} />
+        <Legend />
+        <Line type="monotone" dataKey="invested" stroke="#475569" strokeWidth={2.5} dot={false} name="Invested" />
+        <Line type="monotone" dataKey="current" stroke="#0f766e" strokeWidth={3} dot={false} connectNulls name="Current Value" />
+        <Line type="monotone" dataKey="profit" stroke="#2563eb" strokeWidth={2} dot={false} connectNulls name="Profit" />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+function BreakdownGrowthChart({ points, field, keys, currency }: { points: PortfolioTimelinePoint[]; field: keyof Pick<PortfolioTimelinePoint, "category" | "region" | "assetKind" | "issuer">; keys: string[]; currency: string }) {
+  if (points.length === 0 || keys.length === 0) return <p className="message">No priced timeline data yet for this breakdown.</p>;
+  const data = points.map((point) => Object.fromEntries([["date", point.date], ...keys.map((key) => [key, point[field][key] ?? null])]));
+  return (
+    <ResponsiveContainer width="100%" height={310}>
+      <LineChart data={data} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
+        <CartesianGrid stroke="#e2e8f0" vertical={false} />
+        <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={28} />
+        <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
+        <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), displayHoldingName(String(name))]} labelFormatter={(label) => String(label)} />
+        <Legend formatter={(value) => displayHoldingName(String(value))} />
+        {keys.map((key, index) => <Line key={key} type="monotone" dataKey={key} stroke={chartColors[index % chartColors.length]} strokeWidth={2.4} dot={false} connectNulls />)}
+      </LineChart>
+    </ResponsiveContainer>
+  );
 }
 
 function SignalCard({ signal }: { signal: DashboardSignal }) {
@@ -891,6 +966,19 @@ function daysSince(date: string): number {
   const parsed = Date.parse(date + "T00:00:00.000Z");
   if (Number.isNaN(parsed)) return 0;
   return Math.max(0, Math.floor((Date.now() - parsed) / 86400000));
+}
+
+function topTimelineKeys(points: PortfolioTimelinePoint[], field: keyof Pick<PortfolioTimelinePoint, "category" | "region" | "assetKind" | "issuer">, limit: number): string[] {
+  const totals = new Map<string, number>();
+  for (const point of points) {
+    for (const [key, value] of Object.entries(point[field])) totals.set(key, Math.max(totals.get(key) ?? 0, value));
+  }
+  return [...totals.entries()].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([key]) => key);
+}
+
+function shortDate(value: string): string {
+  const match = value.match(/^(\d{4})-(\d{2})/);
+  return match ? match[2] + "/" + match[1].slice(2) : value;
 }
 
 function latestAsOfDate(dates: string[]): string {

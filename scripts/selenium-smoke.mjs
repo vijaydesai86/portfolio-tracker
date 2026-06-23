@@ -27,6 +27,17 @@ try {
   if (!/Portfolio Analytics|Holdings|Transactions|Imports|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
+  for (const label of ["Overview", "Allocation", "Growth", "Risk"]) {
+    const tab = await driver.wait(until.elementLocated(By.xpath(`//button[.//strong[normalize-space(.)='${label}']]`)), 15000);
+    await tab.click();
+    await driver.wait(async () => {
+      const body = await driver.findElement(By.css("body")).getText();
+      if (label === "Overview") return body.includes("Portfolio Growth");
+      if (label === "Allocation") return body.includes("Asset Class Growth");
+      if (label === "Growth") return body.includes("Asset Type Growth");
+      return body.includes("Top 5 Concentration");
+    }, 15000);
+  }
   fs.writeFileSync(screenshotPath, await driver.takeScreenshot(), "base64");
   console.log(`Selenium smoke passed: ${title}`);
   console.log(`Screenshot: ${screenshotPath}`);

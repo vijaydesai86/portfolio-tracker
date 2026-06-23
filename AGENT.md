@@ -76,3 +76,4 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 - PF interest credited inside the account is capitalized interest, not cash returned to the user. Represent it without changing invested cash-flow totals or double-counting profit.
 - PF/NPS yearly imports must retain all transactions from every imported year while keeping current balances from the latest statement date only. Do not depend on private filenames; parse by verified statement format.
 - Keep PF categorized as Debt and NPS categorized from explicit scheme type: E as Equity, C/G as Debt, A as Others.
+- Timeline current-value charts must not fabricate historical prices. Use imported statement balances, real price/NAV snapshots, and transaction units only; show invested flow even when historical current value is unavailable.
