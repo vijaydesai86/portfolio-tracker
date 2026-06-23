@@ -12,6 +12,9 @@ Total Withdrawals for the year [ 2025 ]
 0
 0
 0
+1,234
+987
+765
 1,23,456
 98,765
 76,543
@@ -31,6 +34,7 @@ describe("EPFO passbook importer", () => {
       { key: "pension", label: "EPS Pension Share", value: 76543 }
     ]);
     expect(parsed.yearlyContributions.map((row) => row.value)).toEqual([12000, 10000, 8000]);
+    expect(parsed.yearlyInterest.map((row) => row.value)).toEqual([1234, 987, 765]);
   });
 
   it("builds and commits canonical EPF records without duplicate IDs", () => {
@@ -42,7 +46,8 @@ describe("EPFO passbook importer", () => {
     expect(backup.accounts[0]).toMatchObject({ type: "epf", institution: "EPFO" });
     expect(backup.instruments.map((item) => item.type)).toEqual(["epf", "epf", "epf"]);
     expect(backup.manualBalances).toHaveLength(3);
-    expect(backup.transactions).toHaveLength(3);
+    expect(backup.transactions).toHaveLength(6);
+    expect(backup.transactions.filter((tx) => tx.type === "interest_accrual").map((tx) => tx.amount)).toEqual([1234, 987, 765]);
     expect(backup.imports[0]).toMatchObject({ provider: "epfo_passbook", status: "committed" });
   });
 });

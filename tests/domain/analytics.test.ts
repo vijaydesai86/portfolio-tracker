@@ -119,6 +119,82 @@ describe("portfolio analytics", () => {
     expect(summary.missingFx).toEqual(["USD/INR"]);
   });
 
+
+  it("does not treat capitalized PF interest as returned cash", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push({
+      id: "acct_epf",
+      name: "EPFO Provident Fund",
+      institution: "EPFO",
+      type: "epf",
+      currency: "INR",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    backup.instruments.push({
+      id: "inst_epf_employee",
+      name: "EPF Employee Share",
+      type: "epf",
+      currency: "INR",
+      country: "IN",
+      category: "Debt",
+      issuer: "EPFO",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    backup.transactions.push(
+      {
+        id: "txn_epf_contribution",
+        accountId: "acct_epf",
+        instrumentId: "inst_epf_employee",
+        date: "2026-03-31",
+        type: "contribution",
+        amount: 1000,
+        currency: "INR",
+        fees: 0,
+        taxes: 0,
+        source: { type: "import", provider: "epfo_passbook" },
+        userModified: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      },
+      {
+        id: "txn_epf_interest",
+        accountId: "acct_epf",
+        instrumentId: "inst_epf_employee",
+        date: "2026-03-31",
+        type: "interest_accrual",
+        amount: 50,
+        currency: "INR",
+        fees: 0,
+        taxes: 0,
+        source: { type: "import", provider: "epfo_passbook" },
+        userModified: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      }
+    );
+    backup.manualBalances.push({
+      id: "bal_epf_employee",
+      accountId: "acct_epf",
+      instrumentId: "inst_epf_employee",
+      label: "EPF Employee Share",
+      category: "Debt",
+      currency: "INR",
+      value: 1050,
+      asOfDate: "2026-03-31",
+      source: { type: "import", provider: "epfo_passbook" },
+      userModified: false,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+
+    const insights = calculatePortfolioInsights(backup);
+
+    expect(insights.transactionStats.investedBase).toBe(1000);
+    expect(insights.transactionStats.incomeBase).toBe(0);
+    expect(insights.holdings[0]).toMatchObject({ assetKind: "PF", valueInBase: 1050 });
+  });
 });
 
 describe("INR-first multi-currency analytics", () => {

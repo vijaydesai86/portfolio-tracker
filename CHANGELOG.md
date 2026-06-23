@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Fixed EPFO/PF parsing to capture capitalized yearly interest rows separately from contributions and closing balances.
+
 - Fixed the dashboard loss watchlist so it only shows holdings with negative P/L instead of the lowest positive gains.
 
 - Added browser EPFO/PF yearly PDF import and NPS yearly CSV statement import with canonical balances, transactions, private-file parser tests, and Selenium upload/commit smoke coverage.

@@ -10,6 +10,13 @@ describe("private PF/NPS imports", () => {
 
     expect(parsed.errors).toEqual([]);
     expect(parsed.balances).toHaveLength(3);
+    expect(parsed.yearlyInterest.some((bucket) => bucket.value > 0)).toBe(true);
+    expect(imported.transactions.some((tx) => tx.type === "interest_accrual")).toBe(true);
+    for (const balance of parsed.balances) {
+      const contribution = parsed.yearlyContributions.find((bucket) => bucket.key === balance.key)?.value ?? 0;
+      const interest = parsed.yearlyInterest.find((bucket) => bucket.key === balance.key)?.value ?? 0;
+      expect(balance.value).toBeGreaterThanOrEqual(contribution + interest);
+    }
     expect(imported.manualBalances.reduce((sum, balance) => sum + balance.value, 0)).toBeGreaterThan(0);
   });
 

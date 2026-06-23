@@ -70,6 +70,7 @@ export const transactionSchema = z.object({
     "switch_out",
     "dividend",
     "interest",
+    "interest_accrual",
     "deposit",
     "withdrawal",
     "fee",

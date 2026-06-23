@@ -20,7 +20,7 @@ Portfolio Tracker is a local-first multi-asset portfolio tracker and goal planne
 - CAS text parser and canonical normalization privately verified against the provided password-protected CAS PDF via local `pdftotext` extraction.
 - Browser CAS PDF upload with password entry, staging, and commit flow privately verified against the provided password-protected CAS PDF via Selenium/Firefox.
 - Browser INDMoney Transactions Ledger XLSX import for US stocks, dividends, taxes, stock splits, cash movements, open positions, and combined analytics.
-- Browser EPFO/PF yearly PDF import for employee, employer, and pension balance buckets plus yearly contribution rows.
+- Browser EPFO/PF yearly PDF import for employee, employer, and pension balance buckets, yearly contribution rows, and EPFO capitalized yearly interest accrual rows.
 - Browser NPS yearly CSV statement import for Tier I/II scheme holdings, NAV snapshots, scheme transactions, fees, and contributions. NPS PDF/XLSX files remain detected-only until real fixtures are available.
 - Live market refresh route for AMFI mutual fund NAVs, US stock quotes, latest USD/INR, and historical USD/INR for transaction-date conversion. USD/INR now uses reachable real-provider fallbacks; NAV and stock quote failures are surfaced in the UI instead of using fake fallback data.
 - Research-driven analytics cockpit with main KPIs for invested amount, current value, and profit/loss; supporting cash-flow analytics for lifetime cash in, lifetime cash out, fees/taxes, and current P/L before fees; plus INR XIRR with historical FX, performance bridge, allocation map, concentration signals, market-data freshness warnings, gain/loss contributors, asset-kind totals, India/US totals, source totals, and institution/AMC-style totals.

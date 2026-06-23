@@ -73,3 +73,4 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 
 - Asset modules must be classified from structured account/instrument types, never from free-text fund or provider names.
 - Performance panels must be semantically strict: a loss watchlist must filter to negative P/L only and must not show low positive gains as losses.
+- PF interest credited inside the account is capitalized interest, not cash returned to the user. Represent it without changing invested cash-flow totals or double-counting profit.

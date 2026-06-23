@@ -8,12 +8,14 @@ export type EpfoBalanceBucket = {
 };
 
 export type EpfoContributionBucket = EpfoBalanceBucket;
+export type EpfoInterestBucket = EpfoBalanceBucket;
 
 export type EpfoPassbookParseResult = {
   statementType: "epfo_passbook";
   asOfDate: string;
   balances: EpfoBalanceBucket[];
   yearlyContributions: EpfoContributionBucket[];
+  yearlyInterest: EpfoInterestBucket[];
   warnings: string[];
   errors: string[];
 };
@@ -53,7 +55,12 @@ export function parseEpfoPassbookText(text: string): EpfoPassbookParseResult {
   if (contributionIndex === -1) warnings.push("No annual contribution total found in EPFO passbook.");
   const yearlyContributions = toBuckets(contributionAmounts.slice(0, 3));
 
-  return { statementType: "epfo_passbook", asOfDate, balances, yearlyContributions, warnings, errors };
+  const withdrawalIndex = lastIndexMatching(lines, /Total Withdrawals for the year/i, closingIndex);
+  const amountsAfterWithdrawals = withdrawalIndex === -1 ? [] : amountLinesBetween(lines, withdrawalIndex + 1, closingIndex);
+  const interestAmounts = amountsAfterWithdrawals.length >= 9 ? amountsAfterWithdrawals.slice(-6, -3) : [];
+  const yearlyInterest = toBuckets(interestAmounts);
+
+  return { statementType: "epfo_passbook", asOfDate, balances, yearlyContributions, yearlyInterest, warnings, errors };
 }
 
 export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, options: { importId: string; fileName?: string; sourceSha256?: string; now?: string }): EpfoCanonicalImport {
@@ -93,7 +100,7 @@ export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, option
     };
   });
 
-  const transactions = parsed.yearlyContributions.filter((bucket) => bucket.value > 0).map((bucket): Transaction => {
+  const contributionTransactions = parsed.yearlyContributions.filter((bucket) => bucket.value > 0).map((bucket): Transaction => {
     const instrument = instruments.find((item) => item.name === bucket.label)!;
     const sourceRecordHash = stableHash({ provider: "epfo_passbook", contribution: bucket, asOfDate: parsed.asOfDate });
     return {
@@ -113,6 +120,28 @@ export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, option
     };
   });
 
+  const interestTransactions = parsed.yearlyInterest.filter((bucket) => bucket.value > 0).map((bucket): Transaction => {
+    const instrument = instruments.find((item) => item.name === bucket.label)!;
+    const sourceRecordHash = stableHash({ provider: "epfo_passbook", interestAccrual: bucket, asOfDate: parsed.asOfDate });
+    return {
+      id: slugId("txn", [sourceRecordHash]),
+      accountId,
+      instrumentId: instrument.id,
+      date: parsed.asOfDate,
+      type: "interest_accrual",
+      amount: bucket.value,
+      currency: "INR",
+      fees: 0,
+      taxes: 0,
+      source: { type: "import", importId: options.importId, provider: "epfo_passbook", sourceRecordHash },
+      userModified: false,
+      createdAt: now,
+      updatedAt: now
+    };
+  });
+
+  const transactions = [...contributionTransactions, ...interestTransactions];
+
   const importRun: ImportRun = {
     id: options.importId,
     provider: "epfo_passbook",
@@ -120,7 +149,7 @@ export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, option
     status: parsed.errors.length > 0 ? "failed" : "staged",
     confidence: parsed.errors.length > 0 ? "low" : "medium",
     createdAt: now,
-    notes: parsed.balances.length + " PF balance buckets, " + transactions.length + " yearly contribution rows"
+    notes: parsed.balances.length + " PF balance buckets, " + contributionTransactions.length + " yearly contribution rows, " + interestTransactions.length + " interest accrual rows"
   };
 
   const sourceDocument: SourceDocument | undefined = options.fileName ? {
@@ -182,6 +211,15 @@ function nextAmountLines(lines: string[], afterIndex: number, count: number): nu
   return values;
 }
 
+function amountLinesBetween(lines: string[], startIndex: number, endIndex: number): number[] {
+  const values: number[] = [];
+  for (let index = startIndex; index < endIndex; index++) {
+    const value = parseAmountLine(lines[index]);
+    if (value !== undefined) values.push(value);
+  }
+  return values;
+}
+
 function parseAmountLine(line: string): number | undefined {
   if (!/^[\d,]+(?:\.\d+)?$/.test(line)) return undefined;
   return parseAmountToken(line);
@@ -228,7 +266,7 @@ function lastIndexMatching(lines: string[], regex: RegExp, beforeIndex: number):
 }
 
 function emptyResult(errors: string[]): EpfoPassbookParseResult {
-  return { statementType: "epfo_passbook", asOfDate: "", balances: [], yearlyContributions: [], warnings: [], errors };
+  return { statementType: "epfo_passbook", asOfDate: "", balances: [], yearlyContributions: [], yearlyInterest: [], warnings: [], errors };
 }
 
 function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {
