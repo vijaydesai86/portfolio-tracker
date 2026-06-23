@@ -49,6 +49,23 @@ mf-buy-1,2026-04-01,MF Platform,mutual_fund,INF000000000,Example Mutual Fund,buy
     expect(result.priceSnapshots).toHaveLength(4);
   });
 
+  it("keeps repeated template transaction ids when transaction facts differ", () => {
+    const tsv = `transaction_id	date	platform	asset_type	symbol_or_isin	name	type	quantity	price	amount	fees	taxes	currency	category	notes
+fidelity-us-buy-template	1/15/2025	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	buy	330	109		0	0	USD	Equity	first lot
+fidelity-us-buy-template	4/15/2025	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	buy	400	110		0	0	USD	Equity	second lot
+fidelity-us-buy-template	7/15/2025	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	buy	100	125		0	0	USD	Equity	third lot
+fidelity-us-buy-template	5/15/2026	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	sell	100	350		0	0	USD	Equity	sale`;
+
+    const result = parseManualCsv(tsv, { importId: "arm_manual", now: "2026-06-23T00:00:00.000Z" });
+
+    expect(result.errors).toEqual([]);
+    expect(result.transactions).toHaveLength(4);
+    expect(result.transactions.map((tx) => tx.date)).toEqual(["2025-01-15", "2025-04-15", "2025-07-15", "2026-05-15"]);
+    expect(new Set(result.transactions.map((tx) => tx.source.sourceRecordHash)).size).toBe(4);
+    expect(result.manualBalances).toHaveLength(1);
+    expect(result.manualBalances[0]).toMatchObject({ label: "Arm Holdings PLC - ADR", quantity: 730, price: 350, value: 255500, currency: "USD" });
+  });
+
   it("rejects invalid categories and keeps rows out of staged data", () => {
     const csv = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category
 bad,2026-06-22,Manual,other,Bad Asset,100,INR,RealEstate`;

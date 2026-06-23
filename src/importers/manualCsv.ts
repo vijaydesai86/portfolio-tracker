@@ -243,9 +243,23 @@ function parseTransactionCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOp
 
     const accountId = ensureAccount(accounts, normalized, now);
     const instrumentId = ensureInstrument(instruments, normalized, now);
-    const sourceRecordHash = normalized.transaction_id
-      ? stableHash({ provider: "manual_transactions", transaction_id: normalized.transaction_id })
-      : stableHash({ provider: "manual_transactions", row: rowNumber, ...normalized, amount });
+    const sourceRecordHash = stableHash({
+      provider: "manual_transactions",
+      transaction_id: normalized.transaction_id || undefined,
+      date: normalized.date,
+      account_name: normalized.account_name,
+      asset_type: normalized.asset_type,
+      symbol: normalized.symbol,
+      isin: normalized.isin,
+      asset_name: normalized.asset_name,
+      transaction_type: normalized.transaction_type,
+      quantity,
+      price,
+      amount,
+      fees: optionalNumber(normalized.fees) ?? 0,
+      taxes: optionalNumber(normalized.taxes) ?? 0,
+      currency: normalized.currency
+    });
 
     transactions.push({
       id: slugId("tx", [sourceRecordHash]),
@@ -509,8 +523,31 @@ function normalizeHeader(value: string): string {
 function parseDateCell(value?: string): string {
   const raw = (value ?? "").trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slash) {
+    const first = Number(slash[1]);
+    const second = Number(slash[2]);
+    const year = Number(slash[3]);
+    const month = first > 12 ? second : first;
+    const day = first > 12 ? first : second;
+    if (isValidDateParts(year, month, day)) return year + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+  }
+
+  const dash = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dash) {
+    const first = Number(dash[1]);
+    const second = Number(dash[2]);
+    const year = Number(dash[3]);
+    const month = first > 12 ? second : first;
+    const day = first > 12 ? first : second;
+    if (isValidDateParts(year, month, day)) return year + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+  }
+
   const parsed = Date.parse(raw);
-  return Number.isNaN(parsed) ? raw : new Date(parsed).toISOString().slice(0, 10);
+  if (Number.isNaN(parsed)) return raw;
+  const date = new Date(parsed);
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
 }
 
 function cleanNumber(value?: string): string {
@@ -521,6 +558,13 @@ function optionalNumber(value: string): number | undefined {
   if (value === "") return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isValidDateParts(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
 }
 
 function isIsoDate(value: string): boolean {
