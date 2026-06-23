@@ -1,4 +1,4 @@
-import { tryConvertToBase } from "@/src/domain/analytics";
+import { calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
 import type { Account, AssetCategory, Instrument, ManualBalance, PortfolioBackup, PriceSnapshot, Transaction } from "@/src/schema/backup";
 
 export type TimelineBreakdowns = {
@@ -26,12 +26,41 @@ const unitInTypes = new Set<Transaction["type"]>(["buy", "sip", "deposit", "cont
 const unitOutTypes = new Set<Transaction["type"]>(["sell", "redemption", "withdrawal", "maturity", "switch_out", "fee", "tax"]);
 
 export function buildPortfolioTimeline(backup: PortfolioBackup): PortfolioTimeline {
-  const dates = timelineDates(backup);
-  const points = dates.map((date) => buildPoint(backup, date));
+  const latestDate = todayIso();
+  const dates = timelineDates(backup, latestDate);
+  const points = dates.map((date) => date === latestDate ? buildLatestPoint(backup, latestDate) : buildPoint(backup, date));
   const pricedDates = points.filter((point) => point.current !== null).length;
   return {
     points,
     coverage: { pricedDates, totalDates: points.length, firstDate: points[0]?.date, latestDate: points.at(-1)?.date }
+  };
+}
+
+function buildLatestPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoint {
+  if (backup.manualBalances.length === 0) return buildPoint(backup, date);
+
+  const historicalPoint = buildPoint(backup, date);
+  const currentBreakdown = emptyBreakdowns();
+  let convertedCount = 0;
+
+  for (const balance of backup.manualBalances) {
+    const value = tryConvertToBase(balance.value, balance.currency, backup);
+    if (value === undefined) continue;
+    convertedCount += 1;
+    addBreakdowns(currentBreakdown, balanceDimensions(balance, backup), value);
+  }
+
+  const summary = calculatePortfolioSummary(backup);
+  const current = convertedCount > 0 ? summary.netWorth : null;
+  return {
+    date,
+    invested: historicalPoint.invested,
+    current,
+    profit: current === null ? null : roundMoney(current - historicalPoint.invested),
+    category: roundBreakdown(currentBreakdown.category),
+    region: roundBreakdown(currentBreakdown.region),
+    assetKind: roundBreakdown(currentBreakdown.assetKind),
+    issuer: topBreakdown(roundBreakdown(currentBreakdown.issuer), 12)
   };
 }
 
@@ -128,7 +157,7 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
   };
 }
 
-function timelineDates(backup: PortfolioBackup): string[] {
+function timelineDates(backup: PortfolioBackup, end: string): string[] {
   const sourceDates = new Set<string>();
   for (const tx of backup.transactions) sourceDates.add(tx.date);
   for (const balance of backup.manualBalances) sourceDates.add(balance.asOfDate);
@@ -136,11 +165,10 @@ function timelineDates(backup: PortfolioBackup): string[] {
     if (!isFxSnapshot(snapshot)) sourceDates.add(snapshot.asOfDate);
   }
 
-  const sortedSourceDates = [...sourceDates].filter(Boolean).sort();
-  if (sortedSourceDates.length === 0) return [];
+  const sortedSourceDates = [...sourceDates].filter((date) => Boolean(date) && date <= end).sort();
+  if (sortedSourceDates.length === 0) return backup.manualBalances.length > 0 ? [end] : [];
 
   const start = sortedSourceDates[0];
-  const end = maxIsoDate(todayIso(), sortedSourceDates.at(-1)!);
   const dates = new Set<string>([start, end]);
   let cursor = monthEnd(start);
   while (cursor < end) {
@@ -172,9 +200,6 @@ function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function maxIsoDate(left: string, right: string): string {
-  return left >= right ? left : right;
-}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -208,7 +233,7 @@ function instrumentDimensions(instrumentId: string, backup: PortfolioBackup, acc
     category: instrument?.category ?? "Others",
     region: region(instrument, account, instrument?.currency),
     assetKind: assetKind(instrument, account),
-    issuer: instrument?.issuer ?? account?.institution ?? "Unassigned"
+    issuer: cleanDimension(instrument?.issuer) ?? cleanDimension(account?.institution) ?? "Unassigned"
   };
 }
 
@@ -219,11 +244,17 @@ function balanceDimensions(balance: ManualBalance, backup: PortfolioBackup): Dim
     category: balance.category,
     region: region(instrument, account, balance.currency),
     assetKind: assetKind(instrument, account),
-    issuer: instrument?.issuer ?? account?.institution ?? balance.source.provider ?? "Manual"
+    issuer: cleanDimension(instrument?.issuer) ?? cleanDimension(account?.institution) ?? cleanDimension(balance.source.provider) ?? "Manual"
   };
 }
 
 type Dimensions = { category: AssetCategory | string; region: string; assetKind: string; issuer: string };
+
+function cleanDimension(value?: string): string | undefined {
+  const cleaned = value?.trim();
+  if (!cleaned || cleaned === "0" || cleaned === "-" || /^n\/?a$/i.test(cleaned)) return undefined;
+  return cleaned;
+}
 
 function emptyBreakdowns(): TimelineBreakdowns {
   return { category: {}, region: {}, assetKind: {}, issuer: {} };

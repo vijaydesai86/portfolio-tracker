@@ -900,15 +900,15 @@ function PortfolioGrowthChart({ points, currency }: { points: PortfolioTimelineP
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={points} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
           <CartesianGrid stroke="#e2e8f0" vertical={false} />
-          <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={28} />
+          <XAxis dataKey="date" ticks={timelineTicks(points)} tickFormatter={timelineTickLabel} minTickGap={26} />
           <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
           <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), String(name)]} labelFormatter={(label) => String(label)} />
           <Legend />
           <Line type="monotone" dataKey="invested" stroke="#64748b" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} name="Invested" />
-          <Line type="monotone" dataKey="current" stroke="#0f766e" strokeWidth={3.2} dot={false} activeDot={{ r: 5 }} connectNulls={false} name="Current Value" />
+          <Line type="monotone" dataKey="current" stroke="#0f766e" strokeWidth={3.2} dot={false} activeDot={{ r: 5 }} connectNulls name="Current Value" />
         </LineChart>
       </ResponsiveContainer>
-      <p className="chart-note">Sampled at month-end plus latest date. Current value is reconstructed from units held and the latest real NAV, stock quote, PF book-value, NPS statement NAV, and FX snapshot available on or before each point. Coverage: {completeValuePoints}/{points.length} complete valuation point(s).</p>
+      <p className="chart-note">Sampled at month-end plus today's current snapshot. The final point matches the dashboard current value; historical points use the latest real NAV, quote, PF book value, NPS statement NAV, and FX rate available on or before each point. Coverage: {completeValuePoints}/{points.length} valuation point(s).</p>
     </div>
   );
 }
@@ -924,11 +924,11 @@ function BreakdownGrowthChart({ points, field, keys, currency }: { points: Portf
       <ResponsiveContainer width="100%" height={292}>
         <AreaChart data={data} margin={{ left: 6, right: 18, top: 8, bottom: 6 }}>
           <CartesianGrid stroke="#e2e8f0" vertical={false} />
-          <XAxis dataKey="date" tickFormatter={shortDate} minTickGap={28} />
+          <XAxis dataKey="date" ticks={timelineTicks(completePoints)} tickFormatter={timelineTickLabel} minTickGap={26} />
           <YAxis tickFormatter={(value) => compactMoney(Number(value))} width={74} />
           <Tooltip formatter={(value, name) => [formatMoney(Number(value ?? 0), currency), displayHoldingName(String(name))]} labelFormatter={(label) => String(label)} />
           <Legend formatter={(value) => displayHoldingName(String(value))} />
-          {keys.map((key, index) => <Area key={key} type="monotone" dataKey={key} stackId="value" stroke={chartColors[index % chartColors.length]} fill={chartColors[index % chartColors.length]} fillOpacity={0.18} strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls={false} />)}
+          {keys.map((key, index) => <Area key={key} type="monotone" dataKey={key} stackId="value" stroke={chartColors[index % chartColors.length]} fill={chartColors[index % chartColors.length]} fillOpacity={0.18} strokeWidth={2} dot={false} activeDot={{ r: 4 }} connectNulls />)}
         </AreaChart>
       </ResponsiveContainer>
       <p className="chart-note">Stacked month-end history using complete portfolio valuation points only. Missing history means NAV, quote, or FX data is not yet available for every active holding.</p>
@@ -958,7 +958,7 @@ function DonutChart({ data }: { data: Array<{ name: string; value: number; perce
 
 function HorizontalBar({ data, currency }: { data: Array<{ name: string; value: number }>; currency: string }) {
   if (data.length === 0) return <p className="message">No data yet.</p>;
-  const chartData = data.slice(0, 8).map((item) => ({ ...item, fullName: item.name, shortName: chartLabel(item.name) }));
+  const chartData = labeledChartData(data.slice(0, 8));
   const dense = chartData.length > 5;
   return (
     <div className="smart-bar-chart">
@@ -981,7 +981,7 @@ function HorizontalBar({ data, currency }: { data: Array<{ name: string; value: 
 
 function PercentBar({ data }: { data: Array<{ name: string; value: number }> }) {
   if (data.length === 0) return <p className="message">No positive holding XIRR yet.</p>;
-  const chartData = data.slice(0, 8).map((item) => ({ ...item, fullName: item.name, shortName: chartLabel(item.name) }));
+  const chartData = labeledChartData(data.slice(0, 8));
   return (
     <div className="smart-bar-chart">
       <ResponsiveContainer width="100%" height={286}>
@@ -1031,26 +1031,106 @@ function topTimelineKeys(points: PortfolioTimelinePoint[], field: keyof Pick<Por
   return [...totals.entries()].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([key]) => key);
 }
 
+function labeledChartData<T extends { name: string; value: number }>(items: T[]): Array<T & { fullName: string; shortName: string }> {
+  const used = new Map<string, number>();
+  return items.map((item) => {
+    const base = chartLabel(item.name);
+    const count = used.get(base) ?? 0;
+    used.set(base, count + 1);
+    return { ...item, fullName: item.name, shortName: count === 0 ? base : base + " " + String(count + 1) };
+  });
+}
+
 function chartLabel(value: string): string {
-  const cleaned = displayHoldingName(value)
-    .replace(/Mutual Fund/gi, "MF")
-    .replace(/Institution/gi, "Inst")
-    .replace(/Conservative Hybrid/gi, "Conservative")
-    .replace(/Dynamic Asset Allocation/gi, "Dynamic AA")
-    .replace(/Ultra Short Term/gi, "Ultra ST")
-    .replace(/Nifty 50 Index/gi, "Nifty 50")
-    .replace(/Direct Growth/gi, "Direct")
+  const normalized = displayHoldingName(value)
+    .replace(/^Registrar\s*:\s*/i, "")
+    .replace(/^HUSTGT-/i, "")
+    .replace(/S\s+and\s+P/gi, "S&P")
     .replace(/Transactions Ledger/gi, "Ledger")
     .replace(/indmoney_export/gi, "INDMoney")
     .replace(/cas_pdf/gi, "CAS")
     .replace(/nps_statement/gi, "NPS")
-    .replace(/epfo_passbook/gi, "EPFO");
-  return cleaned.length <= 18 ? cleaned : cleaned.slice(0, 16).trimEnd() + "...";
+    .replace(/epfo_passbook/gi, "EPFO")
+    .replace(/\bMutual Fund\b/gi, "MF")
+    .replace(/\bInstitution\b/gi, "Inst")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized || normalized === "0") return "Other";
+  if (/^[A-Z]{1,6}$/.test(normalized)) return normalized;
+
+  const issuer = issuerAlias(normalized);
+  const strategy = strategyAlias(normalized);
+  if (issuer && strategy) return compactChartLabel(issuer + " " + strategy, 24);
+  if (issuer) return issuer;
+  if (strategy) return compactChartLabel(strategy, 24);
+  return compactChartLabel(normalized, 24);
 }
 
-function shortDate(value: string): string {
-  const match = value.match(/^(\d{4})-(\d{2})/);
-  return match ? match[2] + "/" + match[1].slice(2) : value;
+function issuerAlias(value: string): string | undefined {
+  if (/Parag Parikh|PPFAS/i.test(value)) return "PPFAS";
+  if (/ICICI Prudential/i.test(value)) return "ICICI Pru";
+  if (/Motilal Oswal|\bOswal\b/i.test(value)) return "MO";
+  if (/HDFC/i.test(value)) return "HDFC";
+  if (/SBI Pension Fund|SBI PENSION FUND/i.test(value)) return "SBI NPS";
+  if (/EPFO|EPF/i.test(value)) return "EPFO";
+  if (/INDMoney/i.test(value)) return "INDMoney";
+  return undefined;
+}
+
+function strategyAlias(value: string): string | undefined {
+  if (/Nifty\s*50/i.test(value)) return "Nifty 50";
+  if (/S&P\s*500/i.test(value)) return "S&P 500";
+  if (/Gilt/i.test(value)) return "Gilt";
+  if (/Flexi Cap/i.test(value)) return "Flexi";
+  if (/Dynamic Asset Allocation/i.test(value)) return "Dynamic AA";
+  if (/Conservative Hybrid|Conservative/i.test(value)) return "Conservative";
+  if (/Ultra Short Term|Ultra ST/i.test(value)) return "Ultra ST";
+  if (/Scheme\s*E|SCHEME E/i.test(value)) return "Scheme E";
+  if (/Scheme\s*G|SCHEME G/i.test(value)) return "Scheme G";
+  if (/Cash/i.test(value)) return "Cash";
+  if (/ESPP/i.test(value)) return "ESPP";
+  return undefined;
+}
+
+function compactChartLabel(value: string, max = 24): string {
+  const cleaned = value
+    .replace(/\b(Fund|Direct|Growth|Plan|Option|Index|Tier I|POP|MF)\b/gi, "")
+    .replace(/\s+-\s+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length <= max) return cleaned;
+  const words = cleaned.split(" ");
+  let label = "";
+  for (const word of words) {
+    const next = label ? label + " " + word : word;
+    if (next.length > max) break;
+    label = next;
+  }
+  return label || cleaned.slice(0, max).trimEnd();
+}
+
+function timelineTicks(points: PortfolioTimelinePoint[]): string[] {
+  if (points.length === 0) return [];
+  const ticks: string[] = [];
+  const years = new Set<string>();
+  for (const point of points) {
+    const year = point.date.slice(0, 4);
+    if (!years.has(year)) {
+      years.add(year);
+      ticks.push(point.date);
+    }
+  }
+  const latest = points.at(-1)?.date;
+  if (latest && !ticks.includes(latest)) ticks.push(latest);
+  return ticks;
+}
+
+function timelineTickLabel(value: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  if (value === today) return "Today";
+  const match = value.match(/^(\d{4})-/);
+  return match ? match[1] : value;
 }
 
 function latestAsOfDate(dates: string[]): string {

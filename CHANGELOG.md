@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Fixed portfolio timeline chart correctness by clamping timeline dates to today, forcing the latest plotted current value and breakdowns to match the dashboard current-holdings snapshot, normalizing invalid chart buckets, and replacing hard-truncated chart labels with readable finance aliases.
+
 - Rebuilt the Holdings workspace with filtered summary metrics, top-holding/profit/XIRR charts, per-holding allocation, invested amount, P/L, simple return, XIRR, and richer responsive holding rows.
 
 - Reworked bar-chart rendering into a vertical, color-coded dashboard chart with compact labels, top-value labels, richer spacing, and readable tooltips.

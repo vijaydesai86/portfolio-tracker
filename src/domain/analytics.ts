@@ -183,10 +183,16 @@ function buildHoldingInsight(balance: ManualBalance, backup: PortfolioBackup, mi
     quantity: balance.quantity,
     price: balance.price,
     asOfDate: balance.asOfDate,
-    provider: balance.source.provider ?? balance.source.type,
-    institution: account?.institution ?? balance.source.provider ?? "Manual",
-    issuer: instrument?.issuer ?? account?.institution ?? balance.source.provider ?? "Manual"
+    provider: cleanDimension(balance.source.provider) ?? balance.source.type,
+    institution: cleanDimension(account?.institution) ?? cleanDimension(balance.source.provider) ?? "Manual",
+    issuer: cleanDimension(instrument?.issuer) ?? cleanDimension(account?.institution) ?? cleanDimension(balance.source.provider) ?? "Manual"
   };
+}
+
+function cleanDimension(value?: string): string | undefined {
+  const cleaned = value?.trim();
+  if (!cleaned || cleaned === "0" || cleaned === "-" || /^n\/?a$/i.test(cleaned)) return undefined;
+  return cleaned;
 }
 
 function groupHoldings(holdings: HoldingInsight[], key: "provider" | "institution" | "issuer" | "assetKind" | "region"): Array<{ name: string; value: number }> {
