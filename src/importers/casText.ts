@@ -544,10 +544,11 @@ function parseCasTransactionLine(line: string): CasTransactionRow | undefined {
 
 function classifyCasTransaction(description: string, hasUnits: boolean): CasTransactionType {
   const value = description.toLowerCase();
+  const normalized = value.replace(/[^a-z0-9]+/g, " ").trim();
   if (value.includes("stamp duty")) return "stamp_duty";
   if (value.includes("dividend")) return "dividend";
-  if (value.includes("switch in")) return "switch_in";
-  if (value.includes("switch out")) return "switch_out";
+  if (normalized.includes("switch in")) return "switch_in";
+  if (normalized.includes("switch out")) return "switch_out";
   if (value.includes("redemption") || value.includes("redeem")) return "redemption";
   if (value.includes("systematic investment") || value.includes("sip purchase") || value.includes("purchase systematic")) return "sip";
   if (value.includes("purchase") && hasUnits) return "purchase";

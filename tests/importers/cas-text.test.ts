@@ -40,6 +40,20 @@ describe("CAS text parser", () => {
     expect(parsed.schemes[0].transactions.map((tx) => tx.type)).toEqual(["purchase", "stamp_duty"]);
   });
 
+  it("classifies hyphenated CAS switch transactions as switch flows", () => {
+    const parsed = parseCasText(`Consolidated Account Statement
+Folio No: 123456 PAN: REDACTED
+REDACTED INVESTOR
+ABC1-Sample Index Fund - Direct Plan Growth - ISIN: INF000000003 Registrar : CAMS
+Nominee 1: REDACTED Opening Unit Balance: 0.000
+03-Nov-2022   Switch-In - From Sample Sensex Fund - via AMCOnline                         1,526,065.80         8,935.722          170.7826              8,935.722
+03-Nov-2022   Switch-Out - To Sample Nifty Fund - via AMCOnline                             100,000.00          -500.000          200.0000              8,435.722
+Closing Unit Balance: 8,435.722 NAV on 19-Jun-2026: INR 200.0000 Total Cost Value: 1,426,065.80 Market Value on 19-Jun-2026: INR 1,687,144.40`);
+
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.schemes[0].transactions.map((tx) => tx.type)).toEqual(["switch_in", "switch_out"]);
+  });
+
   it("uses CAS Total Cost Value as holding invested amount when statement-window transactions are partial", () => {
     const partialHistoryCas = `Consolidated Account Statement
 Date          Transaction                                                                         Amount               Units             Price                 Unit

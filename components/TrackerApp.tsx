@@ -88,11 +88,13 @@ export function TrackerApp() {
     const cashOut = insights.transactionStats.externalCashOutBase;
     const feesAndTax = insights.transactionStats.feesAndTaxesBase;
     const knownReturns = [...holdingReturns.values()].filter((row) => row.costBasisKnown && row.currentValue !== undefined);
-    const netInvested = knownReturns.reduce((sum, row) => sum + row.netInvested, 0);
+    const holdingNetInvested = knownReturns.reduce((sum, row) => sum + row.netInvested, 0);
     const currentWithCostBasis = knownReturns.reduce((sum, row) => sum + (row.currentValue ?? 0), 0);
-    const currentProfit = knownReturns.reduce((sum, row) => sum + (row.profit ?? 0), 0);
+    const hasExternalFlows = grossCashIn > 0 || cashOut > 0;
+    const netInvested = hasExternalFlows ? Math.max(0, grossCashIn - cashOut) : holdingNetInvested;
+    const currentProfit = hasExternalFlows ? current - netInvested : knownReturns.reduce((sum, row) => sum + (row.profit ?? 0), 0);
     const totalProfit = currentProfit;
-    const profitKnown = knownReturns.length > 0;
+    const profitKnown = hasExternalFlows || knownReturns.length > 0;
     return {
       grossCashIn,
       current,

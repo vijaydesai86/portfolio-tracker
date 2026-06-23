@@ -4,6 +4,12 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Fixed CAS XIRR coverage for hyphenated `Switch-In` and `Switch-Out` rows so switch transactions are included in mutual-fund cost and cash-flow reconstruction.
+
+- Fixed EPFO/PF yearly parsing to select the main passbook closing balance instead of taxable-data subtables, and to include main passbook transfer-in rows as PF cost-basis contributions.
+
+- Changed headline portfolio invested/P&L to use external capital-in minus external capital-out when transaction cash-flow data exists, while holding rows continue to show remaining cost basis.
+
 - Fixed CAS mutual-fund invested/P&L calculations to use statement `Total Cost Value` as authoritative cost basis, and suppress holding XIRR when the CAS statement window lacks complete acquisition cash flows.
 
 - Fixed PF portfolio valuation to exclude EPS pension from net worth and external cash-in while keeping employee/employer PF shares from the latest detailed closing balance.

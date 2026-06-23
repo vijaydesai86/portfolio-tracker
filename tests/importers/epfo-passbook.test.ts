@@ -56,16 +56,38 @@ describe("EPFO passbook importer", () => {
   });
 
 
-  it("prefers detailed PF buckets over the combined summary table", () => {
+  it("prefers main PF passbook buckets over taxable-data detail", () => {
     const parsed = parseEpfoPassbookText(epfoDualSummaryText);
 
     expect(parsed.errors).toEqual([]);
     expect(parsed.asOfDate).toBe("2025-03-31");
-    expect(parsed.balances.map((row) => row.value)).toEqual([389073, 331010, 58063]);
-    expect(sumBucket(parsed.yearlyContributions, "employee")).toBe(77400);
-    expect(sumBucket(parsed.yearlyContributions, "employer")).toBe(250000);
-    expect(sumBucket(parsed.yearlyContributions, "pension")).toBe(57800);
-    expect(parsed.yearlyInterest.map((row) => row.value)).toEqual([54934, 54671, 263]);
+    expect(parsed.balances.map((row) => row.value)).toEqual([1068502, 1068502, 0]);
+    expect(sumBucket(parsed.yearlyContributions, "employee")).toBe(307800);
+    expect(sumBucket(parsed.yearlyContributions, "employer")).toBe(307800);
+    expect(sumBucket(parsed.yearlyContributions, "pension")).toBe(0);
+    expect(parsed.yearlyInterest.map((row) => row.value)).toEqual([54934, 54934, 0]);
+  });
+
+  it("parses main passbook transfer-in rows as PF cost-basis contributions", () => {
+    const parsed = parseEpfoPassbookText(`EPF Passbook [ Financial Year - 2024-2025 ]
+OB Int. Updated upto 01/04/2024                                                                     26,339                                                 26,339                                                          0
+Mar-2024 05-04-2024                     CR          Cont. For Due-Month 042024                              2,00,000                          0              24,000                  24,000                          0
+TRANSFER IN - SAME
+May-2024 14-08-2024                     CR          OFFICE(Old Member Id-                                              0                      0           6,65,699                6,65,699                           0
+Total Contributions for the year [ 2024 ]                            3,07,800                3,07,800                           0
+Total Transfer-Ins/VDRs for the year [ 2024 ]                               6,79,429                6,79,429                           0
+Total Withdrawals for the year [ 2024 ]                                          0                      0                       0
+Int. Updated upto 31/03/2025                                                                                                                                        54,934                  54,934                          0
+Closing Balance as on 31/03/2025                                                                                                                                10,68,502              10,68,502                            0
+Taxable Data for the year [ 2024-2025]
+Closing Balance as on 31/03/2025                                                                 3,89,073                                                3,31,010                                                  58,063
+Printed On : 23-06-2026 10:58:25`);
+
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.balances.map((row) => row.value)).toEqual([1068502, 1068502, 0]);
+    expect(sumBucket(parsed.yearlyContributions, "employee")).toBe(689699);
+    expect(sumBucket(parsed.yearlyContributions, "employer")).toBe(689699);
+    expect(parsed.yearlyContributions.some((row) => row.date === "2024-08-14" && row.value === 665699)).toBe(true);
   });
 
   it("builds and commits canonical EPF records without duplicate IDs", () => {

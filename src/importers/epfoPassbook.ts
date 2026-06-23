@@ -195,14 +195,14 @@ function toBuckets(values: number[], date?: string): EpfoContributionBucket[] {
 }
 
 function selectPassbookClosingIndex(lines: string[], closingIndexes: number[]): number {
-  const detailed = closingIndexes.filter((closingIndex) => detailedTotalBeforeClosing(lines, closingIndex).length >= 3);
-  if (detailed.length > 0) return detailed[detailed.length - 1];
-  const nonTaxable = closingIndexes.filter((closingIndex) => {
-    const start = Math.max(0, lastIndexMatching(lines, /EPF Passbook|Member Passbook/i, closingIndex));
-    const segment = lines.slice(start, closingIndex + 1).join(" ");
-    return !/Taxable Data/i.test(segment);
+  const mainPassbook = closingIndexes.filter((closingIndex) => {
+    const previousClosing = closingIndexes.filter((index) => index < closingIndex).at(-1) ?? -1;
+    const header = lastIndexMatching(lines, /EPF Passbook|Member Passbook|Taxable Data/i, closingIndex);
+    const start = Math.max(previousClosing + 1, header);
+    const segment = lines.slice(Math.max(0, start), closingIndex + 1).join(" ");
+    return /Total Contributions for the year/i.test(segment) && !/Taxable Data|Cumulative Balance at the end of the Month/i.test(segment);
   });
-  return nonTaxable.at(-1) ?? closingIndexes.at(-1) ?? closingIndexes[0];
+  return mainPassbook.at(-1) ?? closingIndexes.at(-1) ?? closingIndexes[0];
 }
 
 
@@ -221,21 +221,23 @@ function contributionPostedDateByDueMonth(lines: string[], closingIndex: number)
 function detailedMonthlyContributionBuckets(lines: string[], closingIndex: number, postedDates: Map<string, string>): EpfoContributionBucket[] {
   const start = lastIndexMatching(lines, /OB Int. Updated/i, closingIndex);
   if (start === -1) return [];
+  const segment = lines.slice(start, closingIndex).join(" ");
+  const cumulativeRows = /Cumulative Balance at the end of the Month|Taxable Data/i.test(segment);
   const previousCumulative = [0, 0, 0];
   const rows: EpfoContributionBucket[] = [];
   for (let index = start + 1; index < closingIndex; index++) {
     const line = lines[index];
-    if (/^TOTAL\b/i.test(line)) break;
+    if (/^TOTAL\b|Total Contributions|Total Transfer|Total Withdrawals|Interest details|Int\. Updated/i.test(line)) break;
     const month = parseMonthYear(line);
     if (!month) continue;
     const values = amountTokens(line).slice(-3);
     if (values.length < 3) continue;
     const employee = values[0];
-    const employer = Math.max(0, values[1] - previousCumulative[1]);
-    const pension = Math.max(0, values[2] - previousCumulative[2]);
+    const employer = cumulativeRows ? Math.max(0, values[1] - previousCumulative[1]) : values[1];
+    const pension = cumulativeRows ? Math.max(0, values[2] - previousCumulative[2]) : values[2];
     previousCumulative[1] = values[1];
     previousCumulative[2] = values[2];
-    const date = postedDates.get(month) ?? monthEnd(month);
+    const date = parsePostedDate(line) ?? postedDates.get(month) ?? monthEnd(month);
     rows.push(...toBuckets([employee, employer, pension], date).filter((bucket) => bucket.value > 0));
   }
   return rows;
@@ -245,6 +247,12 @@ function parseMonthYear(line: string): string | undefined {
   const match = line.match(/^([A-Za-z]{3})-(\d{4})\b/);
   if (!match) return undefined;
   return match[2] + "-" + monthNumber(match[1]);
+}
+
+function parsePostedDate(line: string): string | undefined {
+  const match = line.match(/^[A-Za-z]{3}-\d{4}\s+(\d{2})-(\d{2})-(\d{4})\b/);
+  if (!match) return undefined;
+  return match[3] + "-" + match[2] + "-" + match[1];
 }
 
 function monthEnd(month: string): string {
@@ -260,7 +268,7 @@ function monthNumber(value: string): string {
 
 function detailedTotalBeforeClosing(lines: string[], closingIndex: number): number[] {
   for (let index = closingIndex - 1; index >= 0 && index >= closingIndex - 8; index--) {
-    if (!/^TOTAL\b/i.test(lines[index])) continue;
+    if (!/^TOTAL\s+[\d,]/i.test(lines[index])) continue;
     const values = amountTokens(lines[index]).slice(-3);
     if (values.length >= 3) return values;
   }
