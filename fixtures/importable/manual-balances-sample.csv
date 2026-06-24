@@ -1,10 +1,10 @@
 balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes
-cash-main,2026-06-22,Manual,cash,Cash Balance,50000,INR,Cash,50000,INR,2026-06-22,Sample liquid cash balance
-espp-contribution,2026-06-22,Employer,espp,ESPP Contribution,50000,USD,Equity,45000,USD,2026-06-22,Sample ESPP contribution balance
-ppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,50000,INR,Debt,45000,INR,2026-06-22,Sample PPF manual balance
-ssy-main,2026-06-22,Bank or Post Office,ssy,Sukanya Samriddhi Account,50000,INR,Debt,42000,INR,2026-06-22,Sample SSY manual balance
-epf-main,2026-06-22,EPFO,epf,EPF Balance,50000,INR,Debt,47000,INR,2026-06-22,Sample EPF fallback; native PF import is preferred
-nps-main,2026-06-22,NPS,nps,NPS Manual Balance,50000,INR,Others,44000,INR,2026-06-22,Sample NPS fallback; native NPS import is preferred
-fd-main,2026-06-22,Bank,fd,Fixed Deposit,50000,INR,Debt,48000,INR,2026-06-22,Sample FD current value and principal/cost
-manual-gold-main,2026-06-22,Manual,gold,Manual Gold Holding,50000,INR,Gold,40000,INR,2026-06-22,Sample manually valued gold
-other-main,2026-06-22,Manual,other,Other Asset,50000,INR,Others,35000,INR,2026-06-22,Sample other asset
+cash-main,2026-06-22,Manual,cash,Cash Balance,1000,INR,Cash,1000,INR,2026-06-22,Synthetic liquid cash balance
+espp-contribution,2026-06-22,Employer,espp,ESPP Contribution,100,USD,Equity,90,USD,2026-06-22,Synthetic ESPP contribution balance
+ppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,1000,INR,Debt,900,INR,2026-06-22,Synthetic PPF manual balance
+ssy-main,2026-06-22,Bank or Post Office,ssy,Sukanya Samriddhi Account,1000,INR,Debt,840,INR,2026-06-22,Synthetic SSY manual balance
+epf-main,2026-06-22,EPFO,epf,EPF Balance,1000,INR,Debt,940,INR,2026-06-22,Synthetic EPF fallback; native PF import is preferred
+nps-main,2026-06-22,NPS,nps,NPS Manual Balance,1000,INR,Others,880,INR,2026-06-22,Synthetic NPS fallback; native NPS import is preferred
+fd-main,2026-06-22,Bank,fd,Fixed Deposit,1000,INR,Debt,960,INR,2026-06-22,Synthetic FD current value and principal/cost
+manual-gold-main,2026-06-22,Manual,gold,Manual Gold Holding,1000,INR,Gold,800,INR,2026-06-22,Synthetic manually valued gold
+other-main,2026-06-22,Manual,other,Other Asset,1000,INR,Others,700,INR,2026-06-22,Synthetic other asset

@@ -1,3 +1,4 @@
+import { reconcileManualTransactionPositions } from "@/src/domain/manualTransactionPositions";
 import { parseManualCsv, type ManualCsvResult } from "@/src/importers/manualCsv";
 import type { ImportRun, PortfolioBackup, SourceDocument } from "@/src/schema/backup";
 
@@ -104,9 +105,10 @@ function commitManualParsedImport(backup: PortfolioBackup, parsed: ManualCsvResu
   }
 
   next.exportedAt = now;
+  const reconciled = reconcileManualTransactionPositions(next, now);
 
   return {
-    backup: next,
+    backup: reconciled,
     errors: parsed.errors,
     addedBalances,
     addedTransactions,

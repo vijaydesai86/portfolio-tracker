@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Added Fidelity-style manual US stock CSV support for `price ($)` and `USD-INR`, preserving CSV buy/sell prices as transaction facts while using market refresh only for current holding valuation; sanitized committed manual sample fixtures to synthetic values.
+
 - Added compact manual balance-ledger CSV support and a committed PPF/SSY/ESPP/Cash sample file where dated `invest` rows affect invested/current value and `interest` rows affect current value only.
 
 - Fixed transaction deletion for Add Entry records so deleting a manually added transaction also reconciles the matching holding value/quantity instead of only changing invested/P&L math.

@@ -57,6 +57,7 @@ type NormalizedTransactionRow = Required<{
   quantity: string;
   price: string;
   amount: string;
+  fx_rate: string;
   fees: string;
   taxes: string;
   symbol: string;
@@ -305,6 +306,7 @@ function parseTransactionCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOp
       quantity,
       price,
       amount,
+      fxRate: optionalNumber(normalized.fx_rate),
       fees: optionalNumber(normalized.fees) ?? 0,
       taxes: optionalNumber(normalized.taxes) ?? 0,
       currency: normalized.currency
@@ -336,6 +338,19 @@ function parseTransactionCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOp
         currency: normalized.currency,
         asOfDate: normalized.date,
         source: "manual_transactions",
+        createdAt: now
+      });
+    }
+
+    const fxRate = optionalNumber(normalized.fx_rate);
+    if (normalized.currency === "USD" && fxRate !== undefined && fxRate > 0) {
+      priceSnapshots.push({
+        id: slugId("price", ["USDINR", normalized.date, String(fxRate), "manual_transactions_fx"]),
+        instrumentId: "USDINR",
+        price: fxRate,
+        currency: "INR",
+        asOfDate: normalized.date,
+        source: "manual_transactions_fx",
         createdAt: now
       });
     }
@@ -567,7 +582,7 @@ function normalizeBalanceRow(row: ManualCsvRow): NormalizedBalanceRow {
     invested_as_of_date: parseDateCell(pick(row, "invested_as_of_date", "invested_date", "contribution_date")) || parseDateCell(pick(row, "as_of_date", "date", "valuation_date")),
     as_of_date: parseDateCell(pick(row, "as_of_date", "date", "valuation_date")),
     quantity: cleanNumber(pick(row, "quantity", "units", "shares")),
-    price: cleanNumber(pick(row, "price", "nav", "unit_price")),
+    price: cleanNumber(pick(row, "price", "price_($)", "price_$", "price_usd", "nav", "unit_price")),
     symbol: symbolFields.symbol || pick(row, "symbol", "ticker").toUpperCase(),
     isin: symbolFields.isin || pick(row, "isin").toUpperCase(),
     country: pick(row, "country", "region").toUpperCase(),
@@ -593,8 +608,9 @@ function normalizeTransactionRow(row: ManualCsvRow): NormalizedTransactionRow {
     date: parseDateCell(pick(row, "date", "transaction_date")),
     transaction_type: normalizeTransactionType(pick(row, "type", "transaction_type", "action")),
     quantity: cleanNumber(pick(row, "quantity", "units", "shares")),
-    price: cleanNumber(pick(row, "price", "nav", "unit_price")),
+    price: cleanNumber(pick(row, "price", "price_($)", "price_$", "price_usd", "nav", "unit_price")),
     amount: cleanNumber(pick(row, "amount", "net_amount", "gross_amount")),
+    fx_rate: cleanNumber(pick(row, "usd_inr", "usd/inr", "fx_rate", "fx", "conversion_rate")),
     fees: cleanNumber(pick(row, "fees", "fee", "charges", "commission")),
     taxes: cleanNumber(pick(row, "taxes", "tax", "withholding_tax")),
     symbol: symbolFields.symbol || pick(row, "symbol", "ticker").toUpperCase(),

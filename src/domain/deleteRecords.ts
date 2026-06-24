@@ -1,8 +1,9 @@
+import { reconcileManualTransactionPositions } from "@/src/domain/manualTransactionPositions";
 import type { Account, ManualBalance, PortfolioBackup, Transaction } from "@/src/schema/backup";
 
 export function deleteImportRunFromBackup(backup: PortfolioBackup, importId: string, now = new Date().toISOString()): PortfolioBackup {
   const deletedBalanceIds = new Set(backup.manualBalances.filter((balance) => balance.source.importId === importId).map((balance) => balance.id));
-  return pruneOrphans({
+  const next = reconcileManualTransactionPositions({
     ...backup,
     exportedAt: now,
     imports: backup.imports.filter((run) => run.id !== importId),
@@ -10,7 +11,8 @@ export function deleteImportRunFromBackup(backup: PortfolioBackup, importId: str
     transactions: backup.transactions.filter((tx) => tx.source.importId !== importId),
     manualBalances: backup.manualBalances.filter((balance) => balance.source.importId !== importId),
     goalMappings: backup.goalMappings.filter((mapping) => !mapping.manualBalanceId || !deletedBalanceIds.has(mapping.manualBalanceId))
-  });
+  }, now);
+  return pruneOrphans(next);
 }
 
 export function deleteTransactionFromBackup(backup: PortfolioBackup, transactionId: string, now = new Date().toISOString()): PortfolioBackup {
@@ -27,12 +29,14 @@ export function deleteTransactionFromBackup(backup: PortfolioBackup, transaction
     ? reverseManualEntryBalance(relatedBalance, relatedAccount, deleted, now)
     : undefined;
 
-  return pruneOrphans({
+  const next = {
     ...backup,
     exportedAt: now,
     transactions: nextTransactions,
     manualBalances: reconciledBalance ? backup.manualBalances.map((balance) => balance.id === reconciledBalance.id ? reconciledBalance : balance) : backup.manualBalances
-  });
+  };
+
+  return pruneOrphans(deleted?.source.provider === "manual_transactions" ? reconcileManualTransactionPositions(next, now) : next);
 }
 
 export function pruneOrphans(portfolio: PortfolioBackup): PortfolioBackup {
@@ -85,7 +89,7 @@ function reverseManualEntryBalance(balance: ManualBalance, account: Account, tx:
     quantity: nextQuantity,
     value: nextValue,
     asOfDate: balance.asOfDate,
-    source: { ...balance.source, provider: "manual_entry" },
+    source: { ...balance.source },
     userModified: true,
     updatedAt: now
   };

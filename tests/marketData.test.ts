@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { calculateHoldingReturns } from "@/src/domain/holdingReturns";
+import { commitManualCsvImport } from "@/src/importers/importPipeline";
 import { applyMarketDataPayload, parseAmfiNavAll, parseCurrencyApiLatestFx, parseExchangeRateApiLatestFx, parseFrankfurterHistoricalFx, parseFrankfurterLatestFx, parseFxFromStooqCsv, parseHistoricalFxFromStooqCsv, parseMfapiHistoricalNav, parseStooqCsv, parseStooqHistoricalStockCsv, parseYahooChartQuote, parseYahooHistoricalPrices } from "@/src/marketData/marketData";
 import { createEmptyBackup } from "@/src/schema/backup";
 
@@ -22,6 +24,27 @@ describe("market data parsers", () => {
 
     expect(updated.manualBalances[0]).toMatchObject({ value: 250, price: 125, asOfDate: "2026-06-20" });
     expect(updated.priceSnapshots.some((snapshot) => snapshot.instrumentId === "USDINR" && snapshot.price === 83)).toBe(true);
+  });
+  it("refreshes current value for manual Fidelity positions without changing CSV buy/sell prices", () => {
+    const csv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes
+1,15-02-2025,Fidelity,us_stock,TST,Example US Stock,buy,10,10,80,0,,USD,Equity,RSU1
+2,15-05-2025,Fidelity,us_stock,TST,Example US Stock,buy,5,12,81,0,,USD,Equity,RSU2
+3,28-05-2026,Fidelity,us_stock,TST,Example US Stock,sell,3,30,90,0,,USD,Equity,RSU1`;
+    const imported = commitManualCsvImport(createEmptyBackup("INR"), csv, { importId: "fid_manual", fileName: "manual-fidelity.csv", now: "2026-06-24T00:00:00.000Z" }).backup;
+
+    const updated = applyMarketDataPayload(imported, {
+      stocks: [{ symbol: "TST", price: 40, currency: "USD", asOfDate: "2026-06-23", source: "test_live_quote" }],
+      navs: [],
+      fx: { pair: "USDINR", from: "USD", to: "INR", rate: 96, asOfDate: "2026-06-23", source: "test_latest_fx" },
+      errors: []
+    });
+    const holding = updated.manualBalances.find((balance) => balance.label === "Example US Stock")!;
+    const row = calculateHoldingReturns(updated).get(holding.id)!;
+
+    expect(updated.transactions.map((tx) => tx.price)).toEqual([10, 12, 30]);
+    expect(holding).toMatchObject({ price: 40, value: 480, asOfDate: "2026-06-23" });
+    expect(row.invested).toBe(10460);
+    expect(row.currentValue).toBe(46080);
   });
 });
 

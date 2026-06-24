@@ -51,10 +51,10 @@ mf-buy-1,2026-04-01,MF Platform,mutual_fund,INF000000000,Example Mutual Fund,buy
 
   it("keeps repeated template transaction ids when transaction facts differ", () => {
     const tsv = `transaction_id	date	platform	asset_type	symbol_or_isin	name	type	quantity	price	amount	fees	taxes	currency	category	notes
-fidelity-us-buy-template	1/15/2025	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	buy	330	109		0	0	USD	Equity	first lot
-fidelity-us-buy-template	4/15/2025	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	buy	400	110		0	0	USD	Equity	second lot
-fidelity-us-buy-template	7/15/2025	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	buy	100	125		0	0	USD	Equity	third lot
-fidelity-us-buy-template	5/15/2026	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	sell	100	350		0	0	USD	Equity	sale`;
+fidelity-us-buy-template	1/15/2025	Fidelity	us_stock	TST	Example US Stock	buy	10	10		0	0	USD	Equity	first synthetic lot
+fidelity-us-buy-template	4/15/2025	Fidelity	us_stock	TST	Example US Stock	buy	20	11		0	0	USD	Equity	second synthetic lot
+fidelity-us-buy-template	7/15/2025	Fidelity	us_stock	TST	Example US Stock	buy	5	12		0	0	USD	Equity	third synthetic lot
+fidelity-us-buy-template	5/15/2026	Fidelity	us_stock	TST	Example US Stock	sell	7	15		0	0	USD	Equity	synthetic sale`;
 
     const result = parseManualCsv(tsv, { importId: "arm_manual", now: "2026-06-23T00:00:00.000Z" });
 
@@ -63,7 +63,7 @@ fidelity-us-buy-template	5/15/2026	Fidelity	us_stock	ARM	Arm Holdings PLC - ADR	
     expect(result.transactions.map((tx) => tx.date)).toEqual(["2025-01-15", "2025-04-15", "2025-07-15", "2026-05-15"]);
     expect(new Set(result.transactions.map((tx) => tx.source.sourceRecordHash)).size).toBe(4);
     expect(result.manualBalances).toHaveLength(1);
-    expect(result.manualBalances[0]).toMatchObject({ label: "Arm Holdings PLC - ADR", quantity: 730, price: 350, value: 255500, currency: "USD" });
+    expect(result.manualBalances[0]).toMatchObject({ label: "Example US Stock", quantity: 28, price: 15, value: 420, currency: "USD" });
   });
 
   it("parses optional invested fields on balance CSV rows", () => {

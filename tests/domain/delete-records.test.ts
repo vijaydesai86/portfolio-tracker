@@ -73,16 +73,56 @@ describe("deleteRecords", () => {
     const csv = readFileSync(resolve(__dirname, "../../fixtures/importable/manual-balance-ledger-sample.csv"), "utf8");
     const imported = commitManualCsvImport(backup, csv, { importId: "ledger", fileName: "manual-balance-ledger-sample.csv", now: "2026-06-24T00:00:00.000Z" }).backup;
     const ppf = imported.manualBalances.find((balance) => balance.label === "Public Provident Fund")!;
-    const interest = imported.transactions.find((tx) => tx.accountId === ppf.accountId && tx.type === "interest_accrual" && tx.amount === 59587)!;
+    const interest = imported.transactions.find((tx) => tx.accountId === ppf.accountId && tx.type === "interest_accrual" && tx.amount === 50)!;
 
     const next = deleteTransactionFromBackup(imported, interest.id, "2026-06-25T00:00:00.000Z");
     const nextPpf = next.manualBalances.find((balance) => balance.id === ppf.id)!;
     const row = calculateHoldingReturns(next).get(ppf.id)!;
 
-    expect(nextPpf.value).toBe(1001750);
-    expect(row.invested).toBe(900000);
-    expect(row.profit).toBe(101750);
+    expect(nextPpf.value).toBe(6100);
+    expect(row.invested).toBe(6000);
+    expect(row.profit).toBe(100);
     expect(next.transactions.some((tx) => tx.id === interest.id)).toBe(false);
+  });
+
+  it("reconciles manual transaction positions when deleting an imported Fidelity-style row", () => {
+    const csv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes
+1,15-02-2025,Fidelity,us_stock,TST,Example US Stock,buy,10,10,80,0,,USD,Equity,RSU1
+2,15-05-2025,Fidelity,us_stock,TST,Example US Stock,buy,5,12,81,0,,USD,Equity,RSU2
+3,28-05-2026,Fidelity,us_stock,TST,Example US Stock,sell,3,30,90,0,,USD,Equity,RSU1`;
+    const imported = commitManualCsvImport(createEmptyBackup("INR"), csv, { importId: "fid_manual", fileName: "manual-fidelity.csv", now: "2026-06-24T00:00:00.000Z" }).backup;
+    const sell = imported.transactions.find((tx) => tx.type === "sell")!;
+
+    const next = deleteTransactionFromBackup(imported, sell.id, "2026-06-25T00:00:00.000Z");
+    const holding = next.manualBalances.find((balance) => balance.label === "Example US Stock")!;
+    const row = calculateHoldingReturns(next).get(holding.id)!;
+
+    expect(next.transactions.some((tx) => tx.id === sell.id)).toBe(false);
+    expect(holding.source.provider).toBe("manual_positions");
+    expect(holding.quantity).toBe(15);
+    expect(holding.value).toBe(180);
+    expect(row.invested).toBe(12860);
+    expect(row.currentValue).toBe(16200);
+  });
+
+  it("reconciles manual transaction positions when deleting one upload from a multi-file Fidelity import", () => {
+    const firstCsv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes
+1,15-02-2025,Fidelity,us_stock,TST,Example US Stock,buy,10,10,80,0,,USD,Equity,RSU1
+2,15-05-2025,Fidelity,us_stock,TST,Example US Stock,buy,5,12,81,0,,USD,Equity,RSU2`;
+    const secondCsv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes
+3,28-05-2026,Fidelity,us_stock,TST,Example US Stock,sell,3,30,90,0,,USD,Equity,RSU1`;
+    const first = commitManualCsvImport(createEmptyBackup("INR"), firstCsv, { importId: "fid_manual_1", fileName: "manual-fidelity-1.csv", now: "2026-06-24T00:00:00.000Z" }).backup;
+    const second = commitManualCsvImport(first, secondCsv, { importId: "fid_manual_2", fileName: "manual-fidelity-2.csv", now: "2026-06-24T00:00:00.000Z" }).backup;
+
+    const next = deleteImportRunFromBackup(second, "fid_manual_2", "2026-06-25T00:00:00.000Z");
+    const holding = next.manualBalances.find((balance) => balance.label === "Example US Stock")!;
+    const row = calculateHoldingReturns(next).get(holding.id)!;
+
+    expect(next.transactions).toHaveLength(2);
+    expect(next.imports.map((run) => run.id)).toEqual(["fid_manual_1"]);
+    expect(holding.quantity).toBe(15);
+    expect(holding.value).toBe(180);
+    expect(row.invested).toBe(12860);
   });
 
   it("deletes a single transaction without deleting a still-held instrument", () => {

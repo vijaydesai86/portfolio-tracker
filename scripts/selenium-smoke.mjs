@@ -91,7 +91,28 @@ try {
   await jsClick("//button[.//strong[normalize-space(.)='Overview']]");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
-    return body.includes("₹19,42,957.00") && body.includes("₹17,15,630.00") && body.includes("₹2,27,327.00");
+    return body.includes("₹8,940.00") && body.includes("₹8,730.00") && body.includes("₹210.00");
+  }, 20000);
+
+  const fidelityCsvPath = path.resolve("test-results/manual-fidelity-smoke.csv");
+  fs.writeFileSync(fidelityCsvPath, [
+    "transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes",
+    "1,15-02-2025,Fidelity,us_stock,TST,Example US Stock,buy,10,10,80,0,,USD,Equity,RSU1",
+    "2,15-05-2025,Fidelity,us_stock,TST,Example US Stock,buy,5,12,81,0,,USD,Equity,RSU2",
+    "3,28-05-2026,Fidelity,us_stock,TST,Example US Stock,sell,3,30,90,0,,USD,Equity,RSU1"
+  ].join("\n"));
+  await jsClick("//button[contains(., 'Reset')]");
+  await waitForBodyText("Portfolio reset locally");
+  await jsClick("//button[contains(., 'Imports')]");
+  const fidelityFileInput = await driver.wait(until.elementLocated(By.xpath("(//input[@type='file'])[1]")), 15000);
+  await fidelityFileInput.sendKeys(fidelityCsvPath);
+  await waitForBodyText("parse the manual CSV");
+  await jsClick("//button[normalize-space(.)='Parse Manual CSV']");
+  await waitForBodyText("Manual CSV committed: 1 holding(s), 3 transaction(s)", 30000);
+  await jsClick("//button[contains(., 'Holdings')]");
+  await driver.wait(async () => {
+    const body = await driver.findElement(By.css("body")).getText();
+    return body.includes("Example US Stock") && body.includes("Direct Stock") && body.includes("12");
   }, 20000);
   fs.writeFileSync(screenshotPath, await driver.takeScreenshot(), "base64");
   console.log(`Selenium smoke passed: ${title}`);
