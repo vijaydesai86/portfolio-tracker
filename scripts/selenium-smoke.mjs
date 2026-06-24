@@ -64,8 +64,15 @@ try {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("deposit") && body.includes("manual_entry") && body.includes("250");
   }, 15000);
+  await jsClick("//button[contains(., 'Edit Transactions')]");
+  await jsClick("//button[normalize-space(.)='Delete']");
+  await waitForBodyText("Transaction deleted locally");
   await jsClick("//button[contains(., 'Holdings')]");
   await waitForBodyText("XIRR Coverage");
+  await driver.wait(async () => {
+    const body = await driver.findElement(By.css("body")).getText();
+    return body.includes("Cash Wallet") && body.includes("₹10,000.00") && !body.includes("₹10,250.00");
+  }, 15000);
   await driver.wait(async () => {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("xirr coverage") && body.includes("top holding xirr") && body.includes("sort by xirr");

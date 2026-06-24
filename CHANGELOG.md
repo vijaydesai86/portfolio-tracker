@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Fixed transaction deletion for Add Entry records so deleting a manually added transaction also reconciles the matching holding value/quantity instead of only changing invested/P&L math.
+
 - Added a dedicated Add Entry workspace with asset-specific transaction/snapshot forms that write canonical manual-entry records, update holdings immediately, seed opening cost basis for balance-only assets when needed, and are covered by domain and Selenium browser tests.
 
 - Reworked Holdings top charts into no-overlap ranking bars with fixed label/value columns, contrast-aware tracks, and responsive labels for long mutual-fund names.

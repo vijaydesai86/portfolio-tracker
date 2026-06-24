@@ -631,7 +631,7 @@ export function TrackerApp() {
 
   function deleteTransaction(transactionId: string) {
     setBackup((current) => deleteTransactionFromBackup(current, transactionId));
-    setStatus("Transaction deleted locally. Review related holdings if the transaction backed a manually derived position.");
+    setStatus("Transaction deleted locally. Add Entry holdings are reconciled when applicable.");
   }
 
   function updateTransaction(transactionId: string, patch: Partial<Transaction>) {
