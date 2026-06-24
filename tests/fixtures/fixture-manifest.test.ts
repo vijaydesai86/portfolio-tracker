@@ -11,6 +11,7 @@ describe("fixture manifest", () => {
       ["fixtures/manual/manual-balances-template.csv", "account_name,asset_name,asset_type,category,currency,current_value,as_of_date,notes"],
       ["fixtures/importable/manual-transactions-template.csv", "transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price,amount,fees,taxes,currency,category,notes"],
       ["fixtures/importable/manual-balances-template.csv", "balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes"],
+      ["fixtures/importable/manual-balance-ledger-sample.csv", "ID,date,asset_type,type,name,currency,category"],
       ["fixtures/importable/all-assets-template.csv", "balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes"]
     ] as const;
 

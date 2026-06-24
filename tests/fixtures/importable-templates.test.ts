@@ -16,6 +16,7 @@ describe("importable canonical template pack", () => {
       "debt-small-savings-template.csv",
       "equity-mf-india-us-template.csv",
       "gold-others-template.csv",
+      "manual-balance-ledger-sample.csv",
       "manual-balances-sample.csv",
       "manual-balances-template.csv",
       "manual-transactions-template.csv"

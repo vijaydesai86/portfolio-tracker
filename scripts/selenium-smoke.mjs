@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { Builder, Browser, By, until } from "selenium-webdriver";
 import firefox from "selenium-webdriver/firefox.js";
 
@@ -77,6 +78,21 @@ try {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("xirr coverage") && body.includes("top holding xirr") && body.includes("sort by xirr");
   }, 15000);
+
+  await jsClick("//button[contains(., 'Reset')]");
+  await waitForBodyText("Portfolio reset locally");
+  await jsClick("//button[contains(., 'Imports')]");
+  const nativeFileInput = await driver.wait(until.elementLocated(By.xpath("(//input[@type='file'])[1]")), 15000);
+  await nativeFileInput.sendKeys(path.resolve("fixtures/importable/manual-balance-ledger-sample.csv"));
+  await waitForBodyText("parse the manual CSV");
+  await jsClick("//button[normalize-space(.)='Parse Manual CSV']");
+  await waitForBodyText("Manual CSV committed: 5 holding(s), 33 transaction(s)", 30000);
+  await jsClick("//button[contains(., 'Analytics')]");
+  await jsClick("//button[.//strong[normalize-space(.)='Overview']]");
+  await driver.wait(async () => {
+    const body = await driver.findElement(By.css("body")).getText();
+    return body.includes("₹19,42,957.00") && body.includes("₹17,15,630.00") && body.includes("₹2,27,327.00");
+  }, 20000);
   fs.writeFileSync(screenshotPath, await driver.takeScreenshot(), "base64");
   console.log(`Selenium smoke passed: ${title}`);
   console.log(`Screenshot: ${screenshotPath}`);

@@ -1,4 +1,9 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { calculatePortfolioInsights, calculatePortfolioSummary } from "@/src/domain/analytics";
+import { calculateDashboardPerformance } from "@/src/domain/dashboardPerformance";
+import { calculateHoldingReturns } from "@/src/domain/holdingReturns";
 import { commitManualCsvImport } from "@/src/importers/importPipeline";
 import { createEmptyBackup } from "@/src/schema/backup";
 
@@ -52,5 +57,30 @@ cash-main,2026-06-23,Manual,cash,Cash,250,INR,Cash`;
     expect(second.backup.manualBalances).toHaveLength(1);
     expect(second.backup.manualBalances[0].value).toBe(250);
     expect(second.backup.manualBalances[0].asOfDate).toBe("2026-06-23");
+  });
+
+  it("imports compact manual balance ledger rows into transactions, holdings, and analytics", () => {
+    const backup = createEmptyBackup("INR");
+    const csv = readFileSync(resolve(__dirname, "../../fixtures/importable/manual-balance-ledger-sample.csv"), "utf8");
+
+    const result = commitManualCsvImport(backup, csv, { importId: "ledger", fileName: "manual-balance-ledger-sample.csv", now: "2026-06-24T00:00:00.000Z" });
+    const summary = calculatePortfolioSummary(result.backup);
+    const insights = calculatePortfolioInsights(result.backup);
+    const holdingReturns = calculateHoldingReturns(result.backup);
+    const performance = calculateDashboardPerformance(summary, insights.transactionStats, holdingReturns.values());
+
+    expect(result.errors).toEqual([]);
+    expect(result.addedTransactions).toBe(33);
+    expect(result.backup.manualBalances).toHaveLength(5);
+    expect(result.backup.accounts.map((account) => account.type).sort()).toEqual(["cash", "cash", "espp", "ppf", "ssy"]);
+    expect(summary.netWorth).toBe(1942957);
+    expect(summary.allocation.Debt.value).toBe(1727327);
+    expect(summary.allocation.Equity.value).toBe(195630);
+    expect(summary.allocation.Cash.value).toBe(20000);
+    expect(performance.netInvested).toBe(1715630);
+    expect(performance.totalProfit).toBe(227327);
+    expect(insights.transactionStats.externalCashInBase).toBe(1715630);
+    expect(result.backup.transactions.filter((tx) => tx.type === "interest_accrual")).toHaveLength(8);
+    expect([...holdingReturns.values()].filter((row) => row.costBasisKnown)).toHaveLength(4);
   });
 });

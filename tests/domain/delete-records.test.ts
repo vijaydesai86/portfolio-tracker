@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { deleteImportRunFromBackup, deleteTransactionFromBackup } from "@/src/domain/deleteRecords";
 import { applyManualEntry } from "@/src/domain/manualEntry";
 import { calculateHoldingReturns } from "@/src/domain/holdingReturns";
+import { commitManualCsvImport } from "@/src/importers/importPipeline";
 import { createEmptyBackup } from "@/src/schema/backup";
 
 describe("deleteRecords", () => {
@@ -63,6 +66,23 @@ describe("deleteRecords", () => {
     expect(next.transactions.map((tx) => tx.id)).toEqual(["opening"]);
     expect(row.invested).toBe(1000);
     expect(row.profit).toBe(200);
+  });
+
+  it("reverses imported manual balance ledger rows when deleting a transaction", () => {
+    const backup = createEmptyBackup("INR");
+    const csv = readFileSync(resolve(__dirname, "../../fixtures/importable/manual-balance-ledger-sample.csv"), "utf8");
+    const imported = commitManualCsvImport(backup, csv, { importId: "ledger", fileName: "manual-balance-ledger-sample.csv", now: "2026-06-24T00:00:00.000Z" }).backup;
+    const ppf = imported.manualBalances.find((balance) => balance.label === "Public Provident Fund")!;
+    const interest = imported.transactions.find((tx) => tx.accountId === ppf.accountId && tx.type === "interest_accrual" && tx.amount === 59587)!;
+
+    const next = deleteTransactionFromBackup(imported, interest.id, "2026-06-25T00:00:00.000Z");
+    const nextPpf = next.manualBalances.find((balance) => balance.id === ppf.id)!;
+    const row = calculateHoldingReturns(next).get(ppf.id)!;
+
+    expect(nextPpf.value).toBe(1001750);
+    expect(row.invested).toBe(900000);
+    expect(row.profit).toBe(101750);
+    expect(next.transactions.some((tx) => tx.id === interest.id)).toBe(false);
   });
 
   it("deletes a single transaction without deleting a still-held instrument", () => {

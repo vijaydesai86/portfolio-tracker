@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Added compact manual balance-ledger CSV support and a committed PPF/SSY/ESPP/Cash sample file where dated `invest` rows affect invested/current value and `interest` rows affect current value only.
+
 - Fixed transaction deletion for Add Entry records so deleting a manually added transaction also reconciles the matching holding value/quantity instead of only changing invested/P&L math.
 
 - Added a dedicated Add Entry workspace with asset-specific transaction/snapshot forms that write canonical manual-entry records, update holdings immediately, seed opening cost basis for balance-only assets when needed, and are covered by domain and Selenium browser tests.

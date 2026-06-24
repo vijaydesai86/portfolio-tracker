@@ -8,6 +8,7 @@ This manifest is the source of truth for import files committed to the repositor
 | --- | --- | --- | --- | --- |
 | `fixtures/importable/manual-transactions-template.csv` | CSV | Application-defined manual transaction template | Yes | No provider support; dynamic market assets only |
 | `fixtures/importable/manual-balances-template.csv` | CSV | Application-defined manual balance template | Yes | No provider support; fixed/manual assets only |
+| `fixtures/importable/manual-balance-ledger-sample.csv` | CSV | Application-defined compact manual balance ledger sample | Yes | No provider support; PPF/SSY/ESPP/cash dated ledger rows |
 | `fixtures/importable/all-assets-template.csv` | CSV | Application-defined manual balance template pack | Yes | No provider support; fixed/manual asset coverage |
 | `fixtures/importable/equity-mf-india-us-template.csv` | CSV | Application-defined manual transaction template pack | Yes | No provider support; mutual fund, Indian stock, US stock, and gold unit examples |
 | `fixtures/importable/debt-small-savings-template.csv` | CSV | Application-defined manual balance template pack | Yes | No provider support; debt/small-savings template |

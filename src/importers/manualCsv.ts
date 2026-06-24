@@ -66,6 +66,24 @@ type NormalizedTransactionRow = Required<{
   notes: string;
 }>;
 
+type NormalizedLedgerRow = Required<{
+  transaction_id: string;
+  account_name: string;
+  institution: string;
+  asset_name: string;
+  asset_type: string;
+  category: string;
+  currency: string;
+  date: string;
+  ledger_type: string;
+  amount: string;
+  symbol: string;
+  isin: string;
+  country: string;
+  issuer: string;
+  notes: string;
+}>;
+
 type PositionAccumulator = {
   accountId: string;
   instrumentId: string;
@@ -75,6 +93,19 @@ type PositionAccumulator = {
   quantity: number;
   lastPrice?: number;
   lastPriceDate?: string;
+  latestDate: string;
+  notes?: string;
+};
+
+type LedgerAccumulator = {
+  accountId: string;
+  instrumentId: string;
+  label: string;
+  category: AccountCategory;
+  currency: string;
+  value: number;
+  investedAmount: number;
+  investedAsOfDate?: string;
   latestDate: string;
   notes?: string;
 };
@@ -106,6 +137,7 @@ export function parseManualCsv(csv: string, options: ManualCsvParseOptions): Man
   });
 
   const headers = (parsed.meta.fields ?? []).map(normalizeHeader);
+  if (looksLikeBalanceLedgerTemplate(headers)) return parseBalanceLedgerCsvRows(parsed.data, options);
   if (looksLikeTransactionTemplate(headers)) return parseTransactionCsvRows(parsed.data, options);
   return parseBalanceCsvRows(parsed.data, options);
 }
@@ -359,12 +391,146 @@ function parseTransactionCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOp
   return { accounts, instruments, transactions, manualBalances, priceSnapshots, errors };
 }
 
+function parseBalanceLedgerCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOptions): ManualCsvResult {
+  const now = options.now ?? new Date().toISOString();
+  const accounts: Account[] = [];
+  const instruments: Instrument[] = [];
+  const transactions: Transaction[] = [];
+  const manualBalances: ManualBalance[] = [];
+  const priceSnapshots: PriceSnapshot[] = [];
+  const errors: ImportError[] = [];
+  const balances = new Map<string, LedgerAccumulator>();
+
+  rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const normalized = normalizeLedgerRow(row);
+    const category = categorySchema.safeParse(normalized.category);
+    const currency = currencySchema.safeParse(normalized.currency);
+    const amount = optionalNumber(normalized.amount);
+
+    if (!normalized.transaction_id) {
+      errors.push({ row: rowNumber, message: "Missing ID" });
+      return;
+    }
+    if (!normalized.asset_name) {
+      errors.push({ row: rowNumber, message: "Missing asset name/type" });
+      return;
+    }
+    if (!supportedAccountTypes.has(normalized.asset_type as Account["type"])) {
+      errors.push({ row: rowNumber, message: "Unsupported asset_type: " + normalized.asset_type });
+      return;
+    }
+    if (!category.success) {
+      errors.push({ row: rowNumber, message: "Invalid category: " + normalized.category });
+      return;
+    }
+    if (!currency.success) {
+      errors.push({ row: rowNumber, message: "Invalid currency: " + normalized.currency });
+      return;
+    }
+    if (!isLedgerType(normalized.ledger_type)) {
+      errors.push({ row: rowNumber, message: "Invalid type: " + normalized.ledger_type });
+      return;
+    }
+    if (!isIsoDate(normalized.date)) {
+      errors.push({ row: rowNumber, message: "Invalid date: " + normalized.date });
+      return;
+    }
+    if (amount === undefined || amount < 0) {
+      errors.push({ row: rowNumber, message: "Invalid amount/name: " + normalized.amount });
+      return;
+    }
+
+    const accountId = ensureAccount(accounts, normalized, now);
+    const instrumentId = ensureInstrument(instruments, normalized, now);
+    const key = accountId + "|" + instrumentId;
+    const existing = balances.get(key) ?? {
+      accountId,
+      instrumentId,
+      label: normalized.asset_name,
+      category: category.data,
+      currency: normalized.currency,
+      value: 0,
+      investedAmount: 0,
+      latestDate: normalized.date,
+      notes: "Derived from compact manual balance ledger. Invest rows add invested/current value; interest rows add current value only."
+    };
+
+    existing.value = roundMoney(existing.value + ledgerValueDelta(normalized.ledger_type, amount));
+    existing.investedAmount = roundMoney(Math.max(0, existing.investedAmount + ledgerInvestedDelta(normalized.ledger_type, amount)));
+    if (ledgerInvestedDelta(normalized.ledger_type, amount) > 0 && (!existing.investedAsOfDate || normalized.date < existing.investedAsOfDate)) existing.investedAsOfDate = normalized.date;
+    if (normalized.date > existing.latestDate) existing.latestDate = normalized.date;
+    balances.set(key, existing);
+
+    if (amount === 0) return;
+    const sourceRecordHash = stableHash({
+      provider: "manual_balance_ledger",
+      transaction_id: normalized.transaction_id,
+      date: normalized.date,
+      asset_type: normalized.asset_type,
+      asset_name: normalized.asset_name,
+      ledger_type: normalized.ledger_type,
+      amount,
+      currency: normalized.currency
+    });
+
+    transactions.push({
+      id: slugId("tx", [sourceRecordHash]),
+      accountId,
+      instrumentId,
+      date: normalized.date,
+      type: ledgerTransactionType(normalized.asset_type, normalized.ledger_type),
+      amount,
+      currency: normalized.currency,
+      fees: 0,
+      taxes: 0,
+      source: { type: "import", importId: options.importId, provider: "manual_balance_ledger", sourceRecordHash },
+      userModified: false,
+      createdAt: now,
+      updatedAt: now
+    });
+  });
+
+  for (const balance of balances.values()) {
+    const logicalKey = balance.accountId + "|" + balance.instrumentId;
+    const sourceRecordHash = stableHash({ provider: "manual_balance_ledger", logicalKey });
+    manualBalances.push({
+      id: slugId("bal", ["manual_balance_ledger", logicalKey]),
+      accountId: balance.accountId,
+      instrumentId: balance.instrumentId,
+      label: balance.label,
+      category: balance.category,
+      currency: balance.currency,
+      value: roundMoney(Math.max(0, balance.value)),
+      investedAmount: roundMoney(Math.max(0, balance.investedAmount)),
+      investedCurrency: balance.currency,
+      investedAsOfDate: balance.investedAsOfDate ?? balance.latestDate,
+      asOfDate: balance.latestDate,
+      notes: balance.notes,
+      source: { type: "import", importId: options.importId, provider: "manual_balance_ledger", sourceRecordHash },
+      userModified: false,
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+
+  return { accounts, instruments, transactions, manualBalances, priceSnapshots, errors };
+}
+
+function looksLikeBalanceLedgerTemplate(headers: string[]): boolean {
+  const headerSet = new Set(headers);
+  const hasLedgerShape = headerSet.has("id") && headerSet.has("date") && headerSet.has("asset_type") && headerSet.has("type") && headerSet.has("currency") && headerSet.has("category");
+  const hasAmountLikeColumn = headerSet.has("amount") || headerSet.has("value") || headerSet.has("name");
+  const hasDynamicColumns = headerSet.has("quantity") || headerSet.has("price") || headerSet.has("symbol_or_isin") || headerSet.has("symbol") || headerSet.has("isin");
+  return hasLedgerShape && hasAmountLikeColumn && !hasDynamicColumns;
+}
+
 function looksLikeTransactionTemplate(headers: string[]): boolean {
   const headerSet = new Set(headers);
   return headerSet.has("date") && headerSet.has("asset_type") && (headerSet.has("type") || headerSet.has("transaction_type")) && (headerSet.has("symbol_or_isin") || headerSet.has("symbol") || headerSet.has("isin") || headerSet.has("name") || headerSet.has("asset_name"));
 }
 
-function ensureAccount(accounts: Account[], row: Pick<NormalizedBalanceRow | NormalizedTransactionRow, "account_name" | "institution" | "asset_type" | "currency">, now: string): string {
+function ensureAccount(accounts: Account[], row: Pick<NormalizedBalanceRow | NormalizedTransactionRow | NormalizedLedgerRow, "account_name" | "institution" | "asset_type" | "currency">, now: string): string {
   const accountId = slugId("acct", [row.account_name, row.asset_type, row.currency]);
   if (!accounts.some((account) => account.id === accountId)) {
     accounts.push({ id: accountId, name: row.account_name, institution: row.institution || "Manual", type: row.asset_type as Account["type"], currency: row.currency, createdAt: now, updatedAt: now });
@@ -372,7 +538,7 @@ function ensureAccount(accounts: Account[], row: Pick<NormalizedBalanceRow | Nor
   return accountId;
 }
 
-function ensureInstrument(instruments: Instrument[], row: Pick<NormalizedBalanceRow | NormalizedTransactionRow, "asset_name" | "asset_type" | "category" | "currency" | "symbol" | "isin" | "country" | "issuer">, now: string): string {
+function ensureInstrument(instruments: Instrument[], row: Pick<NormalizedBalanceRow | NormalizedTransactionRow | NormalizedLedgerRow, "asset_name" | "asset_type" | "category" | "currency" | "symbol" | "isin" | "country" | "issuer">, now: string): string {
   const key = row.isin || row.symbol || row.asset_name;
   const instrumentId = slugId("inst", [row.asset_type, row.currency, key]);
   if (!instruments.some((instrument) => instrument.id === instrumentId)) {
@@ -439,6 +605,31 @@ function normalizeTransactionRow(row: ManualCsvRow): NormalizedTransactionRow {
   };
 }
 
+function normalizeLedgerRow(row: ManualCsvRow): NormalizedLedgerRow {
+  const assetType = normalizeAssetType(pick(row, "asset_type", "type_of_asset"));
+  const currency = normalizeCurrency(pick(row, "currency"), assetType);
+  const nameCell = pick(row, "name");
+  const amount = cleanNumber(pick(row, "amount", "value", "current_value") || (looksNumeric(nameCell) ? nameCell : ""));
+  const assetName = pick(row, "asset_name", "holding_name", "instrument_name") || (!looksNumeric(nameCell) ? nameCell : "") || ledgerAssetName(assetType, currency);
+  return {
+    transaction_id: pick(row, "id", "transaction_id", "tx_id"),
+    account_name: pick(row, "account", "account_name", "institution") || assetName,
+    institution: pick(row, "institution", "platform", "provider", "bank") || "Manual Ledger",
+    asset_name: assetName,
+    asset_type: assetType,
+    category: normalizeCategory(pick(row, "category", "asset_category"), assetType),
+    currency,
+    date: parseLedgerDateCell(pick(row, "date", "transaction_date")),
+    ledger_type: normalizeLedgerType(pick(row, "type", "transaction_type", "action")),
+    amount,
+    symbol: "",
+    isin: "",
+    country: pick(row, "country", "region").toUpperCase(),
+    issuer: pick(row, "issuer"),
+    notes: pick(row, "notes", "description")
+  };
+}
+
 function pick(row: ManualCsvRow, ...keys: string[]): string {
   for (const key of keys) {
     const value = row[normalizeHeader(key)];
@@ -499,6 +690,63 @@ function categoryForAssetType(assetType: string): AccountCategory {
   return "Others";
 }
 
+function normalizeLedgerType(value?: string): string {
+  const normalized = (value ?? "").trim().toLowerCase().replace(/[ /-]/g, "_");
+  const aliases: Record<string, "invest" | "interest" | "withdrawal" | "maturity"> = {
+    investment: "invest",
+    contribution: "invest",
+    deposit: "invest",
+    cash_in: "invest",
+    interest_accrual: "interest",
+    accrued_interest: "interest",
+    withdraw: "withdrawal",
+    cash_out: "withdrawal",
+    closure: "maturity"
+  };
+  return aliases[normalized] ?? normalized;
+}
+
+function isLedgerType(value: string): value is "invest" | "interest" | "withdrawal" | "maturity" {
+  return ["invest", "interest", "withdrawal", "maturity"].includes(value);
+}
+
+function ledgerTransactionType(assetType: string, ledgerType: "invest" | "interest" | "withdrawal" | "maturity"): Transaction["type"] {
+  if (ledgerType === "interest") return "interest_accrual";
+  if (ledgerType === "withdrawal") return "withdrawal";
+  if (ledgerType === "maturity") return "maturity";
+  return assetType === "cash" ? "deposit" : "contribution";
+}
+
+function ledgerValueDelta(type: "invest" | "interest" | "withdrawal" | "maturity", amount: number): number {
+  if (type === "withdrawal" || type === "maturity") return -Math.abs(amount);
+  return Math.abs(amount);
+}
+
+function ledgerInvestedDelta(type: "invest" | "interest" | "withdrawal" | "maturity", amount: number): number {
+  if (type === "invest") return Math.abs(amount);
+  if (type === "withdrawal" || type === "maturity") return -Math.abs(amount);
+  return 0;
+}
+
+function ledgerAssetName(assetType: string, currency: string): string {
+  const labels: Record<string, string> = {
+    ppf: "Public Provident Fund",
+    ssy: "Sukanya Samriddhi Account",
+    espp: "ESPP Contribution",
+    cash: currency === "USD" ? "Cash Balance USD" : "Cash Balance",
+    epf: "EPF Balance",
+    fd: "Fixed Deposit",
+    nps: "NPS Manual Balance",
+    gold: "Manual Gold Holding"
+  };
+  return labels[assetType] ?? assetType.toUpperCase();
+}
+
+function looksNumeric(value: string): boolean {
+  const cleaned = cleanNumber(value);
+  return cleaned !== "" && Number.isFinite(Number(cleaned));
+}
+
 function normalizeTransactionType(value?: string): string {
   const normalized = (value ?? "").trim().toLowerCase().replace(/[ /-]/g, "_");
   const aliases: Record<string, Transaction["type"]> = {
@@ -538,6 +786,29 @@ function positionQuantityDelta(type: Transaction["type"], quantity: number): num
 
 function normalizeHeader(value: string): string {
   return value.trim().toLowerCase().replace(/[ /-]/g, "_");
+}
+
+function parseLedgerDateCell(value?: string): string {
+  const raw = (value ?? "").trim();
+  const monthNames: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+  const named = raw.match(/^(\d{1,2})[-\s]([A-Za-z]{3,4})[-\s](\d{2}|\d{4})$/);
+  if (named) {
+    const day = Number(named[1]);
+    const month = monthNames[named[2].toLowerCase()];
+    const yearNumber = Number(named[3]);
+    const year = named[3].length === 2 ? 2000 + yearNumber : yearNumber;
+    if (month && isValidDateParts(year, month, day)) return year + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+  }
+
+  const numeric = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (numeric) {
+    const day = Number(numeric[1]);
+    const month = Number(numeric[2]);
+    const year = Number(numeric[3]);
+    if (isValidDateParts(year, month, day)) return year + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+  }
+
+  return parseDateCell(raw);
 }
 
 function parseDateCell(value?: string): string {

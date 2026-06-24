@@ -18,11 +18,12 @@ export function deleteTransactionFromBackup(backup: PortfolioBackup, transaction
   const relatedBalance = deleted ? findBalanceForTransaction(backup, deleted) : undefined;
   const relatedAccount = relatedBalance ? backup.accounts.find((account) => account.id === relatedBalance.accountId) : undefined;
   const transactionsWithoutDeleted = backup.transactions.filter((tx) => tx.id !== transactionId);
+  const shouldReconcile = deleted ? isReconciledManualTransactionProvider(deleted.source.provider) : false;
   const openingTransactionIds = deleted && relatedBalance && deleted.source.provider === "manual_entry"
     ? openingTransactionsToDelete(transactionsWithoutDeleted, relatedBalance)
     : new Set<string>();
   const nextTransactions = openingTransactionIds.size === 0 ? transactionsWithoutDeleted : transactionsWithoutDeleted.filter((tx) => !openingTransactionIds.has(tx.id));
-  const reconciledBalance = deleted && relatedBalance && relatedAccount && deleted.source.provider === "manual_entry"
+  const reconciledBalance = deleted && relatedBalance && relatedAccount && shouldReconcile
     ? reverseManualEntryBalance(relatedBalance, relatedAccount, deleted, now)
     : undefined;
 
@@ -53,6 +54,10 @@ export function pruneOrphans(portfolio: PortfolioBackup): PortfolioBackup {
     instruments: portfolio.instruments.filter((instrument) => usedInstrumentIds.has(instrument.id)),
     priceSnapshots: portfolio.priceSnapshots.filter((snapshot) => isFxSnapshot(snapshot.instrumentId) || usedInstrumentIds.has(snapshot.instrumentId))
   };
+}
+
+function isReconciledManualTransactionProvider(provider: string | undefined): boolean {
+  return provider === "manual_entry" || provider === "manual_balance_ledger";
 }
 
 function findBalanceForTransaction(backup: PortfolioBackup, tx: Transaction): ManualBalance | undefined {
