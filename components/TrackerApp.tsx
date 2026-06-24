@@ -803,9 +803,9 @@ export function TrackerApp() {
                     <MiniInsight label="Largest Weight" value={holdingPageAnalytics.topAllocation.toFixed(1) + "%"} detail="top visible holding allocation" />
                   </div>
                   <div className="holding-visual-grid">
-                    <ChartCard title="Top Holdings"><HorizontalBar data={holdingPageAnalytics.valueChart} currency={backup.baseCurrency} /></ChartCard>
-                    <ChartCard title="Top Profit Contributors"><HorizontalBar data={holdingPageAnalytics.profitChart} currency={backup.baseCurrency} /></ChartCard>
-                    <ChartCard title="Top Holding XIRR"><PercentBar data={holdingPageAnalytics.xirrChart} /></ChartCard>
+                    <ChartCard title="Top Holdings"><RankingBar data={holdingPageAnalytics.valueChart} formatValue={(value) => formatMoney(value, backup.baseCurrency)} emptyMessage="No holding value yet." /></ChartCard>
+                    <ChartCard title="Top Profit Contributors"><RankingBar data={holdingPageAnalytics.profitChart} formatValue={(value) => formatMoney(value, backup.baseCurrency)} emptyMessage="No positive profit contributors yet." tone="profit" /></ChartCard>
+                    <ChartCard title="Top Holding XIRR"><RankingBar data={holdingPageAnalytics.xirrChart} formatValue={(value) => value.toFixed(2) + "%"} emptyMessage="No positive holding XIRR yet." tone="return" /></ChartCard>
                   </div>
                   <div className="holding-list pro-holding-list">
                     {filteredHoldings.map((holding) => (
@@ -1087,23 +1087,31 @@ function HorizontalBar({ data, currency }: { data: Array<{ name: string; value: 
   );
 }
 
-function PercentBar({ data }: { data: Array<{ name: string; value: number }> }) {
-  if (data.length === 0) return <p className="message">No positive holding XIRR yet.</p>;
-  const chartData = labeledChartData(data.slice(0, 8));
+type RankingBarProps = {
+  data: Array<{ name: string; value: number }>;
+  formatValue: (value: number) => string;
+  emptyMessage: string;
+  tone?: "value" | "profit" | "return";
+};
+
+function RankingBar({ data, formatValue, emptyMessage, tone = "value" }: RankingBarProps) {
+  const chartData = labeledChartData(data.filter((item) => Number.isFinite(item.value) && item.value > 0).slice(0, 8));
+  if (chartData.length === 0) return <p className="message">{emptyMessage}</p>;
+  const max = Math.max(...chartData.map((item) => item.value));
   return (
-    <div className="smart-bar-chart">
-      <ResponsiveContainer width="100%" height={286}>
-        <BarChart data={chartData} margin={{ left: 8, right: 16, top: 30, bottom: 34 }} barCategoryGap="22%">
-          <CartesianGrid stroke="#e4ebf1" vertical={false} />
-          <XAxis dataKey="shortName" interval={0} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} height={58} />
-          <YAxis tickFormatter={(value) => Number(value).toFixed(0) + "%"} tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "#64748b" }} width={54} />
-          <Tooltip cursor={{ fill: "rgba(14, 116, 144, 0.08)" }} formatter={(value, _name, item) => [Number(value ?? 0).toFixed(2) + "%", item?.payload?.fullName ?? "XIRR"]} labelFormatter={() => ""} />
-          <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={56}>
-            {chartData.map((_, index) => <Cell key={index} fill={chartColors[index % chartColors.length]} />)}
-            <LabelList dataKey="value" position="top" formatter={(value: unknown) => Number(value ?? 0).toFixed(1) + "%"} style={{ fill: "#334155", fontSize: 11, fontWeight: 700 }} />
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+    <div className={"ranking-bar-chart tone-" + tone} role="list">
+      <div className="ranking-axis"><span>0</span><span>{formatValue(max)}</span></div>
+      {chartData.map((item, index) => {
+        const width = max <= 0 ? 0 : Math.max(4, (item.value / max) * 100);
+        const color = chartColors[index % chartColors.length];
+        return (
+          <div className="ranking-row" key={item.fullName} role="listitem" title={item.fullName + " · " + formatValue(item.value)}>
+            <div className="ranking-label"><span>{index + 1}</span><strong>{item.shortName}</strong></div>
+            <div className="ranking-track" aria-hidden="true"><div className="ranking-fill" style={{ width: width + "%", background: color }} /></div>
+            <strong className="ranking-value">{formatValue(item.value)}</strong>
+          </div>
+        );
+      })}
     </div>
   );
 }

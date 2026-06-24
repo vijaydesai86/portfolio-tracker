@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Reworked Holdings top charts into no-overlap ranking bars with fixed label/value columns, contrast-aware tracks, and responsive labels for long mutual-fund names.
+
 - Fixed browser CAS PDF extraction so pdfjs-split transaction descriptions and unit-balance columns are rejoined before parsing, restoring complete CAS transaction/XIRR coverage in browser imports.
 
 - Changed holding performance to derive cost basis and XIRR from transactions whenever transactions exist, using balance-level invested amounts only for balance-only fallbacks; CAS stamp duty now contributes to mutual-fund cost basis and CAS `Total Cost Value` is validated rather than used as the reporting shortcut.
