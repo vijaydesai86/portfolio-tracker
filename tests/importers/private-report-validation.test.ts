@@ -148,33 +148,32 @@ function independentlyAuditHolding(backup: PortfolioBackup, balance: ManualBalan
       flows.push({ date: tx.date, amount: proceeds });
       continue;
     }
-    if (tx.type === "fee" || tx.type === "tax") flows.push({ date: tx.date, amount: -amount });
+    if (tx.type === "fee" || tx.type === "tax") {
+      if (tx.source.provider === "cas_pdf") {
+        costBasisKnown = true;
+        unallocatedCost += amount;
+      }
+      flows.push({ date: tx.date, amount: -amount });
+    }
   }
 
   const reconstructed = lots.reduce((sum, lot) => sum + lot.cost, unallocatedCost);
   let invested = reconstructed;
-  let xirrComplete = true;
-  if (balance.investedAmount !== undefined) {
+  if (transactions.length === 0 && balance.investedAmount !== undefined) {
     invested = balance.investedAmount;
     costBasisKnown = true;
-    xirrComplete = transactions.length === 0 || costBasisMatchesTransactions(balance.investedAmount, reconstructed);
   }
 
   invested = roundMoney(invested);
-  if (transactions.length > 0 && xirrComplete && balance.value !== 0) flows.push({ date: balance.asOfDate, amount: balance.value });
+  if (transactions.length > 0 && balance.value !== 0) flows.push({ date: balance.asOfDate, amount: balance.value });
   const profit = costBasisKnown ? roundMoney(balance.value - invested) : undefined;
   return {
     costBasisKnown,
     invested,
     profit,
     returnPercent: profit === undefined || invested <= 0 ? undefined : roundPercent((profit / invested) * 100),
-    xirr: transactions.length === 0 || !xirrComplete ? undefined : independentXirr(flows)
+    xirr: transactions.length === 0 ? undefined : independentXirr(flows)
   };
-}
-
-function costBasisMatchesTransactions(authoritative: number, reconstructed: number): boolean {
-  const tolerance = Math.max(1, Math.abs(authoritative) * 0.01);
-  return Math.abs(authoritative - reconstructed) <= tolerance;
 }
 
 function isAuditCashIn(type: Transaction["type"]): boolean {
@@ -270,7 +269,6 @@ function independentNpv(flows: Array<{ date: string; amount: number }>, rate: nu
     return sum + flow.amount / Math.pow(1 + rate, years);
   }, 0);
 }
-
 
 function splitPaths(value: string | undefined): string[] {
   return String(value ?? "").split(process.platform === "win32" ? ";" : ":").map((item) => item.trim()).filter(Boolean);

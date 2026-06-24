@@ -426,6 +426,8 @@ function simulateRemainingCost(rows: CasTransactionRow[], openingLot: { quantity
     if (row.amount === undefined) continue;
     if (["purchase", "sip", "switch_in"].includes(row.type)) {
       addLot(lots, row.units, row.amount, (value) => { unallocatedCost += value; });
+    } else if (["stamp_duty", "fee"].includes(row.type)) {
+      unallocatedCost += row.amount;
     } else if (["redemption", "switch_out"].includes(row.type)) {
       removeLot(lots, row.units, row.amount, (value) => { unallocatedCost = Math.max(0, unallocatedCost - value); });
     }

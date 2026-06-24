@@ -35,7 +35,7 @@ describe("calculateHoldingReturns", () => {
     expect(row.xirr).toBeUndefined();
   });
 
-  it("uses authoritative holding invested amount over partial transaction reconstruction", () => {
+  it("uses transaction-derived cost basis over statement invested amount when transactions exist", () => {
     const backup = createEmptyBackup("INR");
     backup.accounts.push({ id: "acct", name: "MF", institution: "AMC", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
     backup.instruments.push({ id: "inst", name: "Fund", type: "mutual_fund", currency: "INR", country: "IN", category: "Equity", issuer: "AMC", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
@@ -44,10 +44,10 @@ describe("calculateHoldingReturns", () => {
 
     const row = calculateHoldingReturns(backup).get("bal")!;
 
-    expect(row.invested).toBe(110000);
-    expect(row.profit).toBe(22000);
-    expect(row.returnPercent).toBe(20);
-    expect(row.xirr).toBeUndefined();
+    expect(row.invested).toBe(10000);
+    expect(row.profit).toBe(122000);
+    expect(row.returnPercent).toBe(1220);
+    expect(row.xirr).toEqual(expect.any(Number));
   });
 
   it("uses optional invested amount for balance-only holdings without creating XIRR", () => {

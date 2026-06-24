@@ -1,9 +1,10 @@
 export async function extractPdfTextInBrowser(file: File, password?: string): Promise<string> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.mjs";
+  const runningInNode = typeof process !== "undefined" && Boolean(process.versions?.node);
+  if (!runningInNode) pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.mjs";
   const data = new Uint8Array(await file.arrayBuffer());
-  const pdf = await pdfjs.getDocument({ data, password }).promise;
-  let text = "";
+  const pdf = await pdfjs.getDocument({ data, password, disableWorker: runningInNode }).promise;
+  const lines: string[] = [];
 
   for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
     const page = await pdf.getPage(pageNo);
@@ -32,9 +33,59 @@ export async function extractPdfTextInBrowser(file: File, password?: string): Pr
         lastX = item.x + item.str.length * 4;
       }
 
-      text += `${line}\n`;
+      lines.push(line);
     }
   }
 
-  return text;
+  return normalizeCasPdfJsLines(lines).join("\n");
+}
+
+const casDate = /^\d{2}-[A-Za-z]{3}-\d{4}/;
+const standaloneUnitBalance = /^-?[\d,]+\.\d{3}$/;
+const dateAmountOnly = /^(\d{2}-[A-Za-z]{3}-\d{4})\s+(-?[\d,]+\.\d{2})\s*$/;
+const dateWithThreeNumericColumns = /^(\d{2}-[A-Za-z]{3}-\d{4})\s+(.+?)\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{3})\s+(-?[\d,]+\.\d{3,4})\s*$/;
+const dateOnlyThreeNumericColumns = /^(\d{2}-[A-Za-z]{3}-\d{4})\s+(-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{3})\s+(-?[\d,]+\.\d{3,4})\s*$/;
+const descriptionWithUnitBalance = /^(.+?)\s+(-?[\d,]+\.\d{3})\s*$/;
+
+export function normalizeCasPdfJsLines(lines: string[]): string[] {
+  const normalized: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]?.trim();
+    const next = lines[index + 1]?.trim();
+    if (!line) continue;
+
+    if (next && casDate.test(next)) {
+      const merged = mergePdfJsCarryLine(line, next);
+      if (merged) {
+        normalized.push(merged);
+        index += 1;
+        continue;
+      }
+    }
+
+    normalized.push(line);
+  }
+  return normalized;
+}
+
+function mergePdfJsCarryLine(line: string, next: string): string | undefined {
+  const nextMissingBalance = next.match(dateWithThreeNumericColumns);
+  if (nextMissingBalance && standaloneUnitBalance.test(line)) return next + " " + line;
+
+  const nextNoDescription = next.match(dateOnlyThreeNumericColumns);
+  if (nextNoDescription) {
+    const carriedDescription = line.match(descriptionWithUnitBalance);
+    if (carriedDescription) return nextNoDescription[1] + " " + carriedDescription[1] + " " + nextNoDescription[2] + " " + nextNoDescription[3] + " " + nextNoDescription[4] + " " + carriedDescription[2];
+  }
+
+  const nextAmountOnly = next.match(dateAmountOnly);
+  if (nextAmountOnly && isCarriedAmountDescription(line)) return nextAmountOnly[1] + " " + line + " " + nextAmountOnly[2];
+
+  return undefined;
+}
+
+function isCarriedAmountDescription(line: string): boolean {
+  if (casDate.test(line)) return false;
+  if (standaloneUnitBalance.test(line)) return false;
+  return /purchase|systematic investment|stamp duty|switch|redemption|dividend|fee|load/i.test(line);
 }
