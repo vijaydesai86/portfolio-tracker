@@ -17,7 +17,7 @@ export type HoldingReturn = {
 };
 
 const cashInTypes = new Set<Transaction["type"]>(["buy", "sip", "deposit", "contribution", "switch_in"]);
-const lotOutTypes = new Set<Transaction["type"]>(["sell", "redemption", "switch_out"]);
+const lotOutTypes = new Set<Transaction["type"]>(["sell", "redemption", "switch_out", "withdrawal", "maturity"]);
 const cashOutTypes = new Set<Transaction["type"]>(["sell", "redemption", "dividend", "interest", "maturity", "withdrawal", "switch_out"]);
 const feeTypes = new Set<Transaction["type"]>(["fee", "tax"]);
 

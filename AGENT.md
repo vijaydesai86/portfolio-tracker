@@ -63,6 +63,7 @@ Current automated CAS support includes browser PDF upload, password entry, clien
 - NPS yearly CSV statement browser import is implemented and private-file verified. NPS PDF/XLSX remains detected-only until real fixtures are available.
 - Live market refresh uses AMFI NAVAll for mutual funds, Stooq/Yahoo for US stock quotes, Yahoo NSE/BSE lookup for Indian stock quotes, and Frankfurter/Open ER API/currency-api/Stooq for USD/INR. Never replace failed market fetches with fabricated fallback prices; manual FX must be user-supplied real data.
 - Manual CSV import is implemented for `manual-transactions-template.csv` and `manual-balances-template.csv`. Do not ask users to maintain FX in normal manual files; dynamic market assets should use transaction facts, while fixed/manual assets should use current balances. Balance rows may include optional `invested_amount`, `invested_currency`, and `invested_as_of_date`; if absent, invested/P&L/XIRR must remain unavailable instead of treating current value as profit.
+- Add Entry must stay asset-specific, not a generic notes form. It must write canonical transactions, balance snapshots, and price snapshots in the same schema as imports. If the first manual transaction is added to a balance-only holding with user-provided invested amount, preserve that opening cost basis as an explicit manual opening transaction so invested/P&L do not reset.
 
 ## INR-First Analytics Rule
 

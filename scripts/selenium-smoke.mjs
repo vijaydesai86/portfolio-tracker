@@ -35,7 +35,7 @@ try {
   await driver.get(url);
   await driver.wait(until.elementLocated(By.css("h1")), 15000);
   const title = await driver.findElement(By.css("h1")).getText();
-  if (!/Portfolio Analytics|Holdings|Transactions|Imports|Backup/.test(title)) {
+  if (!/Portfolio Analytics|Holdings|Transactions|Add Entry|Imports|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
   for (const label of ["Overview", "Allocation", "Holdings", "History"]) {
@@ -52,6 +52,18 @@ try {
   await waitForBodyText("Native File Intake");
   await jsClick("//button[normalize-space(.)='Stage and Commit']");
   await waitForBodyText("Manual CSV committed");
+  await jsClick("//button[contains(., 'Add Entry')]");
+  await waitForBodyText("Add a transaction or balance snapshot");
+  const amountInput = await driver.wait(until.elementLocated(By.xpath("//label[span[normalize-space(.)='Amount']]//input")), 15000);
+  await amountInput.clear();
+  await amountInput.sendKeys("250");
+  await jsClick("//section[.//h2[normalize-space(.)='Add Entry']]//button[contains(., 'Add Entry')]");
+  await waitForBodyText("Added Deposit / Contribution for Cash Wallet");
+  await jsClick("//button[contains(., 'Transactions')]");
+  await driver.wait(async () => {
+    const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
+    return body.includes("deposit") && body.includes("manual_entry") && body.includes("250");
+  }, 15000);
   await jsClick("//button[contains(., 'Holdings')]");
   await waitForBodyText("XIRR Coverage");
   await driver.wait(async () => {

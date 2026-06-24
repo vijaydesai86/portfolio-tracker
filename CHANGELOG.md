@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Added a dedicated Add Entry workspace with asset-specific transaction/snapshot forms that write canonical manual-entry records, update holdings immediately, seed opening cost basis for balance-only assets when needed, and are covered by domain and Selenium browser tests.
+
 - Reworked Holdings top charts into no-overlap ranking bars with fixed label/value columns, contrast-aware tracks, and responsive labels for long mutual-fund names.
 
 - Fixed browser CAS PDF extraction so pdfjs-split transaction descriptions and unit-balance columns are rejoined before parsing, restoring complete CAS transaction/XIRR coverage in browser imports.

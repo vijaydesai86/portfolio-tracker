@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Download, FileJson, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, TrendingDown, TrendingUp, Upload } from "lucide-react";
+import { AlertTriangle, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, TrendingDown, TrendingUp, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
@@ -9,6 +9,7 @@ import { buildReadinessModules, type ReadinessModule } from "@/src/domain/assetM
 import { lossWatchlist, topGainContributors, type HoldingPerformanceRow } from "@/src/domain/holdingPerformance";
 import { calculateHoldingReturns, type HoldingReturn } from "@/src/domain/holdingReturns";
 import { calculateDashboardPerformance } from "@/src/domain/dashboardPerformance";
+import { applyManualEntry, manualEntryActionsForAccount, type ManualEntryAction } from "@/src/domain/manualEntry";
 import { buildPortfolioTimeline, type PortfolioTimelinePoint } from "@/src/domain/performanceTimeline";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
@@ -36,7 +37,7 @@ const assetClassCards = [
 
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
-type View = "dashboard" | "holdings" | "transactions" | "imports" | "backup";
+type View = "dashboard" | "holdings" | "transactions" | "add-entry" | "imports" | "backup";
 type AnalyticsTab = "overview" | "allocation" | "holdings" | "history";
 type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
 
@@ -76,6 +77,17 @@ export function TrackerApp() {
   const [holdingSort, setHoldingSort] = useState<HoldingSort>("value");
   const [holdingEditMode, setHoldingEditMode] = useState(false);
   const [transactionEditMode, setTransactionEditMode] = useState(false);
+  const [entryHoldingId, setEntryHoldingId] = useState("");
+  const [entryActionId, setEntryActionId] = useState("");
+  const [entryDate, setEntryDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [entryAmount, setEntryAmount] = useState("");
+  const [entryQuantity, setEntryQuantity] = useState("");
+  const [entryPrice, setEntryPrice] = useState("");
+  const [entryFees, setEntryFees] = useState("0");
+  const [entryTaxes, setEntryTaxes] = useState("0");
+  const [entryCurrentValue, setEntryCurrentValue] = useState("");
+  const [entryInvestedAmount, setEntryInvestedAmount] = useState("");
+  const [entryNotes, setEntryNotes] = useState("");
   const [analyticsTab, setAnalyticsTab] = useState<AnalyticsTab>("overview");
 
   const summary = useMemo(() => calculatePortfolioSummary(backup), [backup]);
@@ -632,6 +644,53 @@ export function TrackerApp() {
     setStatus("Transaction edit saved locally. Export backup to preserve browser edits outside this device.");
   }
 
+  async function addManualEntryFromForm() {
+    const balance = backup.manualBalances.find((item) => item.id === entryHoldingId) ?? backup.manualBalances[0];
+    if (!balance) {
+      setErrors(["Import or create a holding before adding an entry."]);
+      return;
+    }
+    const account = backup.accounts.find((item) => item.id === balance.accountId);
+    const action = account ? manualEntryActionsForAccount(account.type).find((item) => item.id === entryActionId) ?? manualEntryActionsForAccount(account.type)[0] : undefined;
+    if (!action) {
+      setErrors(["Selected holding does not support manual entries."]);
+      return;
+    }
+
+    try {
+      const result = applyManualEntry(backup, {
+        balanceId: balance.id,
+        actionId: action.id,
+        date: entryDate,
+        amount: parseOptionalNumber(entryAmount),
+        quantity: parseOptionalNumber(entryQuantity),
+        price: parseOptionalNumber(entryPrice),
+        fees: parseOptionalNumber(entryFees),
+        taxes: parseOptionalNumber(entryTaxes),
+        currentValue: parseOptionalNumber(entryCurrentValue),
+        investedAmount: parseOptionalNumber(entryInvestedAmount),
+        notes: entryNotes
+      });
+      setBackup(result.backup);
+      setErrors([]);
+      setEntryAmount("");
+      setEntryQuantity("");
+      setEntryFees("0");
+      setEntryTaxes("0");
+      setEntryCurrentValue("");
+      setEntryInvestedAmount("");
+      setEntryNotes("");
+      const message = "Added " + result.action.label + " for " + displayHoldingName(result.balance.label) + ".";
+      if (shouldRefreshAfterImport(result.backup, result.transaction ? 1 : 0)) {
+        await refreshMarketDataFor(result.backup, message);
+      } else {
+        setStatus(message);
+      }
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : "Unable to add entry"]);
+    }
+  }
+
   return (
     <div className="shell app-shell-v2">
       <aside className="sidebar">
@@ -640,6 +699,7 @@ export function TrackerApp() {
           <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}><LayoutDashboard size={18} /> Analytics</button>
           <button className={view === "holdings" ? "active" : ""} onClick={() => setView("holdings")}><Table2 size={18} /> Holdings</button>
           <button className={view === "transactions" ? "active" : ""} onClick={() => setView("transactions")}><Pencil size={18} /> Transactions</button>
+          <button className={view === "add-entry" ? "active" : ""} onClick={() => setView("add-entry")}><PlusCircle size={18} /> Add Entry</button>
           <button className={view === "imports" ? "active" : ""} onClick={() => setView("imports")}><Upload size={18} /> Imports</button>
           <button className={view === "backup" ? "active" : ""} onClick={() => setView("backup")}><FileJson size={18} /> Backup</button>
         </nav>
@@ -842,6 +902,8 @@ export function TrackerApp() {
           </section>
         )}
 
+        {view === "add-entry" && <AddEntryView {...{ backup, entryHoldingId, setEntryHoldingId, entryActionId, setEntryActionId, entryDate, setEntryDate, entryAmount, setEntryAmount, entryQuantity, setEntryQuantity, entryPrice, setEntryPrice, entryFees, setEntryFees, entryTaxes, setEntryTaxes, entryCurrentValue, setEntryCurrentValue, entryInvestedAmount, setEntryInvestedAmount, entryNotes, setEntryNotes, addManualEntryFromForm }} />}
+
         {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, importLabel, setImportLabel, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
 
         {view === "backup" && (
@@ -852,6 +914,83 @@ export function TrackerApp() {
         )}
       </main>
     </div>
+  );
+}
+
+function AddEntryView(props: {
+  backup: PortfolioBackup;
+  entryHoldingId: string;
+  setEntryHoldingId: (value: string) => void;
+  entryActionId: string;
+  setEntryActionId: (value: string) => void;
+  entryDate: string;
+  setEntryDate: (value: string) => void;
+  entryAmount: string;
+  setEntryAmount: (value: string) => void;
+  entryQuantity: string;
+  setEntryQuantity: (value: string) => void;
+  entryPrice: string;
+  setEntryPrice: (value: string) => void;
+  entryFees: string;
+  setEntryFees: (value: string) => void;
+  entryTaxes: string;
+  setEntryTaxes: (value: string) => void;
+  entryCurrentValue: string;
+  setEntryCurrentValue: (value: string) => void;
+  entryInvestedAmount: string;
+  setEntryInvestedAmount: (value: string) => void;
+  entryNotes: string;
+  setEntryNotes: (value: string) => void;
+  addManualEntryFromForm: () => void;
+}) {
+  const holdings = props.backup.manualBalances.flatMap((balance) => {
+    const account = props.backup.accounts.find((item) => item.id === balance.accountId);
+    const instrument = balance.instrumentId ? props.backup.instruments.find((item) => item.id === balance.instrumentId) : undefined;
+    return account && instrument ? [{ balance, account, instrument }] : [];
+  });
+  const selected = holdings.find((item) => item.balance.id === props.entryHoldingId) ?? holdings[0];
+  const actions = selected ? manualEntryActionsForAccount(selected.account.type) : [];
+  const action = actions.find((item) => item.id === props.entryActionId) ?? actions[0];
+  const isSnapshot = action?.mode === "balance_snapshot";
+  return (
+    <section className="grid">
+      <div className="card wide-card add-entry-card">
+        <div className="section-head">
+          <div><h2>Add Entry</h2><p>Add a transaction or balance snapshot to an existing imported/manual asset. The record is saved in the same canonical ledger used by imports.</p></div>
+          <button className="primary" disabled={!selected || !action} onClick={props.addManualEntryFromForm}><PlusCircle size={15} /> Add Entry</button>
+        </div>
+        {holdings.length === 0 ? <p className="message">Import or create a holding before adding entries.</p> : (
+          <div className="entry-workbench">
+            <div className="entry-selector-panel">
+              <label><span>Asset</span><select value={selected?.balance.id ?? ""} onChange={(event) => { props.setEntryHoldingId(event.target.value); props.setEntryActionId(""); }}>
+                {holdings.map(({ balance, account }) => <option key={balance.id} value={balance.id}>{displayHoldingName(balance.label)} · {assetTypeLabel(account.type)}</option>)}
+              </select></label>
+              {selected && <div className="entry-asset-summary">
+                <strong>{displayHoldingName(selected.balance.label)}</strong>
+                <span>{assetTypeLabel(selected.account.type)} · {selected.instrument.category} · {selected.balance.currency}</span>
+                <div><em>Current</em><b>{formatMoney(selected.balance.value, selected.balance.currency)}</b></div>
+                <div><em>Qty/Units</em><b>{selected.balance.quantity === undefined ? "-" : formatNumber(selected.balance.quantity)}</b></div>
+              </div>}
+            </div>
+            <div className="entry-form-panel">
+              <div className="entry-form-grid">
+                <label><span>Entry type</span><select value={action?.id ?? ""} onChange={(event) => props.setEntryActionId(event.target.value)}>{actions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+                <label><span>Date</span><input type="date" value={props.entryDate} onChange={(event) => props.setEntryDate(event.target.value)} /></label>
+                {!isSnapshot && <label><span>Amount</span><input type="number" step="0.01" value={props.entryAmount} onChange={(event) => props.setEntryAmount(event.target.value)} placeholder={action?.needsQuantity && action?.needsPrice ? "auto from qty x price" : "0.00"} /></label>}
+                {action?.needsQuantity && <label><span>{selected?.account.type === "mutual_fund" || selected?.account.type === "nps" ? "Units" : "Quantity"}</span><input type="number" step="0.000001" value={props.entryQuantity} onChange={(event) => props.setEntryQuantity(event.target.value)} /></label>}
+                {action?.needsPrice && <label><span>{selected?.account.type === "mutual_fund" || selected?.account.type === "nps" ? "NAV" : "Price"}</span><input type="number" step="0.0001" value={props.entryPrice} onChange={(event) => props.setEntryPrice(event.target.value)} /></label>}
+                {action?.needsFees && <label><span>Fees</span><input type="number" step="0.01" value={props.entryFees} onChange={(event) => props.setEntryFees(event.target.value)} /></label>}
+                {action?.needsTaxes && <label><span>Taxes</span><input type="number" step="0.01" value={props.entryTaxes} onChange={(event) => props.setEntryTaxes(event.target.value)} /></label>}
+                {isSnapshot && <label><span>Current value</span><input type="number" step="0.01" value={props.entryCurrentValue} onChange={(event) => props.setEntryCurrentValue(event.target.value)} /></label>}
+                {isSnapshot && <label><span>Invested amount</span><input type="number" step="0.01" value={props.entryInvestedAmount} onChange={(event) => props.setEntryInvestedAmount(event.target.value)} placeholder="optional" /></label>}
+                <label className="entry-notes"><span>Notes</span><input value={props.entryNotes} onChange={(event) => props.setEntryNotes(event.target.value)} placeholder="Optional source/reference" /></label>
+              </div>
+              {action && <p className="entry-hint">{entryActionHint(action, selected?.account.type)}</p>}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1284,11 +1423,46 @@ function latestAsOfDate(dates: string[]): string {
   return dates.filter(Boolean).sort().at(-1) ?? "unknown date";
 }
 
+function parseOptionalNumber(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function assetTypeLabel(type: PortfolioBackup["accounts"][number]["type"]): string {
+  const labels: Record<PortfolioBackup["accounts"][number]["type"], string> = {
+    mutual_fund: "Mutual Fund",
+    indian_stock: "Indian Stock",
+    us_stock: "US Stock",
+    fd: "Fixed Deposit",
+    ppf: "PPF",
+    ssy: "SSY",
+    nps: "NPS",
+    epf: "PF / EPF",
+    cash: "Cash",
+    espp: "ESPP",
+    gold: "Gold",
+    other: "Other"
+  };
+  return labels[type];
+}
+
+function entryActionHint(action: ManualEntryAction, accountType?: PortfolioBackup["accounts"][number]["type"]): string {
+  if (action.mode === "balance_snapshot") return "Updates the latest balance/units checkpoint without creating a synthetic transaction; use it for statement closing balances or manually valued assets.";
+  if (accountType === "mutual_fund") return "Creates a mutual-fund ledger row with units, NAV, fees/tax, cost basis, XIRR cash flow, and latest value from the entered units/NAV until market refresh updates NAV.";
+  if (accountType === "us_stock" || accountType === "indian_stock") return "Creates a stock trade or income row with quantity, price, fees/tax, cost basis, XIRR cash flow, and current value from the entered price until market refresh updates quotes.";
+  if (accountType === "nps") return "Creates an NPS scheme transaction with units/NAV for contribution or internal switch accounting; later NPS statement imports can still validate balances.";
+  if (accountType === "epf") return action.id === "interest_accrual" ? "Adds capitalized PF interest to current value without treating it as new invested capital." : "Adds a PF contribution, transfer, or withdrawal as a dated ledger row used by invested amount, P/L, and XIRR.";
+  return "Creates a dated balance-ledger row used by invested amount, current value, profit/loss, and XIRR when there is enough cash-flow history.";
+}
+
 function viewTitle(view: View): string {
   if (view === "imports") return "Imports";
   if (view === "backup") return "Backup and Restore";
   if (view === "holdings") return "Holdings";
   if (view === "transactions") return "Transactions";
+  if (view === "add-entry") return "Add Entry";
   return "Portfolio Analytics";
 }
 
