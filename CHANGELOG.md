@@ -4,6 +4,8 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Added a separate Goals workspace with UI-created expense-driven goals, retirement/custom corpus multiples, per-category return assumptions, asset-to-goal percentage mapping, goal progress/projection analytics, and JSON export/restore round-trip coverage for goals and mappings.
+
 - Added Fidelity-style manual US stock CSV support for `price ($)` and `USD-INR`, preserving CSV buy/sell prices as transaction facts while using market refresh only for current holding valuation; sanitized committed manual sample fixtures to synthetic values.
 
 - Added compact manual balance-ledger CSV support and a committed PPF/SSY/ESPP/Cash sample file where dated `invest` rows affect invested/current value and `interest` rows affect current value only.

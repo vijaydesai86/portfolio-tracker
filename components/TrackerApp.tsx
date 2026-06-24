@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, TrendingDown, TrendingUp, Upload } from "lucide-react";
+import { AlertTriangle, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, Target, TrendingDown, TrendingUp, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
@@ -11,6 +11,7 @@ import { calculateHoldingReturns, type HoldingReturn } from "@/src/domain/holdin
 import { calculateDashboardPerformance } from "@/src/domain/dashboardPerformance";
 import { applyManualEntry, manualEntryActionsForAccount, type ManualEntryAction } from "@/src/domain/manualEntry";
 import { buildPortfolioTimeline, type PortfolioTimelinePoint } from "@/src/domain/performanceTimeline";
+import { buildGoal, calculateGoalProgress, createGoalMapping, recalculateGoalTarget, type GoalProgress } from "@/src/domain/goalAnalytics";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
 import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type CasCanonicalImport, type CasParseResult } from "@/src/importers/casText";
@@ -21,7 +22,7 @@ import { commitManualCsvImport } from "@/src/importers/importPipeline";
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
-import { createEmptyBackup, parseBackup, type AssetCategory, type ManualBalance, type PortfolioBackup, type Transaction } from "@/src/schema/backup";
+import { createEmptyBackup, parseBackup, type AssetCategory, type Goal, type ManualBalance, type PortfolioBackup, type Transaction } from "@/src/schema/backup";
 
 const sampleTemplate = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes\ncash-main,2026-06-22,Manual,cash,Cash Wallet,10000,INR,Cash,,,,liquid cash\nespp-contribution,2026-06-22,Employer,espp,ESPP Contribution,2000,USD,Equity,2000,USD,2026-06-22,total contribution only\nppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,300000,INR,Debt,250000,INR,2026-06-22,latest known balance`;
 
@@ -37,7 +38,7 @@ const assetClassCards = [
 
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
-type View = "dashboard" | "holdings" | "transactions" | "add-entry" | "imports" | "backup";
+type View = "dashboard" | "holdings" | "transactions" | "goals" | "add-entry" | "imports" | "backup";
 type AnalyticsTab = "overview" | "allocation" | "holdings" | "history";
 type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
 
@@ -88,6 +89,21 @@ export function TrackerApp() {
   const [entryCurrentValue, setEntryCurrentValue] = useState("");
   const [entryInvestedAmount, setEntryInvestedAmount] = useState("");
   const [entryNotes, setEntryNotes] = useState("");
+  const [goalName, setGoalName] = useState("Retirement");
+  const [goalType, setGoalType] = useState<Goal["type"]>("retirement");
+  const [goalMonthlyExpense, setGoalMonthlyExpense] = useState("100000");
+  const [goalInflation, setGoalInflation] = useState("6");
+  const [goalTargetYear, setGoalTargetYear] = useState(() => String(new Date().getFullYear() + 15));
+  const [goalMultiplier, setGoalMultiplier] = useState("35");
+  const [goalEquityReturn, setGoalEquityReturn] = useState("10");
+  const [goalDebtReturn, setGoalDebtReturn] = useState("6");
+  const [goalGoldReturn, setGoalGoldReturn] = useState("6");
+  const [goalCashReturn, setGoalCashReturn] = useState("6");
+  const [goalOtherReturn, setGoalOtherReturn] = useState("6");
+  const [selectedGoalId, setSelectedGoalId] = useState("");
+  const [mappingGoalId, setMappingGoalId] = useState("");
+  const [mappingBalanceId, setMappingBalanceId] = useState("");
+  const [mappingPercent, setMappingPercent] = useState("100");
   const [analyticsTab, setAnalyticsTab] = useState<AnalyticsTab>("overview");
 
   const summary = useMemo(() => calculatePortfolioSummary(backup), [backup]);
@@ -96,6 +112,7 @@ export function TrackerApp() {
   const allocation = summary.allocation;
   const holdingReturns = useMemo(() => calculateHoldingReturns(backup), [backup]);
   const performance = useMemo(() => calculateDashboardPerformance(summary, insights.transactionStats, holdingReturns.values()), [holdingReturns, insights.transactionStats, summary]);
+  const goalProgress = useMemo(() => calculateGoalProgress(backup), [backup]);
 
   const chartData = useMemo(() => ({
     allocation: categoryOrder.map((category) => ({ name: category, value: allocation[category].value, percent: allocation[category].percent })).filter((item) => item.value > 0),
@@ -691,6 +708,101 @@ export function TrackerApp() {
     }
   }
 
+  function addGoalFromForm() {
+    try {
+      const now = new Date().toISOString();
+      const goal = buildGoal({
+        name: goalName,
+        type: goalType,
+        currentMonthlyExpense: parseFormNumber(goalMonthlyExpense, 0),
+        inflationRate: parseFormNumber(goalInflation, 0),
+        targetYear: parseFormNumber(goalTargetYear, new Date().getFullYear()),
+        corpusMultiple: parseFormNumber(goalMultiplier, 1),
+        currency: backup.baseCurrency,
+        expectedReturn: parseFormNumber(goalEquityReturn, 10),
+        equityReturn: parseFormNumber(goalEquityReturn, 10),
+        debtReturn: parseFormNumber(goalDebtReturn, 6),
+        goldReturn: parseFormNumber(goalGoldReturn, 6),
+        cashReturn: parseFormNumber(goalCashReturn, 6),
+        otherReturn: parseFormNumber(goalOtherReturn, 6)
+      }, now);
+      setBackup((current) => ({ ...current, exportedAt: now, goals: [...current.goals, goal] }));
+      setSelectedGoalId(goal.id);
+      setMappingGoalId(goal.id);
+      setErrors([]);
+      setStatus("Goal added locally. Export JSON to preserve the full goal plan and mappings.");
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : "Unable to add goal"]);
+    }
+  }
+
+  function updateGoalRecord(goalId: string, patch: Partial<Goal>) {
+    const now = new Date().toISOString();
+    setBackup((current) => ({
+      ...current,
+      exportedAt: now,
+      goals: current.goals.map((goal) => {
+        if (goal.id !== goalId) return goal;
+        const next = { ...goal, ...patch, updatedAt: now };
+        if (typeof next.name === "string" && next.name.trim().length === 0) next.name = "Goal";
+        return recalculateGoalTarget(next);
+      })
+    }));
+    setStatus("Goal updated locally. Export JSON to preserve this plan outside the browser.");
+  }
+
+  function deleteGoalRecord(goalId: string) {
+    const now = new Date().toISOString();
+    setBackup((current) => ({
+      ...current,
+      exportedAt: now,
+      goals: current.goals.filter((goal) => goal.id !== goalId),
+      goalMappings: current.goalMappings.filter((mapping) => mapping.goalId !== goalId)
+    }));
+    setSelectedGoalId((current) => current === goalId ? "" : current);
+    setMappingGoalId((current) => current === goalId ? "" : current);
+    setStatus("Goal and its asset mappings deleted locally.");
+  }
+
+  function upsertGoalMappingFromForm() {
+    const goalId = mappingGoalId || selectedGoalId || backup.goals[0]?.id;
+    const balanceId = mappingBalanceId || backup.manualBalances[0]?.id;
+    if (!goalId || !balanceId) {
+      setErrors(["Create a goal and import at least one asset before mapping."]);
+      return;
+    }
+    const percent = parseFormNumber(mappingPercent, 100);
+    const now = new Date().toISOString();
+    setBackup((current) => {
+      const existing = current.goalMappings.find((mapping) => mapping.goalId === goalId && mapping.manualBalanceId === balanceId);
+      return {
+        ...current,
+        exportedAt: now,
+        goalMappings: existing
+          ? current.goalMappings.map((mapping) => mapping.id === existing.id ? { ...mapping, percent: clampGoalPercent(percent), updatedAt: now } : mapping)
+          : [...current.goalMappings, createGoalMapping(goalId, balanceId, percent, now)]
+      };
+    });
+    setErrors([]);
+    setStatus("Asset mapped to goal locally. Export JSON to preserve mappings.");
+  }
+
+  function deleteGoalMapping(mappingId: string) {
+    const now = new Date().toISOString();
+    setBackup((current) => ({
+      ...current,
+      exportedAt: now,
+      goalMappings: current.goalMappings.filter((mapping) => mapping.id !== mappingId)
+    }));
+    setStatus("Goal mapping deleted locally.");
+  }
+
+  function applyGoalPreset(name: string, type: Goal["type"], multiple: number) {
+    setGoalName(name);
+    setGoalType(type);
+    setGoalMultiplier(String(multiple));
+  }
+
   return (
     <div className="shell app-shell-v2">
       <aside className="sidebar">
@@ -699,6 +811,7 @@ export function TrackerApp() {
           <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}><LayoutDashboard size={18} /> Analytics</button>
           <button className={view === "holdings" ? "active" : ""} onClick={() => setView("holdings")}><Table2 size={18} /> Holdings</button>
           <button className={view === "transactions" ? "active" : ""} onClick={() => setView("transactions")}><Pencil size={18} /> Transactions</button>
+          <button className={view === "goals" ? "active" : ""} onClick={() => setView("goals")}><Target size={18} /> Goals</button>
           <button className={view === "add-entry" ? "active" : ""} onClick={() => setView("add-entry")}><PlusCircle size={18} /> Add Entry</button>
           <button className={view === "imports" ? "active" : ""} onClick={() => setView("imports")}><Upload size={18} /> Imports</button>
           <button className={view === "backup" ? "active" : ""} onClick={() => setView("backup")}><FileJson size={18} /> Backup</button>
@@ -902,6 +1015,8 @@ export function TrackerApp() {
           </section>
         )}
 
+        {view === "goals" && <GoalsView {...{ backup, goalProgress, goalName, setGoalName, goalType, setGoalType, goalMonthlyExpense, setGoalMonthlyExpense, goalInflation, setGoalInflation, goalTargetYear, setGoalTargetYear, goalMultiplier, setGoalMultiplier, goalEquityReturn, setGoalEquityReturn, goalDebtReturn, setGoalDebtReturn, goalGoldReturn, setGoalGoldReturn, goalCashReturn, setGoalCashReturn, goalOtherReturn, setGoalOtherReturn, selectedGoalId, setSelectedGoalId, mappingGoalId, setMappingGoalId, mappingBalanceId, setMappingBalanceId, mappingPercent, setMappingPercent, addGoalFromForm, updateGoalRecord, deleteGoalRecord, upsertGoalMappingFromForm, deleteGoalMapping, applyGoalPreset }} />}
+
         {view === "add-entry" && <AddEntryView {...{ backup, entryHoldingId, setEntryHoldingId, entryActionId, setEntryActionId, entryDate, setEntryDate, entryAmount, setEntryAmount, entryQuantity, setEntryQuantity, entryPrice, setEntryPrice, entryFees, setEntryFees, entryTaxes, setEntryTaxes, entryCurrentValue, setEntryCurrentValue, entryInvestedAmount, setEntryInvestedAmount, entryNotes, setEntryNotes, addManualEntryFromForm }} />}
 
         {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, importLabel, setImportLabel, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
@@ -909,10 +1024,207 @@ export function TrackerApp() {
         {view === "backup" && (
           <section className="grid two">
             <div className="card"><h2>Restore Canonical JSON</h2><input type="file" accept="application/json" onChange={(event) => restoreBackup(event.target.files?.[0])} /></div>
-            <div className="card"><h2>Canonical Format</h2><p className="message">A single versioned JSON file restores accounts, balances, imports, goals, prices, and source metadata.</p><pre>{JSON.stringify({ schemaVersion: backup.schemaVersion, baseCurrency: backup.baseCurrency, records: backup.manualBalances.length }, null, 2)}</pre></div>
+            <div className="card"><h2>Canonical Format</h2><p className="message">A single versioned JSON file restores accounts, balances, imports, goals, prices, and source metadata.</p><pre>{JSON.stringify({ schemaVersion: backup.schemaVersion, baseCurrency: backup.baseCurrency, records: backup.manualBalances.length, goals: backup.goals.length, goalMappings: backup.goalMappings.length }, null, 2)}</pre></div>
           </section>
         )}
       </main>
+    </div>
+  );
+}
+
+
+function GoalsView(props: {
+  backup: PortfolioBackup;
+  goalProgress: GoalProgress[];
+  goalName: string;
+  setGoalName: (value: string) => void;
+  goalType: Goal["type"];
+  setGoalType: (value: Goal["type"]) => void;
+  goalMonthlyExpense: string;
+  setGoalMonthlyExpense: (value: string) => void;
+  goalInflation: string;
+  setGoalInflation: (value: string) => void;
+  goalTargetYear: string;
+  setGoalTargetYear: (value: string) => void;
+  goalMultiplier: string;
+  setGoalMultiplier: (value: string) => void;
+  goalEquityReturn: string;
+  setGoalEquityReturn: (value: string) => void;
+  goalDebtReturn: string;
+  setGoalDebtReturn: (value: string) => void;
+  goalGoldReturn: string;
+  setGoalGoldReturn: (value: string) => void;
+  goalCashReturn: string;
+  setGoalCashReturn: (value: string) => void;
+  goalOtherReturn: string;
+  setGoalOtherReturn: (value: string) => void;
+  selectedGoalId: string;
+  setSelectedGoalId: (value: string) => void;
+  mappingGoalId: string;
+  setMappingGoalId: (value: string) => void;
+  mappingBalanceId: string;
+  setMappingBalanceId: (value: string) => void;
+  mappingPercent: string;
+  setMappingPercent: (value: string) => void;
+  addGoalFromForm: () => void;
+  updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void;
+  deleteGoalRecord: (goalId: string) => void;
+  upsertGoalMappingFromForm: () => void;
+  deleteGoalMapping: (mappingId: string) => void;
+  applyGoalPreset: (name: string, type: Goal["type"], multiple: number) => void;
+}) {
+  const selectedProgress = props.goalProgress.find((item) => item.goal.id === props.selectedGoalId) ?? props.goalProgress[0];
+  const mappedRows = props.backup.goalMappings.flatMap((mapping) => {
+    const goal = props.backup.goals.find((item) => item.id === mapping.goalId);
+    const balance = props.backup.manualBalances.find((item) => item.id === mapping.manualBalanceId);
+    const progress = props.goalProgress.find((item) => item.goal.id === mapping.goalId);
+    const mappedHolding = progress?.mappedHoldings.find((item) => item.balance.id === mapping.manualBalanceId);
+    if (!goal || !balance) return [];
+    return [{ mapping, goal, balance, mappedHolding }];
+  });
+  const defaultMappingGoalId = props.mappingGoalId || props.selectedGoalId || props.backup.goals[0]?.id || "";
+  const defaultMappingBalanceId = props.mappingBalanceId || props.backup.manualBalances[0]?.id || "";
+
+  return (
+    <section className="grid goals-section">
+      <div className="card wide-card goals-card">
+        <div className="section-head">
+          <div>
+            <h2>Goals</h2>
+            <p>Create expense-driven goals, map existing assets to them, and project category-wise corpus using the same canonical backup data that powers portfolio analytics.</p>
+          </div>
+          <button className="primary" onClick={props.addGoalFromForm}><Target size={15} /> Add Goal</button>
+        </div>
+        <div className="goal-workspace">
+          <div className="goal-create-panel">
+            <div className="goal-preset-row">
+              <button onClick={() => props.applyGoalPreset("Retirement", "retirement", 35)}>Retirement 35x</button>
+              <button onClick={() => props.applyGoalPreset("Bhoomi", "custom", 13)}>Bhoomi 13x</button>
+            </div>
+            <div className="goal-form-grid">
+              <label><span>Goal name</span><input value={props.goalName} onChange={(event) => props.setGoalName(event.target.value)} /></label>
+              <label><span>Goal type</span><select value={props.goalType} onChange={(event) => props.setGoalType(event.target.value as Goal["type"])}><option value="retirement">Retirement</option><option value="custom">Custom</option></select></label>
+              <label><span>Current monthly expense</span><input type="number" step="1000" value={props.goalMonthlyExpense} onChange={(event) => props.setGoalMonthlyExpense(event.target.value)} /></label>
+              <label><span>Inflation %</span><input type="number" step="0.1" value={props.goalInflation} onChange={(event) => props.setGoalInflation(event.target.value)} /></label>
+              <label><span>Target year</span><input type="number" step="1" value={props.goalTargetYear} onChange={(event) => props.setGoalTargetYear(event.target.value)} /></label>
+              <label><span>Corpus multiple</span><input type="number" step="0.1" value={props.goalMultiplier} onChange={(event) => props.setGoalMultiplier(event.target.value)} /></label>
+            </div>
+            <div className="goal-return-grid">
+              <label><span>Equity return %</span><input type="number" step="0.1" value={props.goalEquityReturn} onChange={(event) => props.setGoalEquityReturn(event.target.value)} /></label>
+              <label><span>Debt return %</span><input type="number" step="0.1" value={props.goalDebtReturn} onChange={(event) => props.setGoalDebtReturn(event.target.value)} /></label>
+              <label><span>Gold return %</span><input type="number" step="0.1" value={props.goalGoldReturn} onChange={(event) => props.setGoalGoldReturn(event.target.value)} /></label>
+              <label><span>Cash return %</span><input type="number" step="0.1" value={props.goalCashReturn} onChange={(event) => props.setGoalCashReturn(event.target.value)} /></label>
+              <label><span>Other return %</span><input type="number" step="0.1" value={props.goalOtherReturn} onChange={(event) => props.setGoalOtherReturn(event.target.value)} /></label>
+            </div>
+            <p className="message">Target corpus is computed as inflated monthly expense at goal year x 12 x corpus multiple. No CSV is required for goals.</p>
+          </div>
+
+          <div className="goal-focus-panel">
+            <span className="eyebrow">Goal snapshot</span>
+            {selectedProgress ? <GoalSnapshot progress={selectedProgress} currency={props.backup.baseCurrency} /> : <p className="message">Add a goal to see funded status, projected corpus, and category split.</p>}
+          </div>
+        </div>
+      </div>
+
+      {props.goalProgress.length > 0 && (
+        <div className="goal-summary-grid">
+          {props.goalProgress.map((progress) => <GoalCard key={progress.goal.id} progress={progress} currency={props.backup.baseCurrency} selected={selectedProgress?.goal.id === progress.goal.id} setSelectedGoalId={props.setSelectedGoalId} updateGoalRecord={props.updateGoalRecord} deleteGoalRecord={props.deleteGoalRecord} />)}
+        </div>
+      )}
+
+      <div className="card wide-card goal-map-card">
+        <div className="section-head">
+          <div><h2>Map Assets to Goals</h2><p>Assign any imported or manually added holding to one or more goals. Percentages apply only to goal planning and do not change the portfolio ledger.</p></div>
+          <button className="primary" disabled={props.backup.goals.length === 0 || props.backup.manualBalances.length === 0} onClick={props.upsertGoalMappingFromForm}>Save Mapping</button>
+        </div>
+        {props.backup.goals.length === 0 || props.backup.manualBalances.length === 0 ? <p className="message">Create a goal and import at least one asset before mapping.</p> : (
+          <>
+            <div className="goal-map-form">
+              <label><span>Goal</span><select value={defaultMappingGoalId} onChange={(event) => { props.setMappingGoalId(event.target.value); props.setSelectedGoalId(event.target.value); }}>{props.backup.goals.map((goal) => <option value={goal.id} key={goal.id}>{goal.name}</option>)}</select></label>
+              <label><span>Asset</span><select value={defaultMappingBalanceId} onChange={(event) => props.setMappingBalanceId(event.target.value)}>{props.backup.manualBalances.map((balance) => {
+                const account = props.backup.accounts.find((item) => item.id === balance.accountId);
+                return <option value={balance.id} key={balance.id}>{displayHoldingName(balance.label)} · {account ? assetTypeLabel(account.type) : "Asset"} · {balance.category}</option>;
+              })}</select></label>
+              <label><span>Mapped %</span><input type="number" step="1" min="0" max="100" value={props.mappingPercent} onChange={(event) => props.setMappingPercent(event.target.value)} /></label>
+            </div>
+            <div className="goal-mapping-list">
+              {mappedRows.length === 0 ? <p className="message">No assets mapped yet.</p> : mappedRows.map(({ mapping, goal, balance, mappedHolding }) => (
+                <div className="goal-mapping-row" key={mapping.id}>
+                  <div><strong>{goal.name}</strong><span>{displayHoldingName(balance.label)} · {balance.category}</span></div>
+                  <em>{mapping.percent.toFixed(1)}%</em>
+                  <strong>{formatMoney(mappedHolding?.value ?? 0, props.backup.baseCurrency)}</strong>
+                  <span>{formatMoney(mappedHolding?.projectedValue ?? 0, props.backup.baseCurrency)} projected</span>
+                  <button className="danger-button" onClick={() => props.deleteGoalMapping(mapping.id)}>Delete</button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function GoalSnapshot({ progress, currency }: { progress: GoalProgress; currency: string }) {
+  const fundedWidth = Math.min(100, Math.max(0, progress.fundedPercent));
+  const projectedWidth = Math.min(100, Math.max(0, progress.projectedFundedPercent));
+  return (
+    <div className="goal-snapshot">
+      <h3>{progress.goal.name}</h3>
+      <div className="goal-snapshot-value"><span>Target corpus</span><strong>{formatMoney(progress.targetCorpus, currency)}</strong></div>
+      <div className="goal-progress-line"><span>Mapped now</span><strong>{formatMoney(progress.mappedCurrentValue, currency)}</strong></div>
+      <div className="goal-progress-rail"><div style={{ width: fundedWidth + "%" }} /></div>
+      <div className="goal-progress-line"><span>Projected at goal</span><strong>{formatMoney(progress.projectedValue, currency)}</strong></div>
+      <div className="goal-progress-rail projected"><div style={{ width: projectedWidth + "%" }} /></div>
+      <div className="goal-mini-grid">
+        <MiniInsight label="Funded" value={progress.fundedPercent.toFixed(1) + "%"} detail="current mapped assets" />
+        <MiniInsight label="Projected" value={progress.projectedFundedPercent.toFixed(1) + "%"} detail="category return assumptions" />
+        <MiniInsight label="First month" value={formatMoney(progress.startingMonthlyExpense, currency)} detail="inflated monthly expense" />
+        <MiniInsight label="Gap" value={formatMoney(progress.projectedGap, currency)} detail="projected surplus/gap" />
+      </div>
+    </div>
+  );
+}
+
+function GoalCard({ progress, currency, selected, setSelectedGoalId, updateGoalRecord, deleteGoalRecord }: { progress: GoalProgress; currency: string; selected: boolean; setSelectedGoalId: (value: string) => void; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void; deleteGoalRecord: (goalId: string) => void }) {
+  const goal = progress.goal;
+  const targetYear = goal.targetDate.slice(0, 4);
+  return (
+    <div className={"goal-card" + (selected ? " selected" : "")} onClick={() => setSelectedGoalId(goal.id)}>
+      <div className="goal-card-head">
+        <div><input value={goal.name} onChange={(event) => updateGoalRecord(goal.id, { name: event.target.value })} onClick={(event) => event.stopPropagation()} /><span>{goal.type === "retirement" ? "Retirement" : "Custom"} · {targetYear} · {progress.yearsToGoal.toFixed(1)} years</span></div>
+        <button className="danger-button" onClick={(event) => { event.stopPropagation(); deleteGoalRecord(goal.id); }}>Delete</button>
+      </div>
+      <div className="goal-card-metrics">
+        <MiniInsight label="Target" value={formatMoney(progress.targetCorpus, currency)} detail="inflated annual expense x multiple" />
+        <MiniInsight label="Mapped" value={formatMoney(progress.mappedCurrentValue, currency)} detail={progress.mappedHoldings.length + " asset(s)"} />
+        <MiniInsight label="Projected" value={formatMoney(progress.projectedValue, currency)} detail={progress.projectedFundedPercent.toFixed(1) + "% of target"} />
+      </div>
+      <div className="goal-edit-grid" onClick={(event) => event.stopPropagation()}>
+        <label><span>Monthly expense</span><input type="number" value={goal.currentMonthlyExpense} onChange={(event) => updateGoalRecord(goal.id, { currentMonthlyExpense: Number(event.target.value) })} /></label>
+        <label><span>Inflation %</span><input type="number" step="0.1" value={goal.inflationRate} onChange={(event) => updateGoalRecord(goal.id, { inflationRate: Number(event.target.value) })} /></label>
+        <label><span>Target year</span><input type="number" value={targetYear} onChange={(event) => updateGoalRecord(goal.id, { targetDate: normalizeGoalYearInput(event.target.value) + "-01-01" })} /></label>
+        <label><span>Multiple</span><input type="number" step="0.1" value={goal.corpusMultiple} onChange={(event) => updateGoalRecord(goal.id, { corpusMultiple: Number(event.target.value) })} /></label>
+      </div>
+      <GoalCategoryStack progress={progress} currency={currency} />
+    </div>
+  );
+}
+
+function GoalCategoryStack({ progress, currency }: { progress: GoalProgress; currency: string }) {
+  const total = progress.mappedCurrentValue;
+  return (
+    <div className="goal-category-block">
+      <div className="goal-category-stack" aria-label="Mapped category split">
+        {categoryOrder.map((category, index) => {
+          const value = progress.categoryValues[category];
+          const width = total <= 0 ? 0 : (value / total) * 100;
+          return value > 0 ? <span key={category} title={category + " · " + formatMoney(value, currency)} style={{ width: width + "%", background: chartColors[index % chartColors.length] }} /> : null;
+        })}
+      </div>
+      <div className="goal-category-list">
+        {categoryOrder.filter((category) => progress.categoryValues[category] > 0).map((category, index) => <span key={category}><i style={{ background: chartColors[index % chartColors.length] }} />{category} {formatMoney(progress.categoryValues[category], currency)}</span>)}
+      </div>
     </div>
   );
 }
@@ -1430,6 +1742,22 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function parseFormNumber(value: string, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clampGoalPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(100, Math.max(0, value));
+}
+
+function normalizeGoalYearInput(value: string): string {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return String(new Date().getFullYear());
+  return String(Math.min(2200, Math.max(1900, Math.round(parsed))));
+}
+
 function assetTypeLabel(type: PortfolioBackup["accounts"][number]["type"]): string {
   const labels: Record<PortfolioBackup["accounts"][number]["type"], string> = {
     mutual_fund: "Mutual Fund",
@@ -1462,6 +1790,7 @@ function viewTitle(view: View): string {
   if (view === "backup") return "Backup and Restore";
   if (view === "holdings") return "Holdings";
   if (view === "transactions") return "Transactions";
+  if (view === "goals") return "Goals";
   if (view === "add-entry") return "Add Entry";
   return "Portfolio Analytics";
 }

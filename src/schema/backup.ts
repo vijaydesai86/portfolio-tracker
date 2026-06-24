@@ -128,11 +128,19 @@ export type PriceSnapshot = z.infer<typeof priceSnapshotSchema>;
 export const goalSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
+  type: z.enum(["retirement", "custom"]).default("custom"),
+  currentMonthlyExpense: z.number().finite().nonnegative().default(0),
   targetAmount: z.number().finite().nonnegative(),
   currency: currencySchema,
   targetDate: dateSchema,
   inflationRate: z.number().min(0).max(100),
+  corpusMultiple: z.number().finite().nonnegative().default(1),
   expectedReturn: z.number().min(0).max(100),
+  equityReturn: z.number().min(0).max(100).default(10),
+  debtReturn: z.number().min(0).max(100).default(6),
+  goldReturn: z.number().min(0).max(100).default(6),
+  cashReturn: z.number().min(0).max(100).default(6),
+  otherReturn: z.number().min(0).max(100).default(6),
   createdAt: timestampSchema,
   updatedAt: timestampSchema
 });

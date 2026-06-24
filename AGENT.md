@@ -12,6 +12,7 @@ This file is machine-readable operating guidance for AI coding agents working on
 - Preserve user/manual edits during reimports unless the user explicitly chooses overwrite.
 - Do not silently accept uncertain imported data. Stage it and require review.
 - Keep the canonical JSON backup format versioned and migration-friendly.
+- Goals and goal mappings are part of the canonical JSON snapshot and must round-trip through browser export/restore tests when changed.
 
 ## Preferred Commands
 
@@ -74,6 +75,7 @@ The app is INR-first. Current foreign-currency holdings require latest FX. Forei
 - CAS mutual fund holdings must derive units, remaining cost basis, P/L, and XIRR from parsed ledger transactions whenever transactions exist. CAS `Total Cost Value` and closing units are validation/checkpoint targets; non-zero opening units must be represented as explicit opening lots. Browser-path CAS PDF extraction must be tested with `tests/importers/cas-browser-private.test.ts` when a private PDF is available.
 - Dashboard profit labels must distinguish external cash in, external cash out, headline invested capital, remaining cost basis, current P/L, fees/tax, total P/L, and XIRR. Headline invested/P&L must match holdings remaining cost basis; external cash-in/out must remain supporting cash-flow analytics and must not replace headline invested. Portfolio XIRR cash flows must not double-count broker cash-ledger deposits and the security trades funded by those deposits. For brokers with explicit cash ledgers, use external deposits/withdrawals for portfolio-level flows and keep buys/sells as internal trades for cost basis. Holding return calculations must be scoped by account plus instrument; the same ticker/fund in two brokers/accounts must not share lots or XIRR cash flows. Zero-amount broker migration rows must not add or remove cost basis or XIRR cash flows. For statements without separate cash ledgers, buys/SIPs/contributions and redemptions are portfolio capital flows. Holdings analytics should show per-holding allocation, remaining cost basis, P/L, simple return, and XIRR when transaction history and FX support it.
 - New analytics panels must remain adaptive to future asset modules: PF/EPF, PPF/SSY, NPS, FD, cash, ESPP, Indian stocks, US stocks, and mutual funds.
+- Goal planning must stay in a separate Goals workspace. Goal inputs are UI records, not required CSV uploads; asset-to-goal mapping must be explicit and percentage based.
 
 - Asset modules must be classified from structured account/instrument types, never from free-text fund or provider names.
 - Performance panels must be semantically strict: a loss watchlist must filter to negative P/L only and must not show low positive gains as losses.

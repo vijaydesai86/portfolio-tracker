@@ -7,12 +7,21 @@ const url = process.env.APP_URL ?? "http://127.0.0.1:3000";
 const firefoxBinary = process.env.FIREFOX_BIN ?? "/arm/tools/mozilla/firefox/146.0.1/linux64/firefox/firefox";
 const geckoDriver = process.env.GECKODRIVER_BIN ?? "/arm/tools/mozilla/geckodriver/0.35.0/linux64/geckodriver";
 const screenshotPath = process.env.SCREENSHOT_PATH ?? "test-results/selenium-dashboard.png";
+const downloadDir = path.resolve("test-results/downloads");
+const backupDownloadPath = path.join(downloadDir, "portfolio-tracker-backup-v1.json");
 
 fs.mkdirSync("test-results", { recursive: true });
+fs.rmSync(downloadDir, { recursive: true, force: true });
+fs.mkdirSync(downloadDir, { recursive: true });
 
 const options = new firefox.Options()
   .setBinary(firefoxBinary)
-  .addArguments("-headless");
+  .addArguments("-headless")
+  .setPreference("browser.download.folderList", 2)
+  .setPreference("browser.download.dir", downloadDir)
+  .setPreference("browser.download.useDownloadDir", true)
+  .setPreference("browser.helperApps.neverAsk.saveToDisk", "application/json,application/octet-stream,text/json")
+  .setPreference("pdfjs.disabled", true);
 const service = new firefox.ServiceBuilder(geckoDriver);
 
 const driver = await new Builder()
@@ -32,11 +41,20 @@ async function waitForBodyText(text, timeout = 15000) {
   await driver.wait(async () => (await driver.findElement(By.css("body")).getText()).toLowerCase().includes(text.toLowerCase()), timeout);
 }
 
+async function waitForFile(filePath, timeout = 15000) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) return;
+    await driver.sleep(250);
+  }
+  throw new Error(`Timed out waiting for ${filePath}`);
+}
+
 try {
   await driver.get(url);
   await driver.wait(until.elementLocated(By.css("h1")), 15000);
   const title = await driver.findElement(By.css("h1")).getText();
-  if (!/Portfolio Analytics|Holdings|Transactions|Add Entry|Imports|Backup/.test(title)) {
+  if (!/Portfolio Analytics|Holdings|Transactions|Goals|Add Entry|Imports|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
   for (const label of ["Overview", "Allocation", "Holdings", "History"]) {
@@ -93,6 +111,35 @@ try {
     const body = await driver.findElement(By.css("body")).getText();
     return body.includes("₹8,940.00") && body.includes("₹8,730.00") && body.includes("₹210.00");
   }, 20000);
+
+  await jsClick("//button[contains(., 'Goals')]");
+  await waitForBodyText("Create expense-driven goals");
+  await jsClick("//section[.//h2[normalize-space(.)='Goals']]//button[contains(., 'Add Goal')]");
+  await waitForBodyText("Goal added locally");
+  await waitForBodyText("Target corpus");
+  await jsClick("//section[.//h2[normalize-space(.)='Map Assets to Goals']]//button[contains(., 'Save Mapping')]");
+  await waitForBodyText("Asset mapped to goal locally");
+  await driver.wait(async () => {
+    const body = await driver.findElement(By.css("body")).getText();
+    return body.includes("Retirement") && body.includes("projected") && body.includes("Map Assets to Goals");
+  }, 15000);
+  await jsClick("//button[contains(., 'Export')]");
+  await waitForFile(backupDownloadPath, 20000);
+  const exported = JSON.parse(fs.readFileSync(backupDownloadPath, "utf8"));
+  if (!Array.isArray(exported.goals) || exported.goals.length !== 1 || !Array.isArray(exported.goalMappings) || exported.goalMappings.length !== 1) {
+    throw new Error("Exported JSON did not include the browser-created goal and mapping");
+  }
+  await jsClick("//button[contains(., 'Reset')]");
+  await waitForBodyText("Portfolio reset locally");
+  await jsClick("//button[contains(., 'Backup')]");
+  const restoreInput = await driver.wait(until.elementLocated(By.xpath("//input[@type='file' and contains(@accept, 'application/json')]")), 15000);
+  await restoreInput.sendKeys(backupDownloadPath);
+  await waitForBodyText("Restored 5 balance record(s) from backup");
+  await jsClick("//button[contains(., 'Goals')]");
+  await driver.wait(async () => {
+    const body = await driver.findElement(By.css("body")).getText();
+    return body.includes("Retirement") && body.includes("Map Assets to Goals") && body.includes("projected");
+  }, 15000);
 
   const fidelityCsvPath = path.resolve("test-results/manual-fidelity-smoke.csv");
   fs.writeFileSync(fidelityCsvPath, [
