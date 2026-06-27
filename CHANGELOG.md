@@ -4,7 +4,31 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
-- Added a separate Goals workspace with UI-created expense-driven goals, retirement/custom corpus multiples, per-category return assumptions, asset-to-goal percentage mapping, goal progress/projection analytics, and JSON export/restore round-trip coverage for goals and mappings.
+- Made frozen snapshot ranking cards full-width so values and bars stay visible, and added native timeline hover/focus tooltips that show all series values for the selected date across history and snapshot charts.
+
+- Reworked History and Snapshot timelines to deterministic native SVG line/dot charts, removed the redundant Analytics Holdings tab in favor of the dedicated Holdings workspace, widened ranking rows for readable holding names, and broadened Selenium visual checks across donut, bar, ranking, history, and snapshot chart families.
+
+- Fixed Asset Classes subtype classification so NPS equity schemes remain `NPS` and are not counted under `Direct stocks`; direct-stock subtype totals now reconcile with the global Stock asset-type chart.
+
+- Restored Allocation Map as a dedicated visible donut chart with center total and value legend, made asset-class subtype rows use explicit labels such as `Direct stocks`, added a top-level goal snapshot selector, and extended Selenium visual smoke tests to catch invisible donuts, missing subtype labels, and missing goal selection controls.
+
+- Strengthened allocation and ranking chart rows with row-level colored fills so they read as visible graphs, not plain text tables; Selenium now verifies visible non-transparent bar fills in the real browser.
+
+- Replaced dense SVG bar charts in allocation and ranking panels with readable metric-row bars, removed fake `0/max` axis rows from asset-class and holding reports, fixed subtype split tags, and added Selenium assertions so chart rows cannot regress into misleading rendered content.
+
+- Added a scope-aware command insight deck to Analytics Overview with goal readiness, valuation quality, concentration, return engine, and allocation-balance cards; refined chart legends/ticks so dense finance graphs render with clearer labels and less visual collision.
+
+- Added a scoped Asset Classes analytics section with Equity/Debt/Cash/Gold subtype splits, top holdings, profit drivers, return metrics, and XIRR coverage; added structured subtype tags such as Direct/MF/EPF/PPF/SSY beside class tags in Holdings and ranking charts; moved new-goal creation into Add Entry; changed history and snapshot breakdown charts from stacked areas to unstacked value lines.
+
+- Fixed goal-scoped Analytics XIRR so full-portfolio Combined Goals uses the same portfolio-equivalent cash-flow basis as Overall Portfolio, while partial goals remain explicitly goal-weighted holding cash-flow returns; mapped holding cash-flow coverage is now only supporting detail.
+
+- Made the main Analytics cockpit goal-aware with an explicit scope selector for Overall Portfolio, Combined Goals, and each individual goal; removed the misleading separate goal analytics widget and fixed combined-goal charts so they no longer imply an incorrect arithmetic total.
+
+- Added frozen portfolio snapshots with snapshot capture, JSON export/restore persistence, no-market-fetch frozen reports, snapshot-history charts for portfolio/allocation/goals, and Selenium coverage for browser capture plus restore.
+
+- Expanded Goals with detailed goal analytics covering combined-plan analytics, selected-goal funding metrics, category projection, mapped-holding rankings, profit contributors, and mapped cash-flow XIRR.
+
+- Added a separate Goals workspace with UI-created expense-driven goals, retirement/custom corpus multiples, per-category return assumptions, corpus-needed-today analytics, combined-goal analytics, per-goal mapped invested/P&L and mapped XIRR, asset-to-goal percentage mapping, and JSON export/restore round-trip coverage for goals and mappings.
 
 - Added Fidelity-style manual US stock CSV support for `price ($)` and `USD-INR`, preserving CSV buy/sell prices as transaction facts while using market refresh only for current holding valuation; sanitized committed manual sample fixtures to synthetic values.
 

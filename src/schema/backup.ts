@@ -181,6 +181,32 @@ export const sourceDocumentSchema = z.object({
 });
 export type SourceDocument = z.infer<typeof sourceDocumentSchema>;
 
+export const snapshotFrozenDataSchema = z.object({
+  settings: z.record(z.string(), z.unknown()),
+  accounts: z.array(accountSchema),
+  instruments: z.array(instrumentSchema),
+  transactions: z.array(transactionSchema),
+  manualBalances: z.array(manualBalanceSchema),
+  priceSnapshots: z.array(priceSnapshotSchema),
+  goals: z.array(goalSchema),
+  goalMappings: z.array(goalMappingSchema),
+  imports: z.array(importRunSchema),
+  sourceDocuments: z.array(sourceDocumentSchema)
+});
+export type SnapshotFrozenData = z.infer<typeof snapshotFrozenDataSchema>;
+
+export const portfolioSnapshotSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  asOfDate: dateSchema,
+  createdAt: timestampSchema,
+  baseCurrency: currencySchema,
+  notes: z.string().optional(),
+  frozenData: snapshotFrozenDataSchema,
+  analytics: z.record(z.string(), z.unknown())
+});
+export type PortfolioSnapshot = z.infer<typeof portfolioSnapshotSchema>;
+
 export const backupSchema = z.object({
   schemaVersion: z.literal(1),
   app: z.literal("portfolio-tracker"),
@@ -194,6 +220,7 @@ export const backupSchema = z.object({
   priceSnapshots: z.array(priceSnapshotSchema),
   goals: z.array(goalSchema),
   goalMappings: z.array(goalMappingSchema),
+  snapshots: z.array(portfolioSnapshotSchema).default([]),
   imports: z.array(importRunSchema),
   sourceDocuments: z.array(sourceDocumentSchema)
 });
@@ -214,6 +241,7 @@ export function createEmptyBackup(baseCurrency: string): PortfolioBackup {
     priceSnapshots: [],
     goals: [],
     goalMappings: [],
+    snapshots: [],
     imports: [],
     sourceDocuments: []
   };

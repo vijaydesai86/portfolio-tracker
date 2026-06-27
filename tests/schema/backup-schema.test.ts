@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createPortfolioSnapshot } from "@/src/domain/snapshots";
 import { createEmptyBackup, parseBackup } from "@/src/schema/backup";
 
 describe("canonical backup schema", () => {
@@ -13,6 +14,13 @@ describe("canonical backup schema", () => {
     const backup = createEmptyBackup("INR") as any;
     backup.schemaVersion = 999;
     expect(() => parseBackup(backup)).toThrow(/schema/i);
+  });
+
+  it("defaults snapshots for legacy backups", () => {
+    const backup = createEmptyBackup("INR") as any;
+    delete backup.snapshots;
+
+    expect(parseBackup(backup).snapshots).toEqual([]);
   });
 
   it("round-trips a full backup without losing records", () => {
@@ -66,6 +74,7 @@ describe("canonical backup schema", () => {
       createdAt: "2026-06-22T00:00:00.000Z",
       updatedAt: "2026-06-22T00:00:00.000Z"
     });
+    backup.snapshots.push(createPortfolioSnapshot(backup, { name: "Schema snapshot", asOfDate: "2026-06-22", now: "2026-06-22T12:00:00.000Z" }));
 
     const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
     expect(parsed.accounts).toHaveLength(1);
@@ -73,5 +82,8 @@ describe("canonical backup schema", () => {
     expect(parsed.goals[0].name).toBe("Retirement");
     expect(parsed.goals[0].corpusMultiple).toBe(35);
     expect(parsed.goalMappings[0].manualBalanceId).toBe("bal_cash");
+    expect(parsed.snapshots).toHaveLength(1);
+    expect(parsed.snapshots[0].name).toBe("Schema snapshot");
+    expect(parsed.snapshots[0].frozenData.manualBalances[0].value).toBe(125000);
   });
 });
