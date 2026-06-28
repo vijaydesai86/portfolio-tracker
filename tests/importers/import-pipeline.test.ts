@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { calculatePortfolioInsights, calculatePortfolioSummary } from "@/src/domain/analytics";
 import { calculateDashboardPerformance } from "@/src/domain/dashboardPerformance";
 import { calculateHoldingReturns } from "@/src/domain/holdingReturns";
-import { commitManualCsvImport } from "@/src/importers/importPipeline";
+import { commitManualCsvImport, previewManualCsvImport } from "@/src/importers/importPipeline";
 import { createEmptyBackup } from "@/src/schema/backup";
 
 const balanceCsv = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category
@@ -146,6 +146,29 @@ cash-main,2026-06-23,Manual,cash,Cash,250,INR,Cash`;
 
     expect(result.errors).toEqual([{ row: 2, message: "Invalid date: 30-02-2026" }]);
     expect(result.backup.transactions).toEqual([]);
+  });
+
+  it("previews manual CSV impact before committing without mutating the backup", () => {
+    const backup = createEmptyBackup("INR");
+    const first = commitManualCsvImport(backup, balanceCsv, { importId: "existing", fileName: "manual.csv", now: "2026-06-22T00:00:00.000Z" }).backup;
+    const csv = [
+      "balance_id,as_of_date,institution,asset_type,name,current_value,currency,category",
+      "cash-main,2026-06-23,Manual,cash,Cash,250,INR,Cash",
+      "new-cash,2026-06-23,Manual,cash,New Cash,50,INR,Cash"
+    ].join("\n");
+
+    const preview = previewManualCsvImport(first, csv, { importId: "preview", fileName: "manual.csv", label: "Manual preview", now: "2026-06-23T00:00:00.000Z" });
+
+    expect(first.manualBalances).toHaveLength(1);
+    expect(first.manualBalances[0].value).toBe(100);
+    expect(preview.errors).toEqual([]);
+    expect(preview.incoming).toMatchObject({ balances: 2, transactions: 0, prices: 0 });
+    expect(preview.effective).toMatchObject({ addedBalances: 1, updatedBalances: 1, addedTransactions: 0, addedPrices: 0, skippedDuplicates: 1 });
+    expect(preview.before).toMatchObject({ holdings: 1, transactions: 0, netWorth: 100 });
+    expect(preview.after).toMatchObject({ holdings: 2, transactions: 0, netWorth: 300 });
+    expect(preview.deltas).toMatchObject({ holdings: 1, transactions: 0, netWorth: 200 });
+    expect(preview.rows.some((row) => row.label === "Cash" && row.action === "update")).toBe(true);
+    expect(preview.rows.some((row) => row.label === "New Cash" && row.action === "add")).toBe(true);
   });
 
 });

@@ -48,6 +48,26 @@ describe("Indian resident portfolio tax report", () => {
     expect(report.unrealized.totalGain).toBe(34000);
     expect(report.income.foreignDividend).toBe(860);
     expect(report.income.foreignTaxPaid).toBe(215);
+    const trace = report.realized.rows[0].trace;
+    expect(trace).toBeDefined();
+    expect(trace).toMatchObject({
+      accountId: "acct_us",
+      instrumentId: "inst_arm",
+      saleTransactionId: "sell1",
+      fifoLotBuyDate: "2024-01-10",
+      sellDate: "2026-01-10",
+      quantityUsed: 8,
+      originalSaleQuantity: 8,
+      bucket: "foreign_equity_ltcg",
+      taxRate: 12.5
+    });
+    if (!trace) throw new Error("Expected tax trace");
+    expect(trace.bucketReason.toLowerCase()).toContain("foreign");
+    expect(trace.proceedsFormula).toContain("1200 USD");
+    expect(trace.proceedsFormula).toContain("FX 86");
+    expect(trace.costFormula).toContain("FIFO 8/10");
+    expect(trace.costFormula).toContain("FX 82");
+    expect(trace.taxFormula).toBe("₹37,600.00 x 12.5% = ₹4,700.00 before bucket set-off/exemption");
   });
 
   it("classifies Indian equity gains by holding period and applies FY tax settings", () => {

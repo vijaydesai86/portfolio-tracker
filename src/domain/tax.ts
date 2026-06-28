@@ -20,6 +20,23 @@ export type TaxBucketId =
   | "exempt"
   | "other_slab";
 
+export type TaxTrace = {
+  accountId: string;
+  instrumentId: string;
+  saleTransactionId: string;
+  fifoLotBuyDate: string;
+  sellDate: string;
+  quantityUsed: number;
+  originalSaleQuantity: number;
+  proceedsFormula: string;
+  costFormula: string;
+  gainFormula: string;
+  bucket: TaxBucketId;
+  bucketReason: string;
+  taxRate: number;
+  taxFormula: string;
+};
+
 export type TaxGainRow = {
   transactionId: string;
   assetName: string;
@@ -33,6 +50,7 @@ export type TaxGainRow = {
   holdingDays: number;
   bucket: TaxBucketId;
   taxRate: number;
+  trace?: TaxTrace;
 };
 
 export type TaxBucketSummary = {
@@ -130,6 +148,12 @@ export type PortfolioTaxReport = {
 
 type Lot = {
   instrumentId: string;
+  originalQuantity: number;
+  originalCostBase: number;
+  originalCurrency: string;
+  originalAmount: number;
+  originalFees: number;
+  originalFxRate?: number;
   accountId: string;
   assetName: string;
   accountType: Account["type"];
@@ -234,6 +258,12 @@ export function calculatePortfolioTaxReport(backup: PortfolioBackup, options?: {
         country: instrument.country,
         buyDate: tx.date,
         quantity: tx.quantity,
+        originalQuantity: tx.quantity,
+        originalCostBase: convertedAmount(Math.abs(tx.amount) + Math.abs(tx.fees ?? 0), tx.currency, backup, tx.date, notes),
+        originalCurrency: tx.currency,
+        originalAmount: Math.abs(tx.amount),
+        originalFees: Math.abs(tx.fees ?? 0),
+        originalFxRate: tx.currency === backup.baseCurrency ? undefined : findFxRateForTax(tx.currency, backup.baseCurrency, backup, tx.date)?.price,
         costBase: convertedAmount(Math.abs(tx.amount) + Math.abs(tx.fees ?? 0), tx.currency, backup, tx.date, notes)
       });
       continue;
@@ -306,6 +336,7 @@ function consumeLots(lots: Lot[], tx: Transaction, backup: PortfolioBackup, note
     remaining = roundQuantity(remaining - used);
     if (emit) {
       const bucket = classifyBucket(account, instrument, tx.currency, holdingDays);
+      const taxRate = taxRateForBucket(bucket, getTaxProfile(backup));
       rows.push({
         transactionId: tx.id,
         assetName: instrument.name,
@@ -318,11 +349,61 @@ function consumeLots(lots: Lot[], tx: Transaction, backup: PortfolioBackup, note
         gain: roundMoney(gain),
         holdingDays,
         bucket,
-        taxRate: taxRateForBucket(bucket, getTaxProfile(backup))
+        taxRate,
+        trace: buildTaxTrace({ tx, lot, used, proceeds, cost, gain, bucket, taxRate, backup, account, instrument })
       });
     }
   }
   return rows;
+}
+
+function buildTaxTrace(input: { tx: Transaction; lot: Lot; used: number; proceeds: number; cost: number; gain: number; bucket: TaxBucketId; taxRate: number; backup: PortfolioBackup; account: Account; instrument: Instrument }): TaxTrace {
+  const originalSaleQuantity = Math.abs(input.tx.quantity ?? input.used);
+  const saleAmount = Math.abs(input.tx.amount);
+  const saleFees = Math.abs(input.tx.fees ?? 0);
+  const saleFx = input.tx.currency === input.backup.baseCurrency ? undefined : findFxRateForTax(input.tx.currency, input.backup.baseCurrency, input.backup, input.tx.date)?.price;
+  const saleNet = saleAmount - saleFees;
+  const lotRatio = input.used / input.lot.originalQuantity;
+  const sellRatio = input.used / originalSaleQuantity;
+  const buyGross = input.lot.originalAmount + input.lot.originalFees;
+  return {
+    accountId: input.tx.accountId,
+    instrumentId: input.tx.instrumentId,
+    saleTransactionId: input.tx.id,
+    fifoLotBuyDate: input.lot.buyDate,
+    sellDate: input.tx.date,
+    quantityUsed: roundQuantity(input.used),
+    originalSaleQuantity: roundQuantity(originalSaleQuantity),
+    proceedsFormula: formulaText([formatNumber(saleNet), input.tx.currency, sellRatio !== 1 ? "x sale ratio " + formatNumber(sellRatio) : "", saleFx ? "x FX " + formatNumber(saleFx) : "base currency"]) + " = " + formatInr(input.proceeds),
+    costFormula: formulaText(["FIFO " + formatNumber(input.used) + "/" + formatNumber(input.lot.originalQuantity), "x " + formatNumber(buyGross) + " " + input.lot.originalCurrency, input.lot.originalFxRate ? "x FX " + formatNumber(input.lot.originalFxRate) : "base currency", "lot ratio " + formatNumber(lotRatio)]) + " = " + formatInr(input.cost),
+    gainFormula: formatInr(input.proceeds) + " - " + formatInr(input.cost) + " = " + formatInr(input.gain),
+    bucket: input.bucket,
+    bucketReason: bucketReason(input.bucket, input.account, input.instrument, input.tx.currency, daysBetween(input.lot.buyDate, input.tx.date)),
+    taxRate: input.taxRate,
+    taxFormula: formatInr(Math.max(0, input.gain)) + " x " + formatNumber(input.taxRate) + "% = " + formatInr(Math.max(0, input.gain) * (input.taxRate / 100)) + " before bucket set-off/exemption"
+  };
+}
+
+function formulaText(parts: string[]): string {
+  return parts.filter(Boolean).join(" ");
+}
+
+function formatInr(value: number): string {
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(roundMoney(value));
+}
+
+function formatNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(roundMoney(value));
+}
+
+function bucketReason(bucket: TaxBucketId, account: Account, instrument: Instrument, currency: string, holdingDays: number): string {
+  if (bucket === "exempt") return "Account type " + account.type + " is treated as exempt in this estimate.";
+  if (bucket === "indian_equity_stcg") return "Indian listed equity/equity mutual fund held " + holdingDays + " day(s), not more than 365 days.";
+  if (bucket === "indian_equity_ltcg") return "Indian listed equity/equity mutual fund held " + holdingDays + " day(s), more than 365 days.";
+  if (bucket === "foreign_equity_stcg") return "Foreign equity detected from account/instrument/currency and held " + holdingDays + " day(s), not more than 730 days.";
+  if (bucket === "foreign_equity_ltcg") return "Foreign equity detected from account/instrument/currency and held " + holdingDays + " day(s), more than 730 days.";
+  if (bucket === "debt_slab") return "Debt or slab-rate asset based on account type " + account.type + " and instrument category " + instrument.category + ".";
+  return "Other slab-rate asset based on account type " + account.type + " and currency " + currency + ".";
 }
 
 function buildUnrealizedRows(lots: Lot[], balancesByInstrument: Map<string, ManualBalance[]>, accounts: Map<string, Account>, instruments: Map<string, Instrument>, backup: PortfolioBackup, notes: string[]): UnrealizedTaxRow[] {
@@ -509,6 +590,14 @@ function convertedAmount(value: number, currency: string, backup: PortfolioBacku
     return value;
   }
   return converted;
+}
+
+function findFxRateForTax(from: string, to: string, backup: PortfolioBackup, asOfDate: string) {
+  const pair = from + to;
+  return backup.priceSnapshots
+    .filter((snapshot) => snapshot.instrumentId === pair && snapshot.currency === to && snapshot.asOfDate <= asOfDate)
+    .sort((a, b) => a.asOfDate.localeCompare(b.asOfDate) || a.createdAt.localeCompare(b.createdAt))
+    .at(-1);
 }
 
 function isInFinancialYear(date: string, financialYear: string): boolean {

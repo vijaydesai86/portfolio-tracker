@@ -12,6 +12,7 @@ import { buildPortfolioTimeline, type PortfolioTimelinePoint } from "@/src/domai
 import { buildGoal, calculateGoalProgress, calculateMappedGoalXirr, createGoalMapping, recalculateGoalTarget, summarizeGoalProgress, type GoalProgress, type GoalSummary } from "@/src/domain/goalAnalytics";
 import { buildSnapshotHistory, createPortfolioSnapshot, snapshotAnalytics, type SnapshotAnalytics, type SnapshotTimelinePoint } from "@/src/domain/snapshots";
 import { calculatePortfolioTaxReport, getTaxProfile, updateTaxProfile, type TaxProfile } from "@/src/domain/tax";
+import { formatUsdEquivalent, getDisplayCurrencySettings, updateDisplayCurrencySettings, type DisplayCurrencySettings } from "@/src/domain/displayCurrency";
 import { taperPresets } from "@/src/domain/tapering";
 import { buildReconciliationReport } from "@/src/domain/reconciliation";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
@@ -20,7 +21,7 @@ import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type Ca
 import { applyCanonicalIndMoneyImport, buildCanonicalIndMoneyImport, parseIndMoneyWorkbook, type IndMoneyCanonicalImport, type IndMoneyParseResult } from "@/src/importers/indmoneyXlsx";
 import { applyCanonicalEpfoImport, buildCanonicalEpfoImport, parseEpfoPassbookText, type EpfoCanonicalImport, type EpfoPassbookParseResult } from "@/src/importers/epfoPassbook";
 import { applyCanonicalNpsImport, buildCanonicalNpsImport, parseNpsCsv, type NpsCanonicalImport, type NpsParseResult } from "@/src/importers/npsStatement";
-import { commitManualCsvImport } from "@/src/importers/importPipeline";
+import { commitManualCsvImport, previewManualCsvImport, type ManualImportPreview } from "@/src/importers/importPipeline";
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
@@ -41,7 +42,7 @@ const assetClassCards = [
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
 type View = "dashboard" | "holdings" | "transactions" | "goals" | "tax" | "snapshots" | "add-entry" | "imports" | "data" | "settings" | "backup";
-type AnalyticsTab = "overview" | "allocation" | "assets" | "history";
+type AnalyticsTab = "overview" | "allocation" | "returns" | "risk" | "history";
 type AnalyticsScope = "portfolio" | "goals-combined" | `goal:${string}`;
 type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
 
@@ -417,6 +418,7 @@ export function TrackerApp() {
   const [backup, setBackup] = useState<PortfolioBackup>(() => createEmptyBackup("INR"));
   const [view, setView] = useState<View>("dashboard");
   const [csv, setCsv] = useState(sampleTemplate);
+  const [manualImportPreview, setManualImportPreview] = useState<ManualImportPreview | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [nativeDetection, setNativeDetection] = useState<ImportDetection | null>(null);
   const [nativeFiles, setNativeFiles] = useState<File[]>([]);
@@ -501,6 +503,8 @@ export function TrackerApp() {
   const goalSummary = useMemo(() => summarizeGoalProgress(goalProgress), [goalProgress]);
   const snapshotHistory = useMemo(() => buildSnapshotHistory(backup.snapshots), [backup.snapshots]);
   const taxProfile = useMemo(() => getTaxProfile(backup), [backup]);
+  const displayCurrencySettings = useMemo(() => getDisplayCurrencySettings(backup), [backup]);
+  const usdSecondary = (value: number | undefined) => formatUsdEquivalent(value, backup);
   const taxFinancialYears = useMemo(() => availableTaxFinancialYears(backup), [backup]);
   const taxReport = useMemo(() => calculatePortfolioTaxReport(backup, { financialYear: taxFinancialYear }), [backup, taxFinancialYear]);
   const reconciliationReport = useMemo(() => buildReconciliationReport(backup), [backup]);
@@ -649,10 +653,24 @@ export function TrackerApp() {
   const assetKindTimelineKeys = topTimelineKeys(timeline.points, "assetKind", 6);
   const issuerTimelineKeys = topTimelineKeys(timeline.points, "issuer", 5);
 
+  function previewManualCsv() {
+    try {
+      const preview = previewManualCsvImport(backup, csv, { importId: `manual_preview_${Date.now()}`, fileName: "manual-template.csv", label: importLabel.trim() || "Manual balance CSV" });
+      setManualImportPreview(preview);
+      setErrors(preview.errors.map((error) => `Row ${error.row}: ${error.message}`));
+      setStatus(`Manual CSV preview: ${preview.effective.addedBalances} new holding(s), ${preview.effective.updatedBalances} updated holding(s), ${preview.effective.addedTransactions} transaction(s), net worth delta ${formatMoney(preview.deltas.netWorth, backup.baseCurrency)}. Nothing committed yet.`);
+    } catch (error) {
+      setManualImportPreview(null);
+      setErrors([error instanceof Error ? error.message : "Unable to preview manual CSV"]);
+      setStatus("Manual CSV preview failed.");
+    }
+  }
+
   async function importCsv() {
     const importId = `manual_${Date.now()}`;
     const result = commitManualCsvImport(backup, csv, { importId, fileName: "manual-template.csv", label: importLabel.trim() || "Manual balance CSV" });
     setBackup(result.backup);
+    setManualImportPreview(null);
     setErrors(result.errors.map((error) => `Row ${error.row}: ${error.message}`));
     const message = `Manual CSV committed: ${result.addedBalances} holding(s), ${result.addedTransactions} transaction(s), ${result.addedPrices} price row(s); ${result.skippedDuplicates} duplicate(s) skipped.`;
     if (result.errors.length === 0 && shouldRefreshAfterImport(result.backup, result.addedTransactions)) {
@@ -752,7 +770,10 @@ export function TrackerApp() {
 
     try {
       const importId = "manual_" + Date.now();
-      const result = commitManualCsvImport(backup, await nativeFile.text(), { importId, fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name });
+      const text = await nativeFile.text();
+      const preview = previewManualCsvImport(backup, text, { importId: importId + "_preview", fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name });
+      setManualImportPreview(preview);
+      const result = commitManualCsvImport(backup, text, { importId, fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name });
       setBackup(result.backup);
       setErrors(result.errors.map((error) => "Row " + error.row + ": " + error.message));
       const message = "Manual CSV committed: " + result.addedBalances + " holding(s), " + result.addedTransactions + " transaction(s), " + result.addedPrices + " price row(s) added; " + result.skippedDuplicates + " duplicate(s) skipped.";
@@ -1040,6 +1061,11 @@ export function TrackerApp() {
     setStatus("Tax profile updated locally. Export JSON to preserve the tax settings.");
   }
 
+  function updateDisplayCurrencyFromForm(patch: Partial<DisplayCurrencySettings>) {
+    setBackup((current) => updateDisplayCurrencySettings(current, patch));
+    setStatus("Display currency settings updated locally. Export JSON to preserve the setting.");
+  }
+
   function resetPortfolio() {
     setBackup(createEmptyBackup("INR"));
     setErrors([]);
@@ -1304,7 +1330,7 @@ export function TrackerApp() {
             <div className="command-hero analytics-hero-v3">
               <div className="hero-ledger">
                 <span className="eyebrow">{scopedAnalytics.eyebrow}</span>
-                <h2>{formatMoney(scopedPerformance.current, backup.baseCurrency)}</h2>
+                <h2>{formatMoney(scopedPerformance.current, backup.baseCurrency)}</h2>{usdSecondary(scopedPerformance.current) && <span className="usd-secondary hero-usd">{usdSecondary(scopedPerformance.current)}</span>}
                 <p>{scopedAnalytics.description}</p>
                 <div className="hero-meta-row">
                   <span>{backup.baseCurrency} base</span>
@@ -1338,9 +1364,9 @@ export function TrackerApp() {
             {analyticsTab === "overview" && (
               <div className="analytics-tab-panel">
                 <div className="wealth-strip main-wealth-strip">
-                  <Metric label="Invested" value={formatMoney(scopedPerformance.netInvested, backup.baseCurrency)} />
-                  <Metric label="Current Value" value={formatMoney(scopedPerformance.current, backup.baseCurrency)} />
-                  <Metric label="Profit / Loss" value={scopedPerformance.profitKnown ? formatMoney(scopedPerformance.totalProfit, backup.baseCurrency) : "-"} />
+                  <Metric label="Invested" value={formatMoney(scopedPerformance.netInvested, backup.baseCurrency)} secondary={usdSecondary(scopedPerformance.netInvested)} />
+                  <Metric label="Current Value" value={formatMoney(scopedPerformance.current, backup.baseCurrency)} secondary={usdSecondary(scopedPerformance.current)} />
+                  <Metric label="Profit / Loss" value={scopedPerformance.profitKnown ? formatMoney(scopedPerformance.totalProfit, backup.baseCurrency) : "-"} secondary={scopedPerformance.profitKnown ? usdSecondary(scopedPerformance.totalProfit) : undefined} />
                 </div>
                 <CommandInsightDeck cards={commandInsights} />
                 <div className="feature-grid">
@@ -1351,10 +1377,10 @@ export function TrackerApp() {
                   </div>
                 </div>
                 <div className="sub-analytics-strip">
-                  <MiniInsight label="Cost Basis" value={formatMoney(scopedPerformance.netInvested, backup.baseCurrency)} detail={scopedAnalytics.scopeKind === "portfolio" ? "same basis used for headline P/L" : "mapped goal cost basis"} />
-                  <MiniInsight label="Required Today" value={scopedAnalytics.requiredToday === undefined ? "-" : formatMoney(scopedAnalytics.requiredToday, backup.baseCurrency)} detail={scopedAnalytics.requiredToday === undefined ? "portfolio scope" : "corpus needed today"} />
-                  <MiniInsight label="Projected" value={scopedAnalytics.projected === undefined ? "-" : formatMoney(scopedAnalytics.projected, backup.baseCurrency)} detail={scopedAnalytics.projected === undefined ? "portfolio scope" : "at goal date"} />
-                  <MiniInsight label={scopedAnalytics.scopeKind === "portfolio" ? "Fees & Taxes" : "Goal Gap"} value={scopedAnalytics.scopeKind === "portfolio" ? formatMoney(scopedPerformance.feesAndTax, backup.baseCurrency) : formatMoney(scopedAnalytics.goalGap ?? 0, backup.baseCurrency)} detail={scopedAnalytics.scopeKind === "portfolio" ? "recorded charges and tax fields" : "projected gap/surplus"} />
+                  <MiniInsight label="Cost Basis" value={formatMoney(scopedPerformance.netInvested, backup.baseCurrency)} secondary={usdSecondary(scopedPerformance.netInvested)} detail={scopedAnalytics.scopeKind === "portfolio" ? "same basis used for headline P/L" : "mapped goal cost basis"} />
+                  <MiniInsight label="Required Today" value={scopedAnalytics.requiredToday === undefined ? "-" : formatMoney(scopedAnalytics.requiredToday, backup.baseCurrency)} secondary={scopedAnalytics.requiredToday === undefined ? undefined : usdSecondary(scopedAnalytics.requiredToday)} detail={scopedAnalytics.requiredToday === undefined ? "portfolio scope" : "corpus needed today"} />
+                  <MiniInsight label="Projected" value={scopedAnalytics.projected === undefined ? "-" : formatMoney(scopedAnalytics.projected, backup.baseCurrency)} secondary={scopedAnalytics.projected === undefined ? undefined : usdSecondary(scopedAnalytics.projected)} detail={scopedAnalytics.projected === undefined ? "portfolio scope" : "at goal date"} />
+                  <MiniInsight label={scopedAnalytics.scopeKind === "portfolio" ? "Fees & Taxes" : "Goal Gap"} value={scopedAnalytics.scopeKind === "portfolio" ? formatMoney(scopedPerformance.feesAndTax, backup.baseCurrency) : formatMoney(scopedAnalytics.goalGap ?? 0, backup.baseCurrency)} secondary={scopedAnalytics.scopeKind === "portfolio" ? usdSecondary(scopedPerformance.feesAndTax) : usdSecondary(scopedAnalytics.goalGap ?? 0)} detail={scopedAnalytics.scopeKind === "portfolio" ? "recorded charges and tax fields" : "projected gap/surplus"} />
                 </div>
               </div>
             )}
@@ -1377,11 +1403,16 @@ export function TrackerApp() {
                   <ChartCard title="Top AMC / Issuer"><HorizontalBar data={chartData.issuer} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="Data Source Mix"><HorizontalBar data={chartData.provider} currency={backup.baseCurrency} /></ChartCard>
                 </div>
+                <AssetClassesPanel insights={assetClassInsights} currency={backup.baseCurrency} scopeLabel={scopedAnalytics.label} />
               </div>
             )}
 
-            {analyticsTab === "assets" && (
-              <AssetClassesPanel insights={assetClassInsights} currency={backup.baseCurrency} scopeLabel={scopedAnalytics.label} />
+            {analyticsTab === "returns" && (
+              <ReturnsPanel holdings={scopedAnalytics.holdings} holdingReturns={holdingReturns} currency={backup.baseCurrency} scopeLabel={scopedAnalytics.label} />
+            )}
+
+            {analyticsTab === "risk" && (
+              <RiskPanel scopedAnalytics={scopedAnalytics} holdingReturns={holdingReturns} currency={backup.baseCurrency} timelineCoverage={valuationCoveragePercent} staleHoldings={staleHoldings} missingFxCount={totalFxIssues} />
             )}
 
             {analyticsTab === "history" && (
@@ -1453,7 +1484,7 @@ export function TrackerApp() {
                     {filteredHoldings.map((holding) => (
                       holdingEditMode ?
                         <HoldingEditRow key={holding.id} balance={backup.manualBalances.find((balance) => balance.id === holding.id)!} updateBalance={updateBalance} /> :
-                        <HoldingRow key={holding.id} holding={holding} baseCurrency={backup.baseCurrency} returns={holdingReturns.get(holding.id)} />
+                        <HoldingRow key={holding.id} holding={holding} baseCurrency={backup.baseCurrency} returns={holdingReturns.get(holding.id)} usdSecondary={usdSecondary} />
                     ))}
                   </div>
                 </>
@@ -1484,7 +1515,7 @@ export function TrackerApp() {
           </section>
         )}
 
-        {view === "goals" && <GoalsView {...{ backup, goalProgress, goalSummary, selectedGoalId, setSelectedGoalId, mappingGoalId, setMappingGoalId, mappingBalanceId, setMappingBalanceId, mappingPercent, setMappingPercent, updateGoalRecord, deleteGoalRecord, upsertGoalMappingFromForm, deleteGoalMapping }} />}
+        {view === "goals" && <GoalsView {...{ backup, goalProgress, goalSummary, selectedGoalId, setSelectedGoalId, mappingGoalId, setMappingGoalId, mappingBalanceId, setMappingBalanceId, mappingPercent, setMappingPercent, updateGoalRecord, deleteGoalRecord, upsertGoalMappingFromForm, deleteGoalMapping, usdSecondary }} />}
 
         {view === "tax" && <TaxView report={taxReport} currency={backup.baseCurrency} financialYears={taxFinancialYears} selectedFinancialYear={taxFinancialYear} setSelectedFinancialYear={setTaxFinancialYear} />}
 
@@ -1492,11 +1523,11 @@ export function TrackerApp() {
 
         {view === "add-entry" && <AddEntryView {...{ backup, entryHoldingId, setEntryHoldingId, entryActionId, setEntryActionId, entryDate, setEntryDate, entryAmount, setEntryAmount, entryQuantity, setEntryQuantity, entryPrice, setEntryPrice, entryFees, setEntryFees, entryTaxes, setEntryTaxes, entryCurrentValue, setEntryCurrentValue, entryInvestedAmount, setEntryInvestedAmount, entryNotes, setEntryNotes, addManualEntryFromForm, goalName, setGoalName, goalType, setGoalType, goalMonthlyExpense, setGoalMonthlyExpense, goalInflation, setGoalInflation, goalTargetYear, setGoalTargetYear, goalMultiplier, setGoalMultiplier, goalEquityReturn, setGoalEquityReturn, goalDebtReturn, setGoalDebtReturn, goalGoldReturn, setGoalGoldReturn, goalCashReturn, setGoalCashReturn, goalOtherReturn, setGoalOtherReturn, addGoalFromForm, applyGoalPreset }} />}
 
-        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, importLabel, setImportLabel, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
+        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, manualImportPreview, previewManualCsv, importCsv, importLabel, setImportLabel, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
 
         {view === "data" && <DataAuditView report={reconciliationReport} currency={backup.baseCurrency} />}
 
-        {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} />}
+        {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} displaySettings={displayCurrencySettings} updateDisplaySettings={updateDisplayCurrencyFromForm} />}
 
         {view === "backup" && (
           <section className="grid two">
@@ -1631,6 +1662,7 @@ function GoalsView(props: {
   deleteGoalRecord: (goalId: string) => void;
   upsertGoalMappingFromForm: () => void;
   deleteGoalMapping: (mappingId: string) => void;
+  usdSecondary: (value: number | undefined) => string | undefined;
 }) {
   const selectedProgress = props.goalProgress.find((item) => item.goal.id === props.selectedGoalId) ?? props.goalProgress[0];
   const mappedRows = props.backup.goalMappings.flatMap((mapping) => {
@@ -1662,7 +1694,7 @@ function GoalsView(props: {
                 {props.goalProgress.map((progress) => <option value={progress.goal.id} key={progress.goal.id}>{progress.goal.name}</option>)}
               </select>
             </label>
-            <MiniInsight label="Needed today" value={formatMoney(selectedProgress.requiredCorpusToday, props.backup.baseCurrency)} detail="present corpus required" />
+            <MiniInsight label="Needed today" value={formatMoney(selectedProgress.requiredCorpusToday, props.backup.baseCurrency)} secondary={props.usdSecondary(selectedProgress.requiredCorpusToday)} detail="present corpus required" />
             <MiniInsight label="Mapped now" value={formatMoney(selectedProgress.mappedCurrentValue, props.backup.baseCurrency)} detail={selectedProgress.corpusTodayFundedPercent.toFixed(1) + "% funded today"} />
             <MiniInsight label="Projected" value={formatMoney(selectedProgress.projectedValue, props.backup.baseCurrency)} detail={selectedProgress.projectedFundedPercent.toFixed(1) + "% of future target"} />
           </div>
@@ -1670,16 +1702,18 @@ function GoalsView(props: {
         <div className="goal-workspace goal-analysis-workspace">
           <div className="goal-focus-panel">
             <span className="eyebrow">Goal snapshot</span>
-            {selectedProgress ? <GoalSnapshot progress={selectedProgress} backup={props.backup} currency={props.backup.baseCurrency} /> : <p className="message">Use Add Entry to create a goal, then map assets here to see funded status, projected corpus, and category split.</p>}
+            {selectedProgress ? <GoalSnapshot progress={selectedProgress} backup={props.backup} currency={props.backup.baseCurrency} usdSecondary={props.usdSecondary} /> : <p className="message">Use Add Entry to create a goal, then map assets here to see funded status, projected corpus, and category split.</p>}
           </div>
         </div>
       </div>
 
-      {props.goalProgress.length > 0 && <GoalCombinedPanel summary={props.goalSummary} progress={props.goalProgress} backup={props.backup} currency={props.backup.baseCurrency} />}
+      {props.goalProgress.length > 0 && <GoalCombinedPanel summary={props.goalSummary} progress={props.goalProgress} backup={props.backup} currency={props.backup.baseCurrency} usdSecondary={props.usdSecondary} />}
+
+      {props.goalProgress.length > 0 && <GoalCoverageMatrix progress={props.goalProgress} currency={props.backup.baseCurrency} usdSecondary={props.usdSecondary} />}
 
       {props.goalProgress.length > 0 && (
         <div className="goal-summary-grid">
-          {props.goalProgress.map((progress) => <GoalCard key={progress.goal.id} progress={progress} currency={props.backup.baseCurrency} selected={selectedProgress?.goal.id === progress.goal.id} setSelectedGoalId={props.setSelectedGoalId} updateGoalRecord={props.updateGoalRecord} deleteGoalRecord={props.deleteGoalRecord} />)}
+          {props.goalProgress.map((progress) => <GoalCard key={progress.goal.id} progress={progress} currency={props.backup.baseCurrency} usdSecondary={props.usdSecondary} selected={selectedProgress?.goal.id === progress.goal.id} setSelectedGoalId={props.setSelectedGoalId} updateGoalRecord={props.updateGoalRecord} deleteGoalRecord={props.deleteGoalRecord} />)}
         </div>
       )}
 
@@ -1703,7 +1737,7 @@ function GoalsView(props: {
                 <div className="goal-mapping-row" key={mapping.id}>
                   <div className="goal-mapping-asset"><strong>{goal.name}</strong><span>{displayHoldingName(balance.label)} · {balance.category}</span></div>
                   <em>{mapping.percent.toFixed(1)}%</em>
-                  <div className="goal-mapping-values"><strong>{formatMoney(mappedHolding?.value ?? 0, props.backup.baseCurrency)}</strong><span>{formatMoney(mappedHolding?.projectedValue ?? 0, props.backup.baseCurrency)} projected</span></div>
+                  <div className="goal-mapping-values"><strong>{formatMoney(mappedHolding?.value ?? 0, props.backup.baseCurrency)}</strong>{props.usdSecondary(mappedHolding?.value) && <small className="usd-secondary">{props.usdSecondary(mappedHolding?.value)}</small>}<span>{formatMoney(mappedHolding?.projectedValue ?? 0, props.backup.baseCurrency)} projected</span></div>
                   <button className="danger-button" onClick={() => props.deleteGoalMapping(mapping.id)}>Delete</button>
                 </div>
               ))}
@@ -1716,7 +1750,16 @@ function GoalsView(props: {
 }
 
 
-function GoalCombinedPanel({ summary, progress, backup, currency }: { summary: GoalSummary; progress: GoalProgress[]; backup: PortfolioBackup; currency: string }) {
+function GoalCoverageMatrix({ progress, currency, usdSecondary }: { progress: GoalProgress[]; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+  return (
+    <div className="card wide-card goal-coverage-card">
+      <div className="section-head"><div><h2>Goal Coverage Matrix</h2><p>Goal-by-goal readiness across required corpus, mapped corpus, projection, and asset-class funding.</p></div></div>
+      <div className="table-wrap"><table><thead><tr><th>Goal</th><th>Needed today</th><th>Mapped now</th><th>Readiness</th><th>Projected</th><th>Equity</th><th>Debt</th><th>Cash</th></tr></thead><tbody>{progress.map((row) => <tr key={row.goal.id}><td>{row.goal.name}</td><td>{formatMoney(row.requiredCorpusToday, currency)}{usdSecondary(row.requiredCorpusToday) && <small className="usd-secondary table-usd">{usdSecondary(row.requiredCorpusToday)}</small>}</td><td>{formatMoney(row.mappedCurrentValue, currency)}{usdSecondary(row.mappedCurrentValue) && <small className="usd-secondary table-usd">{usdSecondary(row.mappedCurrentValue)}</small>}</td><td>{row.corpusTodayFundedPercent.toFixed(1)}%</td><td>{formatMoney(row.projectedValue, currency)}{usdSecondary(row.projectedValue) && <small className="usd-secondary table-usd">{usdSecondary(row.projectedValue)}</small>}</td><td>{formatMoney(row.categoryValues.Equity, currency)}</td><td>{formatMoney(row.categoryValues.Debt, currency)}</td><td>{formatMoney(row.categoryValues.Cash, currency)}</td></tr>)}</tbody></table></div>
+    </div>
+  );
+}
+
+function GoalCombinedPanel({ summary, progress, backup, currency, usdSecondary }: { summary: GoalSummary; progress: GoalProgress[]; backup: PortfolioBackup; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
   const mappedXirr = calculateMappedGoalXirr(backup, progress);
   return (
     <div className="goal-combined-panel">
@@ -1726,7 +1769,7 @@ function GoalCombinedPanel({ summary, progress, backup, currency }: { summary: G
         <p>{summary.goalCount} goal(s). Required today is the amount needed now, under each goal's mapped asset mix, to reach all target corpuses without further investment.</p>
       </div>
       <div className="goal-combined-metrics">
-        <MiniInsight label="Needed today" value={formatMoney(summary.requiredCorpusToday, currency)} detail="present value of all targets" />
+        <MiniInsight label="Needed today" value={formatMoney(summary.requiredCorpusToday, currency)} secondary={usdSecondary(summary.requiredCorpusToday)} detail="present value of all targets" />
         <MiniInsight label="Mapped now" value={formatMoney(summary.mappedCurrentValue, currency)} detail={summary.corpusTodayFundedPercent.toFixed(1) + "% of needed today"} />
         <MiniInsight label="Projected" value={formatMoney(summary.projectedValue, currency)} detail={summary.projectedFundedPercent.toFixed(1) + "% of future target"} />
         <MiniInsight label="Today gap" value={formatMoney(summary.corpusTodayGap, currency)} detail={summary.corpusTodayGap <= 0 ? "ahead of required corpus" : "additional corpus needed now"} />
@@ -1738,24 +1781,24 @@ function GoalCombinedPanel({ summary, progress, backup, currency }: { summary: G
   );
 }
 
-function GoalSnapshot({ progress, backup, currency }: { progress: GoalProgress; backup: PortfolioBackup; currency: string }) {
+function GoalSnapshot({ progress, backup, currency, usdSecondary }: { progress: GoalProgress; backup: PortfolioBackup; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
   const mappedXirr = calculateMappedGoalXirr(backup, [progress]);
   const todayWidth = Math.min(100, Math.max(0, progress.corpusTodayFundedPercent));
   const projectedWidth = Math.min(100, Math.max(0, progress.projectedFundedPercent));
   return (
     <div className="goal-snapshot">
       <h3>{progress.goal.name}</h3>
-      <div className="goal-snapshot-value"><GoalTermLabel help={goalTermHelp.targetCorpus}>Target corpus</GoalTermLabel><strong>{formatMoney(progress.targetCorpus, currency)}</strong></div>
-      <div className="goal-progress-line"><GoalTermLabel help={goalTermHelp.neededToday}>Corpus needed today</GoalTermLabel><strong>{formatMoney(progress.requiredCorpusToday, currency)}</strong></div>
-      <div className="goal-progress-line"><GoalTermLabel help={goalTermHelp.mappedNow}>Mapped now</GoalTermLabel><strong>{formatMoney(progress.mappedCurrentValue, currency)}</strong></div>
+      <div className="goal-snapshot-value"><GoalTermLabel help={goalTermHelp.targetCorpus}>Target corpus</GoalTermLabel><strong>{formatMoney(progress.targetCorpus, currency)}</strong>{usdSecondary(progress.targetCorpus) && <em className="usd-secondary">{usdSecondary(progress.targetCorpus)}</em>}</div>
+      <div className="goal-progress-line"><GoalTermLabel help={goalTermHelp.neededToday}>Corpus needed today</GoalTermLabel><strong>{formatMoney(progress.requiredCorpusToday, currency)}</strong>{usdSecondary(progress.requiredCorpusToday) && <em className="usd-secondary">{usdSecondary(progress.requiredCorpusToday)}</em>}</div>
+      <div className="goal-progress-line"><GoalTermLabel help={goalTermHelp.mappedNow}>Mapped now</GoalTermLabel><strong>{formatMoney(progress.mappedCurrentValue, currency)}</strong>{usdSecondary(progress.mappedCurrentValue) && <em className="usd-secondary">{usdSecondary(progress.mappedCurrentValue)}</em>}</div>
       <div className="goal-progress-rail"><div style={{ width: todayWidth + "%" }} /></div>
-      <div className="goal-progress-line"><GoalTermLabel help={goalTermHelp.projectedAtGoal}>Projected at goal</GoalTermLabel><strong>{formatMoney(progress.projectedValue, currency)}</strong></div>
+      <div className="goal-progress-line"><GoalTermLabel help={goalTermHelp.projectedAtGoal}>Projected at goal</GoalTermLabel><strong>{formatMoney(progress.projectedValue, currency)}</strong>{usdSecondary(progress.projectedValue) && <em className="usd-secondary">{usdSecondary(progress.projectedValue)}</em>}</div>
       <div className="goal-progress-rail projected"><div style={{ width: projectedWidth + "%" }} /></div>
       <div className="goal-mini-grid">
         <MiniInsight label="Today readiness" value={progress.corpusTodayFundedPercent.toFixed(1) + "%"} detail={progress.corpusTodayGap <= 0 ? "no extra corpus needed now" : "versus needed today"} />
         <MiniInsight label="Projected" value={progress.projectedFundedPercent.toFixed(1) + "%"} detail="category return assumptions" />
-        <MiniInsight label="First month" value={formatMoney(progress.startingMonthlyExpense, currency)} detail="inflated monthly expense" />
-        <MiniInsight label="Today gap" value={formatMoney(progress.corpusTodayGap, currency)} detail="needed today minus mapped now" />
+        <MiniInsight label="First month" value={formatMoney(progress.startingMonthlyExpense, currency)} secondary={usdSecondary(progress.startingMonthlyExpense)} detail="inflated monthly expense" />
+        <MiniInsight label="Today gap" value={formatMoney(progress.corpusTodayGap, currency)} secondary={usdSecondary(progress.corpusTodayGap)} detail="needed today minus mapped now" />
         <MiniInsight label="Mapped P/L" value={formatMoney(progress.mappedProfit, currency)} detail={progress.mappedReturnPercent === undefined ? "cost basis unavailable" : progress.mappedReturnPercent.toFixed(1) + "% simple"} />
         <MiniInsight label="XIRR" value={mappedXirr.xirr === null ? "-" : mappedXirr.xirr.toFixed(2) + "%"} detail={mappedXirr.basis === "portfolio" ? "portfolio-equivalent basis" : String(mappedXirr.cashFlowHoldings) + "/" + String(mappedXirr.mappedHoldings) + " mapped cash-flow holdings"} />
       </div>
@@ -1763,7 +1806,7 @@ function GoalSnapshot({ progress, backup, currency }: { progress: GoalProgress; 
   );
 }
 
-function GoalCard({ progress, currency, selected, setSelectedGoalId, updateGoalRecord, deleteGoalRecord }: { progress: GoalProgress; currency: string; selected: boolean; setSelectedGoalId: (value: string) => void; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void; deleteGoalRecord: (goalId: string) => void }) {
+function GoalCard({ progress, currency, usdSecondary, selected, setSelectedGoalId, updateGoalRecord, deleteGoalRecord }: { progress: GoalProgress; currency: string; usdSecondary: (value: number | undefined) => string | undefined; selected: boolean; setSelectedGoalId: (value: string) => void; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void; deleteGoalRecord: (goalId: string) => void }) {
   const goal = progress.goal;
   const targetYear = goal.targetDate.slice(0, 4);
   return (
@@ -1773,12 +1816,12 @@ function GoalCard({ progress, currency, selected, setSelectedGoalId, updateGoalR
         <button className="danger-button" onClick={(event) => { event.stopPropagation(); deleteGoalRecord(goal.id); }}>Delete</button>
       </div>
       <div className="goal-card-metrics">
-        <MiniInsight label="Target" value={formatMoney(progress.targetCorpus, currency)} detail="future corpus" />
-        <MiniInsight label="Needed today" value={formatMoney(progress.requiredCorpusToday, currency)} detail="present corpus required" />
-        <MiniInsight label="Mapped now" value={formatMoney(progress.mappedCurrentValue, currency)} detail={progress.corpusTodayFundedPercent.toFixed(1) + "% of today need"} />
-        <MiniInsight label="Projected" value={formatMoney(progress.projectedValue, currency)} detail={progress.projectedFundedPercent.toFixed(1) + "% of target"} />
-        <MiniInsight label="Invested" value={formatMoney(progress.mappedInvested, currency)} detail="mapped cost basis" />
-        <MiniInsight label="P/L" value={formatMoney(progress.mappedProfit, currency)} detail={progress.mappedReturnPercent === undefined ? "cost basis unavailable" : progress.mappedReturnPercent.toFixed(1) + "% simple"} />
+        <MiniInsight label="Target" value={formatMoney(progress.targetCorpus, currency)} secondary={usdSecondary(progress.targetCorpus)} detail="future corpus" />
+        <MiniInsight label="Needed today" value={formatMoney(progress.requiredCorpusToday, currency)} secondary={usdSecondary(progress.requiredCorpusToday)} detail="present corpus required" />
+        <MiniInsight label="Mapped now" value={formatMoney(progress.mappedCurrentValue, currency)} secondary={usdSecondary(progress.mappedCurrentValue)} detail={progress.corpusTodayFundedPercent.toFixed(1) + "% of today need"} />
+        <MiniInsight label="Projected" value={formatMoney(progress.projectedValue, currency)} secondary={usdSecondary(progress.projectedValue)} detail={progress.projectedFundedPercent.toFixed(1) + "% of target"} />
+        <MiniInsight label="Invested" value={formatMoney(progress.mappedInvested, currency)} secondary={usdSecondary(progress.mappedInvested)} detail="mapped cost basis" />
+        <MiniInsight label="P/L" value={formatMoney(progress.mappedProfit, currency)} secondary={usdSecondary(progress.mappedProfit)} detail={progress.mappedReturnPercent === undefined ? "cost basis unavailable" : progress.mappedReturnPercent.toFixed(1) + "% simple"} />
       </div>
       <div className="goal-edit-grid" onClick={(event) => event.stopPropagation()}>
         <label><span>Monthly expense</span><input type="number" value={goal.currentMonthlyExpense} onChange={(event) => updateGoalRecord(goal.id, { currentMonthlyExpense: Number(event.target.value) })} /></label>
@@ -1943,6 +1986,8 @@ function ImportsView(props: {
   backup: PortfolioBackup;
   csv: string;
   setCsv: (value: string) => void;
+  manualImportPreview: ManualImportPreview | null;
+  previewManualCsv: () => void;
   importCsv: () => void;
   importLabel: string;
   setImportLabel: (value: string) => void;
@@ -2015,7 +2060,7 @@ function ImportsView(props: {
       </div>
       <div className="grid two">
         <div className="card"><h2>USD/INR FX Rates</h2><div className="native-actions"><input type="number" step="0.0001" placeholder="USD/INR rate" value={props.fxRate} onChange={(event) => props.setFxRate(event.target.value)} /><input type="date" value={props.fxDate} onChange={(event) => props.setFxDate(event.target.value)} /><button className="primary" onClick={props.applyManualFxRate}>Add Rate</button></div><p className="message">Use a real USD/INR rate. Current holdings use the latest rate; transaction analytics use rates on or before each transaction date.</p><input type="file" accept=".csv,text/csv" onChange={(event) => props.importFxCsvFile(event.target.files?.[0])} /><textarea value={props.fxCsv} onChange={(event) => props.setFxCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importFxCsvText}>Import FX CSV</button></div></div>
-        <div className="card"><h2>Manual Balance CSV</h2><p className="message">Use the committed templates for normal uploads. This text box is the same balance CSV parser for quick cash, ESPP contribution, PPF, SSY, FD, EPF, NPS, gold, and other balance entries.</p><textarea value={props.csv} onChange={(event) => props.setCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importCsv}>Stage and Commit</button></div></div>
+        <div className="card"><h2>Manual CSV Preview and Commit</h2><p className="message">Use the committed templates for normal uploads. Preview shows the before/after impact without mutating the portfolio; commit then writes the same canonical records.</p><textarea value={props.csv} onChange={(event) => props.setCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button onClick={props.previewManualCsv}>Preview Manual CSV</button><button className="primary" onClick={props.importCsv}>Stage and Commit</button></div><ImportPreviewPanel preview={props.manualImportPreview} currency={props.backup.baseCurrency} /></div>
         <div className="card"><h2>Import History</h2>{props.backup.imports.length === 0 ? <p className="message">No imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Name</th><th>Provider</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>{props.backup.imports.map((run) => <tr key={run.id}><td>{run.label ?? run.fileName ?? run.id}</td><td>{run.provider}</td><td>{run.status}</td><td>{new Date(run.createdAt).toLocaleString()}</td><td><button className="danger-button" onClick={() => props.deleteImport(run.id)}>Delete</button></td></tr>)}</tbody></table></div>}</div>
       </div>
     </section>
@@ -2077,6 +2122,8 @@ function TaxView({ report, currency, financialYears, selectedFinancialYear, setS
       <div className="card wide-card"><h2>Unrealized Tax If Sold Today</h2><p className="chart-note compact-note">Grouped by holding and STCG/LTCG bucket. A holding can appear once with LTCG gain and again with STCG loss because different purchase lots have different holding periods and costs. This is planning data only; it is not included in estimated tax payable until sold.</p>{detailRows.length === 0 ? <p className="message">No open tax lots with current valuation yet.</p> : <div className="table-wrap"><table><thead><tr><th>Asset</th><th>Bucket</th><th>Lots</th><th>Qty</th><th>Current value</th><th>Cost</th><th>Gain/loss</th><th>Rate</th><th>Net rough tax</th></tr></thead><tbody>{detailRows.map((row) => <tr key={row.assetName + row.bucket}><td>{displayHoldingName(row.assetName)}</td><td>{taxBucketLabel(row.bucket)}</td><td>{row.lots ?? 1}</td><td>{formatNumber(row.quantity)}</td><td>{formatMoney(row.currentValue, currency)}</td><td>{formatMoney(row.cost, currency)}</td><td>{formatMoney(row.gain, currency)}</td><td>{row.taxRate.toFixed(1)}%</td><td>{formatMoney(row.potentialTaxBeforeSetoff, currency)}</td></tr>)}</tbody></table></div>}</div>
 
       <div className="card wide-card"><h2>Realized Lot Audit</h2><p className="chart-note compact-note">Raw taxable disposal lots used to build the holding and bucket summaries above. Zero-value broker migration rows are filtered out before this table.</p>{realizedRows.length === 0 ? <p className="message">No realized gain/loss lots for this financial year yet.</p> : <div className="table-wrap"><table><thead><tr><th>Date</th><th>Asset</th><th>Bucket</th><th>Qty</th><th>Proceeds</th><th>Cost</th><th>Gain</th></tr></thead><tbody>{realizedRows.map((row) => <tr key={row.transactionId + row.assetName + row.quantity}><td>{row.date}</td><td>{displayHoldingName(row.assetName)}</td><td>{taxBucketLabel(row.bucket)}</td><td>{formatNumber(row.quantity)}</td><td>{formatMoney(row.proceeds, currency)}</td><td>{formatMoney(row.cost, currency)}</td><td>{formatMoney(row.gain, currency)}</td></tr>)}</tbody></table></div>}</div>
+
+      <TaxRuleTrace rows={report.realized.rows.filter(hasTaxTrace).slice(0, 80)} currency={currency} />
       <div className="card wide-card"><h2>Tax Assumptions</h2><div className="detection"><div><span>Taxpayer</span><strong>Resident Indian individual</strong></div><div><span>Regime</span><strong>{report.profile.regime}</strong></div><div><span>Slab</span><strong>{report.profile.slabRate}%</strong></div><div><span>Surcharge</span><strong>{report.profile.surchargeRate}%</strong></div><div><span>Cess</span><strong>{report.profile.cessRate}%</strong></div></div><div className="error-list">{report.notes.map((note) => <div key={note}>{note}</div>)}</div></div>
     </section>
   );
@@ -2092,12 +2139,15 @@ function DataAuditView({ report, currency }: { report: ReturnType<typeof buildRe
           <MiniInsight label="Holdings" value={String(report.summary.holdings)} detail="canonical balance records" />
           <MiniInsight label="Transactions" value={String(report.summary.transactions)} detail="canonical ledger rows" />
           <MiniInsight label="Market gaps" value={String(report.summary.marketDataGaps)} detail="FX/price/NAV review items" />
+          <MiniInsight label="Data quality" value={String(report.dataQuality.score) + "%"} detail={report.dataQuality.blockers + " blocker(s), " + report.dataQuality.warnings + " warning(s)"} />
         </div>
       </div>
       <div className="analytics-grid">
         <ChartCard title="Source Value Mix"><HorizontalBar data={report.sourceTotals.map((row) => ({ name: row.source, value: row.value }))} currency={currency} /></ChartCard>
+        <div className="card"><h2>Data Quality Matrix</h2><p className="chart-note compact-note">Trust score for the data layer only. Analytics stays in the dashboard; this matrix explains whether inputs, market data, cost basis, XIRR, and freshness are ready.</p><div className="quality-row-list">{report.dataQuality.rows.map((row) => <div className={"quality-row status-" + row.status} key={row.area}><div><span>{row.area}</span><strong>{row.status.toUpperCase()}</strong></div><em>{row.score}%</em><small>{row.detail}</small></div>)}</div></div>
         <div className="card"><h2>Validation Checks</h2><div className="signal-list">{report.validationRows.map((row) => <div className={"signal-item " + (row.status === "ok" ? "good" : "warn")} key={row.label}><ShieldCheck size={18} /><div><span>{row.label}</span><strong>{row.status.toUpperCase()}</strong><small>{row.detail}</small></div></div>)}</div></div>
         <div className="card"><h2>Market Data Gaps</h2>{report.marketDataGaps.length === 0 ? <p className="message">No current FX/price/NAV gaps detected.</p> : <div className="table-wrap"><table><thead><tr><th>Kind</th><th>Label</th><th>Date</th><th>Severity</th></tr></thead><tbody>{report.marketDataGaps.slice(0, 40).map((gap) => <tr key={gap.kind + gap.label + gap.date}><td>{gap.kind}</td><td>{gap.label}</td><td>{gap.date ?? "-"}</td><td>{gap.severity}</td></tr>)}</tbody></table></div>}</div>
+        <div className="card"><h2>Market Data Health</h2><p className="chart-note compact-note">Current valuation coverage by holding and FX pair. Covered rows show the stored source/date; missing critical rows block trustworthy INR totals.</p>{report.marketDataHealth.length === 0 ? <p className="message">No holdings need market data yet.</p> : <div className="table-wrap"><table><thead><tr><th>Status</th><th>Kind</th><th>Label</th><th>As of</th><th>Source</th><th>Detail</th></tr></thead><tbody>{report.marketDataHealth.slice(0, 80).map((row) => <tr key={row.kind + row.label + row.status + row.asOfDate}><td><span className={"status-pill " + (row.status === "covered" ? "implemented" : row.severity === "critical" ? "planned" : "partial")}>{row.status}</span></td><td>{row.kind}</td><td>{row.label}</td><td>{row.asOfDate ?? "-"}</td><td>{row.source ?? "-"}</td><td>{row.detail}</td></tr>)}</tbody></table></div>}</div>
         <div className="card"><h2>Import Quality</h2>{report.imports.length === 0 ? <p className="message">No committed imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Import</th><th>Provider</th><th>Records</th><th>Confidence</th></tr></thead><tbody>{report.imports.map((run) => <tr key={run.id}><td>{run.label}</td><td>{run.provider}</td><td>{run.records}</td><td>{run.confidence}</td></tr>)}</tbody></table></div>}</div>
       </div>
       <div className="card wide-card"><h2>Source Ledger Totals</h2>{report.sourceTotals.length === 0 ? <p className="message">No source records yet.</p> : <div className="table-wrap"><table><thead><tr><th>Source</th><th>Holdings</th><th>Transactions</th><th>Current Value</th></tr></thead><tbody>{report.sourceTotals.map((row) => <tr key={row.source}><td>{row.source}</td><td>{row.holdings}</td><td>{row.transactions}</td><td>{formatMoney(row.value, currency)}</td></tr>)}</tbody></table></div>}</div>
@@ -2105,7 +2155,7 @@ function DataAuditView({ report, currency }: { report: ReturnType<typeof buildRe
   );
 }
 
-function SettingsView({ profile, updateTaxProfile }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void }) {
+function SettingsView({ profile, updateTaxProfile, displaySettings, updateDisplaySettings }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void; displaySettings: DisplayCurrencySettings; updateDisplaySettings: (patch: Partial<DisplayCurrencySettings>) => void }) {
   return (
     <section className="grid settings-workspace">
       <div className="card wide-card">
@@ -2118,14 +2168,147 @@ function SettingsView({ profile, updateTaxProfile }: { profile: TaxProfile; upda
           <label><span>Cess</span><input type="number" step="0.1" value={profile.cessRate} onChange={(event) => updateTaxProfile({ cessRate: Number(event.target.value) })} /></label>
           <label><span>Tax mode</span><select value={profile.mode} disabled><option value="estimate">Portfolio tax estimate</option></select></label>
         </div>
+        <div className="settings-panel">
+          <label className="toggle-row"><input type="checkbox" checked={displaySettings.showUsdEquivalent} onChange={(event) => updateDisplaySettings({ showUsdEquivalent: event.target.checked })} /><span><strong>Show USD equivalents</strong><small>Display-only secondary USD values under INR portfolio, holding, and goal amounts when a real USD/INR snapshot exists.</small></span></label>
+        </div>
         <p className="message">The Tax section intentionally estimates portfolio tax only. Salary, deductions, Form 16, full ITR schedules, and ESPP payroll/perquisite treatment stay outside this tracker unless explicitly added later.</p>
       </div>
     </section>
   );
 }
 
+function ImportPreviewPanel({ preview, currency }: { preview: ManualImportPreview | null; currency: string }) {
+  if (!preview) return <p className="message">Preview before committing to see new rows, updates, duplicates, and net-worth impact.</p>;
+  const hasErrors = preview.errors.length > 0;
+  return (
+    <div className="import-preview-panel">
+      <h3>Import Preview</h3>
+      <div className="holding-command-strip">
+        <MiniInsight label="Incoming rows" value={String(preview.incoming.balances + preview.incoming.transactions + preview.incoming.prices)} detail={preview.incoming.balances + " balances · " + preview.incoming.transactions + " transactions · " + preview.incoming.prices + " prices"} />
+        <MiniInsight label="Net worth delta" value={formatMoney(preview.deltas.netWorth, currency)} detail="after minus before, not committed" />
+        <MiniInsight label="Holdings delta" value={String(preview.deltas.holdings)} detail={preview.after.holdings + " after preview"} />
+        <MiniInsight label="Duplicates" value={String(preview.effective.skippedDuplicates)} detail="rows skipped on commit" />
+      </div>
+      {hasErrors && <div className="error-list">{preview.errors.map((error) => <div key={error.row + error.message}>Row {error.row}: {error.message}</div>)}</div>}
+      <div className="table-wrap"><table><thead><tr><th>Action</th><th>Kind</th><th>Record</th><th>Detail</th></tr></thead><tbody>{preview.rows.slice(0, 60).map((row, index) => <tr key={row.kind + row.label + row.action + index}><td>{row.action}</td><td>{row.kind}</td><td>{row.label}</td><td>{row.detail}</td></tr>)}</tbody></table></div>
+    </div>
+  );
+}
+
+type TaxGainRowWithTrace = ReturnType<typeof calculatePortfolioTaxReport>["realized"]["rows"][number] & { trace: NonNullable<ReturnType<typeof calculatePortfolioTaxReport>["realized"]["rows"][number]["trace"]> };
+
+function hasTaxTrace(row: ReturnType<typeof calculatePortfolioTaxReport>["realized"]["rows"][number]): row is TaxGainRowWithTrace {
+  return Boolean(row.trace);
+}
+
+function TaxRuleTrace({ rows, currency }: { rows: TaxGainRowWithTrace[]; currency: string }) {
+  if (rows.length === 0) return <div className="card wide-card"><h2>Tax Rule Trace</h2><p className="message">No realized rows with tax trace for this financial year yet.</p></div>;
+  return (
+    <div className="card wide-card"><h2>Tax Rule Trace</h2><p className="chart-note compact-note">Audit trail for each taxable sale lot: FIFO buy lot, sale row, FX conversion, bucket reason, gain, and tax formula before bucket-level set-off.</p><div className="table-wrap"><table><thead><tr><th>Sale date</th><th>Asset</th><th>FIFO lot</th><th>Qty</th><th>Bucket reason</th><th>Proceeds formula</th><th>Cost formula</th><th>Gain</th><th>Tax formula</th></tr></thead><tbody>{rows.map((row) => <tr key={row.transactionId + row.assetName + row.trace.fifoLotBuyDate + row.quantity}><td>{row.trace.sellDate}</td><td>{displayHoldingName(row.assetName)}</td><td>{row.trace.fifoLotBuyDate}</td><td>{formatNumber(row.trace.quantityUsed)}</td><td>{row.trace.bucketReason}</td><td>{row.trace.proceedsFormula}</td><td>{row.trace.costFormula}</td><td>{formatMoney(row.gain, currency)}</td><td>{row.trace.taxFormula}</td></tr>)}</tbody></table></div></div>
+  );
+}
+
 function taxBucketLabel(bucket: string): string {
   return bucket.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function ReturnsPanel({ holdings, holdingReturns, currency, scopeLabel }: { holdings: ScopedHolding[]; holdingReturns: Map<string, HoldingReturn>; currency: string; scopeLabel: string }) {
+  const rows = holdings.map((holding) => {
+    const returns = holdingReturns.get(holding.id);
+    const profit = holding.scopedProfit ?? returns?.profit;
+    const invested = holding.scopedInvested ?? returns?.netInvested;
+    const returnPercent = holding.scopedReturnPercent ?? returns?.returnPercent;
+    const xirr = returns?.xirr;
+    return { holding, profit, invested, returnPercent, xirr };
+  });
+  const knownReturns = rows.filter((row) => row.returnPercent !== undefined);
+  const distribution = [
+    { name: "Loss", value: knownReturns.filter((row) => (row.returnPercent ?? 0) < 0).reduce((sum, row) => sum + row.holding.scopedValue, 0), tag: "< 0%" },
+    { name: "0-10%", value: knownReturns.filter((row) => (row.returnPercent ?? 0) >= 0 && (row.returnPercent ?? 0) < 10).reduce((sum, row) => sum + row.holding.scopedValue, 0), tag: "simple" },
+    { name: "10-25%", value: knownReturns.filter((row) => (row.returnPercent ?? 0) >= 10 && (row.returnPercent ?? 0) < 25).reduce((sum, row) => sum + row.holding.scopedValue, 0), tag: "simple" },
+    { name: ">=25%", value: knownReturns.filter((row) => (row.returnPercent ?? 0) >= 25).reduce((sum, row) => sum + row.holding.scopedValue, 0), tag: "simple" }
+  ];
+  const profitRows = rows.filter((row) => (row.profit ?? 0) > 0).sort((a, b) => (b.profit ?? 0) - (a.profit ?? 0)).slice(0, 8).map((row) => ({ name: row.holding.label, value: row.profit ?? 0, tag: assetSubtypeLabel(row.holding), category: row.holding.category }));
+  const lossRows = rows.filter((row) => (row.profit ?? 0) < 0).sort((a, b) => (a.profit ?? 0) - (b.profit ?? 0)).slice(0, 8).map((row) => ({ name: row.holding.label, value: Math.abs(row.profit ?? 0), tag: assetSubtypeLabel(row.holding), category: row.holding.category }));
+  const xirrRows = rows.filter((row) => typeof row.xirr === "number") as Array<typeof rows[number] & { xirr: number }>;
+  const bestXirr = xirrRows.slice().sort((a, b) => b.xirr - a.xirr).slice(0, 8).map((row) => ({ name: row.holding.label, value: row.xirr, tag: assetSubtypeLabel(row.holding), category: row.holding.category }));
+  const worstXirr = xirrRows.slice().sort((a, b) => a.xirr - b.xirr).slice(0, 8);
+  const profit = rows.reduce((sum, row) => sum + (row.profit ?? 0), 0);
+  const invested = rows.reduce((sum, row) => sum + (row.invested ?? 0), 0);
+  return (
+    <div className="analytics-tab-panel returns-panel">
+      <div className="panel-intro-card">
+        <span className="eyebrow">Returns cockpit</span>
+        <h2>{scopeLabel}</h2>
+        <p>Profit, loss, simple return buckets, and holding-level XIRR for the selected analytics scope. Values use the same scoped current value and cost basis as the headline cards.</p>
+      </div>
+      <div className="holding-command-strip">
+        <MiniInsight label="Scoped Profit" value={formatMoney(profit, currency)} detail={invested > 0 ? ((profit / invested) * 100).toFixed(1) + "% simple" : "return unavailable"} />
+        <MiniInsight label="Return Coverage" value={String(knownReturns.length) + "/" + String(holdings.length)} detail="holdings with cost basis" />
+        <MiniInsight label="Positive Contributors" value={String(rows.filter((row) => (row.profit ?? 0) > 0).length)} detail="profit-making holdings" />
+        <MiniInsight label="Loss Contributors" value={String(rows.filter((row) => (row.profit ?? 0) < 0).length)} detail="negative P/L holdings" />
+      </div>
+      <div className="analytics-grid">
+        <ChartCard title="Return Distribution"><RankingBar data={distribution} formatValue={(value) => formatMoney(value, currency)} emptyMessage="No cost-basis return distribution yet." tone="return" /></ChartCard>
+        <ChartCard title="Profit Contributors"><RankingBar data={profitRows} formatValue={(value) => formatMoney(value, currency)} emptyMessage="No positive profit contributors yet." tone="profit" /></ChartCard>
+        <ChartCard title="Loss Contributors"><RankingBar data={lossRows} formatValue={(value) => "-" + formatMoney(value, currency)} emptyMessage="No loss contributors in this scope." tone="profit" /></ChartCard>
+        <ChartCard title="Best Holding XIRR"><RankingBar data={bestXirr} formatValue={(value) => value.toFixed(2) + "%"} emptyMessage="No positive holding XIRR yet." tone="return" /></ChartCard>
+      </div>
+      <div className="card wide-card"><h2>Worst / Review XIRR</h2>{worstXirr.length === 0 ? <p className="message">No holding XIRR rows to review yet.</p> : <div className="table-wrap"><table><thead><tr><th>Holding</th><th>Subtype</th><th>Value</th><th>P/L</th><th>XIRR</th></tr></thead><tbody>{worstXirr.map((row) => <tr key={row.holding.id}><td>{displayHoldingName(row.holding.label)}</td><td>{assetSubtypeLabel(row.holding)}</td><td>{formatMoney(row.holding.scopedValue, currency)}</td><td>{row.profit === undefined ? "-" : formatMoney(row.profit, currency)}</td><td>{row.xirr.toFixed(2)}%</td></tr>)}</tbody></table></div>}</div>
+    </div>
+  );
+}
+
+function RiskPanel({ scopedAnalytics, holdingReturns, currency, timelineCoverage, staleHoldings, missingFxCount }: { scopedAnalytics: ScopedAnalyticsData; holdingReturns: Map<string, HoldingReturn>; currency: string; timelineCoverage: number; staleHoldings: number; missingFxCount: number }) {
+  const holdings = scopedAnalytics.holdings;
+  const current = scopedAnalytics.current;
+  const topOne = holdings[0]?.scopedValue ?? 0;
+  const topThree = holdings.slice(0, 3).reduce((sum, holding) => sum + holding.scopedValue, 0);
+  const topFive = holdings.slice(0, 5).reduce((sum, holding) => sum + holding.scopedValue, 0);
+  const issuerTop = scopedAnalytics.chartData.issuer[0];
+  const currencyRows = groupByCurrency(holdings);
+  const noCostBasis = holdings.filter((holding) => holdingReturns.get(holding.id)?.costBasisKnown !== true).length;
+  const noXirr = holdings.filter((holding) => holdingReturns.get(holding.id)?.hasCashFlows && typeof holdingReturns.get(holding.id)?.xirr !== "number").length;
+  return (
+    <div className="analytics-tab-panel risk-panel">
+      <div className="panel-intro-card">
+        <span className="eyebrow">Risk and trust cockpit</span>
+        <h2>{scopedAnalytics.label}</h2>
+        <p>Concentration, issuer/currency exposure, valuation coverage, and data warnings for the selected scope. This is a portfolio-risk view; parser trust details stay in the Data section.</p>
+      </div>
+      <div className="holding-command-strip">
+        <MiniInsight label="Top 1" value={current <= 0 ? "0.0%" : ((topOne / current) * 100).toFixed(1) + "%"} detail={holdings[0] ? displayHoldingName(holdings[0].label) : "no holdings"} />
+        <MiniInsight label="Top 3" value={current <= 0 ? "0.0%" : ((topThree / current) * 100).toFixed(1) + "%"} detail="largest three holdings" />
+        <MiniInsight label="Top 5" value={current <= 0 ? "0.0%" : ((topFive / current) * 100).toFixed(1) + "%"} detail="largest five holdings" />
+        <MiniInsight label="Largest Issuer" value={issuerTop ? chartLabel(issuerTop.name) : "-"} detail={issuerTop && current > 0 ? ((issuerTop.value / current) * 100).toFixed(1) + "% of scope" : "no issuer exposure"} />
+      </div>
+      <div className="analytics-grid">
+        <ChartCard title="Asset Class Exposure"><DonutChart data={scopedAnalytics.chartData.allocation} currency={currency} /></ChartCard>
+        <ChartCard title="Region Exposure"><HorizontalBar data={scopedAnalytics.chartData.region} currency={currency} /></ChartCard>
+        <ChartCard title="Currency Exposure"><HorizontalBar data={currencyRows} currency={currency} /></ChartCard>
+        <ChartCard title="Issuer Concentration"><HorizontalBar data={scopedAnalytics.chartData.issuer} currency={currency} /></ChartCard>
+      </div>
+      <div className="risk-grid">
+        <div className="card"><h2>Data Warnings In Scope</h2><div className="signal-list">
+          <div className={"signal-item " + (missingFxCount === 0 ? "good" : "warn")}><ShieldCheck size={18} /><div><span>FX coverage</span><strong>{missingFxCount === 0 ? "Covered" : missingFxCount + " gap(s)"}</strong><small>Missing FX affects INR totals and returns.</small></div></div>
+          <div className={"signal-item " + (staleHoldings === 0 ? "good" : "warn")}><RefreshCw size={18} /><div><span>Freshness</span><strong>{staleHoldings === 0 ? "Current" : staleHoldings + " stale"}</strong><small>Holdings older than the freshness window.</small></div></div>
+          <div className={"signal-item " + (noCostBasis === 0 ? "good" : "warn")}><Database size={18} /><div><span>Cost basis</span><strong>{holdings.length - noCostBasis}/{holdings.length}</strong><small>Needed for profit and simple return.</small></div></div>
+          <div className={"signal-item " + (noXirr === 0 ? "good" : "warn")}><TrendingUp size={18} /><div><span>XIRR readiness</span><strong>{noXirr === 0 ? "Ready" : noXirr + " review"}</strong><small>Needs dated cash flows and FX where applicable.</small></div></div>
+        </div></div>
+        <div className="card"><h2>Coverage Snapshot</h2><div className="signal-list">
+          <MiniInsight label="Historical coverage" value={timelineCoverage.toFixed(1) + "%"} detail="complete valuation dates" />
+          <MiniInsight label="Equity / Debt" value={scopedAnalytics.allocation.Equity.percent.toFixed(1) + "% / " + scopedAnalytics.allocation.Debt.percent.toFixed(1) + "%"} detail="allocation balance" />
+          <MiniInsight label="Cash" value={formatMoney(scopedAnalytics.allocation.Cash.value, currency)} detail={scopedAnalytics.allocation.Cash.percent.toFixed(1) + "% of scope"} />
+        </div></div>
+      </div>
+    </div>
+  );
+}
+
+function groupByCurrency(holdings: ScopedHolding[]): Array<{ name: string; value: number }> {
+  const rows = new Map<string, number>();
+  for (const holding of holdings) rows.set(holding.currency, (rows.get(holding.currency) ?? 0) + holding.scopedValue);
+  return [...rows.entries()].map(([name, value]) => ({ name, value: roundMoney(value) })).filter((row) => row.value > 0).sort((a, b) => b.value - a.value);
 }
 
 function AssetClassesPanel({ insights, currency, scopeLabel }: { insights: AssetClassInsight[]; currency: string; scopeLabel: string }) {
@@ -2200,18 +2383,19 @@ function AnalyticsTabs({ active, setActive }: { active: AnalyticsTab; setActive:
   const tabs: Array<{ id: AnalyticsTab; label: string; detail: string }> = [
     { id: "overview", label: "Overview", detail: "current value and signals" },
     { id: "allocation", label: "Allocation", detail: "class, region, issuer" },
-    { id: "assets", label: "Asset Classes", detail: "equity, debt, cash" },
+    { id: "returns", label: "Returns", detail: "profit, loss, XIRR" },
+    { id: "risk", label: "Risk", detail: "concentration and gaps" },
     { id: "history", label: "History", detail: "market-data dependent" }
   ];
   return <div className="analytics-tabs" role="tablist">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} onClick={() => setActive(tab.id)}><strong>{tab.label}</strong><span>{tab.detail}</span></button>)}</div>;
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="card"><div className="metric-label">{label}</div><div className="metric-value">{value}</div></div>;
+function Metric({ label, value, secondary }: { label: string; value: string; secondary?: string }) {
+  return <div className="card"><div className="metric-label">{label}</div><div className="metric-value">{value}</div>{secondary && <div className="usd-secondary">{secondary}</div>}</div>;
 }
 
-function MiniInsight({ label, value, detail, explain }: { label: string; value: string; detail: string; explain?: string }) {
-  return <div className="mini-insight" title={explain}><span>{label}</span><strong title={value}>{value}</strong><small>{detail}</small></div>;
+function MiniInsight({ label, value, detail, explain, secondary }: { label: string; value: string; detail: string; explain?: string; secondary?: string }) {
+  return <div className="mini-insight" title={explain}><span>{label}</span><strong title={value}>{value}</strong>{secondary && <em className="usd-secondary">{secondary}</em>}<small>{detail}</small></div>;
 }
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
@@ -2566,7 +2750,7 @@ function RankingBar({ data, formatValue, emptyMessage, tone = "value" }: Ranking
     </div>
   );
 }
-function HoldingRow({ holding, baseCurrency, returns }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; returns?: HoldingReturn }) {
+function HoldingRow({ holding, baseCurrency, returns, usdSecondary }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; returns?: HoldingReturn; usdSecondary: (value: number | undefined) => string | undefined }) {
   const value = holding.valueInBase === undefined ? "FX needed" : formatMoney(holding.valueInBase, baseCurrency);
   const price = holding.price === undefined ? "-" : formatMoney(holding.price, holding.currency);
   const priceDetail = holding.price === undefined ? "not available" : holding.quantity === undefined ? "latest unit price" : "per unit/share";
@@ -2576,7 +2760,7 @@ function HoldingRow({ holding, baseCurrency, returns }: { holding: ReturnType<ty
   const costKnown = returns?.costBasisKnown === true;
   const xirrDetail = returns?.missingFx.length ? "FX needed" : returns?.hasCashFlows ? "cash-flow return" : "needs transactions";
   const subtype = assetSubtypeLabel(holding);
-  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge subtype-badge">{subtype}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong><small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Price</span><strong>{price}</strong><small>{priceDetail}</small></div><div className="holding-metric"><span>Tracked</span><strong>{trackedValue}</strong><small>{trackedDetail}</small></div><div className="holding-metric"><span>Invested</span><strong>{costKnown ? formatMoney(returns?.netInvested ?? 0, baseCurrency) : "-"}</strong><small>{costKnown ? "remaining cost basis" : "not provided"}</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{xirrDetail}</small></div></div>;
+  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge subtype-badge">{subtype}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong>{usdSecondary(holding.valueInBase) && <em className="usd-secondary">{usdSecondary(holding.valueInBase)}</em>}<small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Price</span><strong>{price}</strong><small>{priceDetail}</small></div><div className="holding-metric"><span>Tracked</span><strong>{trackedValue}</strong><small>{trackedDetail}</small></div><div className="holding-metric"><span>Invested</span><strong>{costKnown ? formatMoney(returns?.netInvested ?? 0, baseCurrency) : "-"}</strong><small>{costKnown ? "remaining cost basis" : "not provided"}</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{xirrDetail}</small></div></div>;
 }
 function HoldingEditRow({ balance, updateBalance }: { balance: ManualBalance; updateBalance: (id: string, patch: Partial<ManualBalance>) => void }) {
   const taperMode = balance.taperMode ?? "none";

@@ -4,6 +4,12 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Restructured the Analytics cockpit into Overview, Allocation, Returns, Risk, and History tabs; moved asset-class deep dives into Allocation; added scope-aware returns/risk panels, a Goals coverage matrix, a Data-section-only Data Quality Matrix, and an optional JSON-persisted display-only USD-equivalent toggle backed by real stored USD/INR snapshots; extended domain and Selenium real-browser coverage for these changes.
+
+- Fixed Manual CSV Preview rendering so metric tiles and preview tables stay contained inside the Imports card with internal scrolling across responsive widths; added Selenium coverage for the exact overflow case.
+
+- Added manual CSV import preview before commit, tax rule trace audit rows with FIFO/FX/formula explanations, and market-data health coverage in the Data workspace; extended unit, build, and real-browser Selenium coverage for these trust-layer improvements.
+
 - Fixed scoped Asset Classes command metric contrast so values, labels, and details remain readable on the hero panel across overall and goal-scoped analytics; added real-browser contrast assertions for these metric tiles.
 
 - Improved workspace hierarchy and navigation by adding default-expanded chevron disclosure controls across pages and analytics subsections, stronger heading/subheading typography where section names visually outrank nested subsection names, goal metric tooltip explanations, and real-browser Selenium assertions for icon-only disclosure behavior and heading visibility.

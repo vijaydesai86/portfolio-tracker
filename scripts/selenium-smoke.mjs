@@ -506,10 +506,48 @@ async function assertResponsiveCorePages() {
       await assertSemanticHeadingRelations(label + " " + page + " semantic headings");
       await assertCollapsibleSections(label + " " + page + " collapsible sections");
       await assertFinanceTablesReadable(label + " " + page + " finance tables");
+      if (page === "Analytics") {
+        for (const tab of ["Overview", "Allocation", "Returns", "Risk", "History"]) {
+          await jsClick("//button[.//strong[normalize-space(.)='" + tab + "']]");
+          await assertNoPageOverflow(label + " Analytics " + tab);
+          await assertNoChartRowOverlap(label + " Analytics " + tab + " chart rows");
+          await assertCardsContained(label + " Analytics " + tab + " cards");
+        }
+      }
       if (page === "Goals") await assertGoalsReadable(label + " Goals");
     }
   }
   await driver.manage().window().setRect({ width: 1440, height: 950 });
+}
+
+
+async function assertImportPreviewContained(context) {
+  const stats = await driver.executeScript(() => {
+    const panel = document.querySelector(".import-preview-panel");
+    if (!panel) return { hasPanel: false };
+    const card = panel.closest(".card");
+    const tableWrap = panel.querySelector(".table-wrap");
+    const panelRect = panel.getBoundingClientRect();
+    const cardRect = card?.getBoundingClientRect();
+    const wrapRect = tableWrap?.getBoundingClientRect();
+    const pageWidth = document.documentElement.clientWidth;
+    const escapingChildren = [...panel.querySelectorAll(".mini-insight, .table-wrap, table")].map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { text: element.textContent.trim().slice(0, 80), left: rect.left, right: rect.right, width: rect.width };
+    }).filter((item) => item.width > 0 && (item.left < panelRect.left - 4 || item.right > panelRect.right + 4) && !(tableWrap && item.text.includes("Action") && wrapRect && wrapRect.left >= panelRect.left - 4 && wrapRect.right <= panelRect.right + 4));
+    const wrapStyle = tableWrap ? getComputedStyle(tableWrap) : null;
+    return {
+      hasPanel: true,
+      panelInsideCard: Boolean(cardRect && panelRect.left >= cardRect.left - 4 && panelRect.right <= cardRect.right + 4),
+      panelInsidePage: panelRect.left >= -4 && panelRect.right <= pageWidth + 4,
+      hasScroller: Boolean(tableWrap && /(auto|scroll)/.test((wrapStyle?.overflowX ?? "") + (wrapStyle?.overflow ?? ""))),
+      wrapInsidePanel: Boolean(wrapRect && wrapRect.left >= panelRect.left - 4 && wrapRect.right <= panelRect.right + 4),
+      escapingChildren: escapingChildren.slice(0, 6)
+    };
+  });
+  if (!stats.hasPanel || !stats.panelInsideCard || !stats.panelInsidePage || !stats.hasScroller || !stats.wrapInsidePanel || stats.escapingChildren.length > 0) {
+    throw new Error(context + " rendered an overflowing import preview: " + JSON.stringify(stats));
+  }
 }
 
 async function assertVisibleAllocationDonut(context) {
@@ -537,17 +575,24 @@ try {
   if (!/Portfolio Analytics|Holdings|Transactions|Goals|Tax|Snapshots|Add Entry|Imports|Data|Settings|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
-  for (const label of ["Overview", "Allocation", "History"]) {
+  for (const label of ["Overview", "Allocation", "Returns", "Risk", "History"]) {
     await jsClick(`//button[.//strong[normalize-space(.)='${label}']]`);
     await driver.wait(async () => {
       const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
       if (label === "Overview") return body.includes("current allocation explorer");
-      if (label === "Allocation") return body.includes("allocation map") && body.includes("by asset type");
+      if (label === "Allocation") return body.includes("allocation map") && body.includes("by asset type") && (body.includes("asset class command center") || body.includes("no scoped asset-class data yet"));
+      if (label === "Returns") return body.includes("returns cockpit") && body.includes("return distribution");
+      if (label === "Risk") return body.includes("risk and trust cockpit") && body.includes("currency exposure");
       return body.includes("historical charts reconstruct") && body.includes("portfolio growth");
     }, 15000);
   }
   await jsClick("//button[contains(., 'Imports')]");
   await waitForBodyText("Native File Intake");
+  await jsClick("//button[normalize-space(.)='Preview Manual CSV']");
+  await waitForBodyText("Import Preview");
+  await waitForBodyText("Net worth delta");
+  await waitForBodyText("Nothing committed yet");
+  await assertImportPreviewContained("manual CSV preview");
   await jsClick("//button[normalize-space(.)='Stage and Commit']");
   await waitForBodyText("Manual CSV committed");
   await jsClick("//button[contains(., 'Add Entry')]");
@@ -608,6 +653,8 @@ try {
   await jsClick("//button[contains(., 'Data')]");
   await waitForBodyText("Data Reconciliation", 15000);
   await waitForBodyText("Validation Checks", 15000);
+  await waitForBodyText("Market Data Health", 15000);
+  await waitForBodyText("Data Quality Matrix", 15000);
   await assertVisibleChartBars("data source value bars");
   await jsClick("//button[contains(., 'Settings')]");
   await waitForBodyText("Tax regime", 15000);
@@ -637,7 +684,7 @@ try {
   await assertNoFakeChartRows("allocation metric rows");
   await assertNoChartRowOverlap("allocation metric rows");
   await assertVisibleChartBars("allocation metric rows");
-  await jsClick("//button[.//strong[normalize-space(.)='Asset Classes']]");
+  await jsClick("//button[.//strong[normalize-space(.)='Allocation']]");
   await waitForBodyText("Asset class command center");
   await assertAssetCommandMetricContrast("asset class command metrics");
   await assertSubsectionCollapsibleSections("asset class subsection collapse controls");
@@ -756,7 +803,7 @@ try {
   await waitForBodyText("Tracked", 15000);
   await jsClick("//button[contains(., 'Analytics')]");
   await jsClick("//button[.//strong[normalize-space(.)='Overall']]");
-  await jsClick("//button[.//strong[normalize-space(.)='Asset Classes']]");
+  await jsClick("//button[.//strong[normalize-space(.)='Allocation']]");
   await waitForBodyText("Direct stocks", 15000);
   await assertAssetCommandMetricContrast("direct stock asset class command metrics");
   await assertSubsectionCollapsibleSections("direct stock asset class subsection collapse controls");
@@ -765,12 +812,25 @@ try {
   await assertVisibleChartBars("direct stock asset class ranking rows");
   await jsClick("//button[contains(., 'Tax')]");
   await waitForBodyText("Realized Lot Audit", 15000);
+  await waitForBodyText("Tax Rule Trace", 15000);
+  await waitForBodyText("FIFO", 15000);
   await waitForBodyText("Example US Stock", 15000);
   await waitForBodyText("Foreign", 15000);
   await jsClick("//button[contains(., 'Data')]");
   await waitForBodyText("Data Reconciliation", 15000);
+  await waitForBodyText("Market Data Health", 15000);
   await jsClick("//button[contains(., 'Settings')]");
   await waitForBodyText("Portfolio tax estimate", 15000);
+  await waitForBodyText("Show USD equivalents", 15000);
+  const usdToggle = await driver.wait(until.elementLocated(By.xpath("//label[contains(., 'Show USD equivalents')]//input[@type='checkbox']")), 15000);
+  await driver.executeScript("arguments[0].scrollIntoView({block: 'center'});", usdToggle);
+  await usdToggle.click();
+  await driver.wait(async () => await driver.executeScript(() => document.querySelector("label.toggle-row input[type='checkbox']")?.checked === true), 10000);
+  await jsClick("//button[contains(., 'Holdings')]");
+  await driver.wait(async () => {
+    const body = await driver.findElement(By.css("body")).getText();
+    return body.includes("Example US Stock") && body.includes("~$");
+  }, 15000);
 
   fs.rmSync(backupDownloadPath, { force: true });
   await jsClick("//button[contains(., 'Export')]");
@@ -778,6 +838,9 @@ try {
   const exportedFidelity = JSON.parse(fs.readFileSync(backupDownloadPath, "utf8"));
   if (!exportedFidelity.manualBalances.some((balance) => balance.taperMode === "medium")) {
     throw new Error("Exported Fidelity JSON did not preserve the selected holding taper mode");
+  }
+  if (exportedFidelity.settings?.displayCurrency?.showUsdEquivalent !== true) {
+    throw new Error("Exported Fidelity JSON did not preserve the USD equivalent display setting");
   }
   await driver.executeScript(() => {
     window.__portfolioTrackerMarketCalls = 0;
@@ -794,7 +857,7 @@ try {
   await jsClick("//button[contains(., 'Holdings')]");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
-    return body.includes("Example US Stock") && body.includes("$30.00") && body.includes("$360.00");
+    return body.includes("Example US Stock") && body.includes("$30.00") && body.includes("$360.00") && body.includes("~$");
   }, 15000);
   await jsClick("//button[contains(., 'Refresh')]");
   await waitForBodyText("holding valuation(s) updated", 20000);
@@ -802,7 +865,7 @@ try {
   await jsClick("//button[contains(., 'Holdings')]");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
-    return body.includes("Example US Stock") && body.includes("$44.00") && body.includes("$528.00");
+    return body.includes("Example US Stock") && body.includes("$44.00") && body.includes("$528.00") && body.includes("~$");
   }, 15000);
   await assertResponsiveCorePages();
   fs.writeFileSync(screenshotPath, await driver.takeScreenshot(), "base64");

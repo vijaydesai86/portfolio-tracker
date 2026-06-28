@@ -1607,7 +1607,7 @@ textarea {
 
 .analytics-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
   gap: 10px;
   background: #e8eef5;
   border: 1px solid var(--line);
@@ -4996,4 +4996,251 @@ textarea {
 .chart-card > h2,
 .panel-heading span {
   min-height: 22px;
+}
+
+/* Import preview must stay contained inside the Imports card at laptop/tablet/mobile widths. */
+.import-preview-panel {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.import-preview-panel h3 {
+  margin: 0;
+}
+
+.import-preview-panel .holding-command-strip {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  min-width: 0;
+  max-width: 100%;
+  margin-bottom: 0;
+}
+
+.import-preview-panel .mini-insight {
+  min-width: 0;
+}
+
+.import-preview-panel .mini-insight strong,
+.import-preview-panel .mini-insight small {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.import-preview-panel .table-wrap {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+.import-preview-panel table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.import-preview-panel th,
+.import-preview-panel td {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.import-preview-panel th:last-child,
+.import-preview-panel td:last-child {
+  min-width: 260px;
+  white-space: normal;
+}
+
+
+/* USD equivalents and analytics trust additions */
+.usd-secondary {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 750;
+  line-height: 1.25;
+  margin-top: 2px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.hero-usd {
+  font-size: 16px;
+  margin-top: -2px;
+  color: #334155;
+}
+
+.metric-value + .usd-secondary,
+.mini-insight .usd-secondary {
+  margin-top: 3px;
+}
+
+.holding-metric .usd-secondary,
+.goal-progress-line .usd-secondary,
+.goal-snapshot-value .usd-secondary,
+.table-usd {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.panel-intro-card {
+  background: #ffffff;
+  border: 1px solid #dbe5ec;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+
+.panel-intro-card h2 {
+  margin: 4px 0 6px;
+  font-size: clamp(20px, 2vw, 26px);
+  color: #0f172a;
+}
+
+.panel-intro-card p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.55;
+}
+
+.returns-panel .wide-card,
+.risk-panel .wide-card,
+.goal-coverage-card {
+  min-width: 0;
+}
+
+.quality-row-list {
+  display: grid;
+  gap: 10px;
+}
+
+.quality-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  padding: 12px;
+  border: 1px solid #dbe5ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.quality-row div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quality-row span,
+.quality-row strong,
+.quality-row small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.quality-row span {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.quality-row strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.quality-row em {
+  align-self: start;
+  color: #0f172a;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.quality-row small {
+  grid-column: 1 / -1;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.quality-row.status-blocker {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.quality-row.status-warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.settings-panel {
+  margin-top: 16px;
+  border: 1px solid #dbe5ec;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.toggle-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 0;
+}
+
+.toggle-row input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: #0e7490;
+  flex: 0 0 auto;
+}
+
+.toggle-row span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.toggle-row strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.toggle-row small {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.goal-coverage-card table small {
+  display: block;
+  margin-top: 2px;
+}
+
+@media (max-width: 780px) {
+  .analytics-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .risk-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .analytics-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .toggle-row {
+    align-items: flex-start;
+  }
 }
