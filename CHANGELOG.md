@@ -4,6 +4,10 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Fixed scoped Asset Classes command metric contrast so values, labels, and details remain readable on the hero panel across overall and goal-scoped analytics; added real-browser contrast assertions for these metric tiles.
+
+- Improved workspace hierarchy and navigation by adding default-expanded chevron disclosure controls across pages and analytics subsections, stronger heading/subheading typography where section names visually outrank nested subsection names, goal metric tooltip explanations, and real-browser Selenium assertions for icon-only disclosure behavior and heading visibility.
+
 - Added per-holding conservative value taper controls for goal planning, with no/light/medium/strong/custom factors using the tracked-price formula while preserving actual portfolio value, tax value, and market refresh behavior; added domain and Selenium coverage for taper persistence, goal projection, JSON export/restore, refresh, and responsive Goals rendering.
 
 - Changed canonical JSON restore to reproduce the exported portfolio state exactly without implicit market refresh; users now press Refresh explicitly to update live NAV/quote/FX values after restore, and Selenium verifies both static restore and explicit refresh.

@@ -196,6 +196,219 @@ async function assertGoalsReadable(context) {
   }
 }
 
+
+async function assertAssetCommandMetricContrast(context) {
+  const stats = await driver.executeScript(() => {
+    function parseRgb(value) {
+      const match = value.match(/rgba?\(([^)]+)\)/);
+      if (!match) return null;
+      const parts = match[1].split(",").map((part) => Number.parseFloat(part.trim()));
+      if (parts.length < 3 || parts.some((part, index) => index < 3 && !Number.isFinite(part))) return null;
+      return { r: parts[0], g: parts[1], b: parts[2] };
+    }
+    function luminance(rgb) {
+      const values = [rgb.r, rgb.g, rgb.b].map((value) => {
+        const channel = value / 255;
+        return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+      });
+      return values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722;
+    }
+    function contrast(a, b) {
+      const l1 = luminance(a);
+      const l2 = luminance(b);
+      return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    }
+    const bad = [];
+    const checked = [];
+    for (const element of document.querySelectorAll(".asset-type-hero-metrics .mini-insight span, .asset-type-hero-metrics .mini-insight strong, .asset-type-hero-metrics .mini-insight small")) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const tile = element.closest(".mini-insight");
+      const fg = parseRgb(getComputedStyle(element).color);
+      const bg = parseRgb(getComputedStyle(tile).backgroundColor);
+      if (!fg || !bg) {
+        bad.push({ text: element.textContent.trim(), fg: getComputedStyle(element).color, bg: getComputedStyle(tile).backgroundColor, reason: "unparsed color" });
+        continue;
+      }
+      const ratio = contrast(fg, bg);
+      checked.push({ text: element.textContent.trim().slice(0, 40), ratio });
+      if (ratio < 4.5) bad.push({ text: element.textContent.trim().slice(0, 80), ratio, fg: getComputedStyle(element).color, bg: getComputedStyle(tile).backgroundColor });
+    }
+    return { checked: checked.length, bad: bad.slice(0, 8) };
+  });
+  if (stats.checked < 6 || stats.bad.length > 0) {
+    throw new Error(context + " rendered low-contrast asset command metrics: " + JSON.stringify(stats));
+  }
+}
+
+
+async function assertHeadingVisualHierarchy(context) {
+  const stats = await driver.executeScript(() => {
+    function weightNumber(value) {
+      if (value === "bold") return 700;
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) ? parsed : 400;
+    }
+    const bad = [];
+    for (const element of document.querySelectorAll("h1, h2, h3, .panel-heading span")) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const style = getComputedStyle(element);
+      const size = Number.parseFloat(style.fontSize);
+      const weight = weightNumber(style.fontWeight);
+      const tag = element.tagName.toLowerCase();
+      const minSize = tag === "h1" ? 20 : tag === "h2" ? 15 : 14;
+      if (size < minSize || weight < 650) {
+        bad.push({ text: element.textContent.trim().slice(0, 80), tag, size, weight });
+      }
+    }
+    return { bad: bad.slice(0, 8) };
+  });
+  if (stats.bad.length > 0) {
+    throw new Error(context + " rendered weak heading hierarchy: " + JSON.stringify(stats));
+  }
+}
+
+
+async function assertSemanticHeadingRelations(context) {
+  const stats = await driver.executeScript(() => {
+    function num(styleValue) {
+      const parsed = Number.parseFloat(styleValue);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    function weight(styleValue) {
+      if (styleValue === "bold") return 700;
+      const parsed = Number.parseInt(styleValue, 10);
+      return Number.isFinite(parsed) ? parsed : 400;
+    }
+    function metrics(element) {
+      const style = getComputedStyle(element);
+      return { text: element.textContent.trim().slice(0, 80), size: num(style.fontSize), weight: weight(style.fontWeight) };
+    }
+    const bad = [];
+    for (const card of document.querySelectorAll(".asset-type-card")) {
+      const primary = card.querySelector(".asset-type-card-head > div > span");
+      const nested = [...card.querySelectorAll(".asset-type-card-charts h3")];
+      if (!primary || nested.length === 0) continue;
+      const p = metrics(primary);
+      const maxNested = nested.map(metrics).sort((a, b) => b.size - a.size)[0];
+      if (p.size < maxNested.size + 4 || p.weight < maxNested.weight) {
+        bad.push({ kind: "asset-card", primary: p, nested: maxNested });
+      }
+    }
+    for (const section of document.querySelectorAll(".command-hero, .analytics-scope-panel, .asset-type-hero, .snapshot-command-panel, .goal-focus-panel, .goal-combined-panel")) {
+      const primary = section.querySelector(":scope .eyebrow");
+      const label = section.querySelector(":scope .mini-insight > span, :scope button span, :scope .metric-label");
+      if (!primary || !label) continue;
+      const p = metrics(primary);
+      const l = metrics(label);
+      if (p.size < l.size + 3 || p.weight < l.weight) {
+        bad.push({ kind: "section-eyebrow", primary: p, nested: l });
+      }
+    }
+    for (const card of document.querySelectorAll(".card, .chart-card")) {
+      const primary = card.querySelector(":scope > .section-head h2, :scope > h2");
+      const label = card.querySelector(":scope .mini-insight > span, :scope .metric-label");
+      if (!primary || !label) continue;
+      const p = metrics(primary);
+      const l = metrics(label);
+      if (p.size < l.size + 2 || p.weight < l.weight) {
+        bad.push({ kind: "card", primary: p, nested: l });
+      }
+    }
+    for (const goalCard of document.querySelectorAll(".goal-card")) {
+      const primary = goalCard.querySelector(".goal-card-head input");
+      const label = goalCard.querySelector(".mini-insight > span");
+      if (!primary || !label) continue;
+      const p = metrics(primary);
+      const l = metrics(label);
+      if (p.size < l.size + 6 || p.weight < l.weight) {
+        bad.push({ kind: "goal-card", primary: p, nested: l });
+      }
+    }
+    return { bad: bad.slice(0, 12) };
+  });
+  if (stats.bad.length > 0) {
+    throw new Error(context + " rendered inverted section/subsection hierarchy: " + JSON.stringify(stats));
+  }
+}
+
+async function assertCollapsibleSections(context) {
+  await driver.wait(async () => await driver.executeScript(() => document.querySelectorAll(".collapse-toggle").length > 0), 5000);
+  const stats = await driver.executeScript(() => {
+    const toggles = [...document.querySelectorAll(".collapse-toggle")].filter((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && button.closest(".collapsible-section");
+    });
+    const textLabeled = toggles.filter((button) => /expand|collapse/i.test(button.textContent.trim())).map((button) => button.textContent.trim());
+    const missingState = toggles.filter((button) => !button.dataset.state || !button.getAttribute("aria-expanded") || !button.getAttribute("aria-label")).length;
+    const oversized = toggles.filter((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.width > 42 || rect.height > 42;
+    }).length;
+    if (toggles.length === 0) return { count: 0, textLabeled, missingState, oversized };
+    const button = toggles[0];
+    const section = button.closest(".collapsible-section");
+    if (section.classList.contains("is-collapsed")) button.click();
+    const before = section.getBoundingClientRect().height;
+    button.click();
+    const collapsed = section.classList.contains("is-collapsed") && button.getAttribute("aria-expanded") === "false" && button.dataset.state === "collapsed";
+    const afterCollapse = section.getBoundingClientRect().height;
+    button.click();
+    const expanded = !section.classList.contains("is-collapsed") && button.getAttribute("aria-expanded") === "true" && button.dataset.state === "expanded";
+    const afterExpand = section.getBoundingClientRect().height;
+    return { count: toggles.length, collapsed, expanded, before, afterCollapse, afterExpand, textLabeled, missingState, oversized };
+  });
+  if (stats.count < 1 || !stats.collapsed || !stats.expanded || stats.textLabeled.length > 0 || stats.missingState > 0 || stats.oversized > 0) {
+    throw new Error(context + " did not provide chevron-only working disclosure controls: " + JSON.stringify(stats));
+  }
+}
+
+async function assertSubsectionCollapsibleSections(context) {
+  const stats = await driver.executeScript(() => {
+    const toggles = [...document.querySelectorAll(".asset-type-card-charts > div.collapsible-section > .collapse-toggle")].filter((button) => {
+      const rect = button.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    const textLabeled = toggles.filter((button) => /expand|collapse/i.test(button.textContent.trim())).map((button) => button.textContent.trim());
+    if (toggles.length === 0) return { count: 0, textLabeled };
+    const button = toggles[0];
+    const section = button.closest(".collapsible-section");
+    if (section.classList.contains("is-collapsed")) button.click();
+    button.click();
+    const collapsed = section.classList.contains("is-collapsed") && button.dataset.state === "collapsed" && button.getAttribute("aria-expanded") === "false";
+    button.click();
+    const expanded = !section.classList.contains("is-collapsed") && button.dataset.state === "expanded" && button.getAttribute("aria-expanded") === "true";
+    return { count: toggles.length, collapsed, expanded, textLabeled };
+  });
+  if (stats.count < 3 || !stats.collapsed || !stats.expanded || stats.textLabeled.length > 0) {
+    throw new Error(context + " did not provide subsection chevron disclosure controls: " + JSON.stringify(stats));
+  }
+}
+
+async function assertGoalTermTooltips(context) {
+  const stats = await driver.executeScript(() => {
+    function weightNumber(value) {
+      if (value === "bold") return 700;
+      const parsed = Number.parseInt(value, 10);
+      return Number.isFinite(parsed) ? parsed : 400;
+    }
+    const labels = [...document.querySelectorAll(".goal-snapshot .term-label")].map((label) => {
+      const style = getComputedStyle(label);
+      return {
+        text: label.textContent.trim(),
+        title: label.getAttribute("title") || "",
+        aria: label.getAttribute("aria-label") || "",
+        weight: weightNumber(style.fontWeight)
+      };
+    });
+    return { count: labels.length, bad: labels.filter((label) => label.title.length < 30 || label.aria.length < 30 || label.weight < 700) };
+  });
+  if (stats.count < 4 || stats.bad.length > 0) {
+    throw new Error(context + " rendered incomplete goal term explanations: " + JSON.stringify(stats));
+  }
+}
+
 async function assertVisibleChartBars(context) {
   const stats = await driver.executeScript(() => {
     const fills = [...document.querySelectorAll(".metric-bar-track span, .ranking-fill")].map((fill) => {
@@ -289,6 +502,9 @@ async function assertResponsiveCorePages() {
       await assertNoPageOverflow(label + " " + page);
       await assertNoChartRowOverlap(label + " " + page + " chart rows");
       await assertCardsContained(label + " " + page + " cards");
+      await assertHeadingVisualHierarchy(label + " " + page + " headings");
+      await assertSemanticHeadingRelations(label + " " + page + " semantic headings");
+      await assertCollapsibleSections(label + " " + page + " collapsible sections");
       await assertFinanceTablesReadable(label + " " + page + " finance tables");
       if (page === "Goals") await assertGoalsReadable(label + " Goals");
     }
@@ -405,6 +621,8 @@ try {
   await waitForBodyText("Selected goal snapshot");
   await waitForBodyText("Goal snapshot");
   await waitForBodyText("Target corpus");
+  await assertGoalTermTooltips("Goals term tooltips");
+  await assertCollapsibleSections("Goals collapse controls");
   await jsClick("//section[.//h2[normalize-space(.)='Map Assets to Goals']]//button[contains(., 'Save Mapping')]");
   await waitForBodyText("Asset mapped to goal locally");
   await driver.wait(async () => {
@@ -421,6 +639,8 @@ try {
   await assertVisibleChartBars("allocation metric rows");
   await jsClick("//button[.//strong[normalize-space(.)='Asset Classes']]");
   await waitForBodyText("Asset class command center");
+  await assertAssetCommandMetricContrast("asset class command metrics");
+  await assertSubsectionCollapsibleSections("asset class subsection collapse controls");
   await assertNoFakeChartRows("asset class ranking rows");
   await assertNoChartRowOverlap("asset class ranking rows");
   await assertVisibleChartBars("asset class ranking rows");
@@ -538,6 +758,8 @@ try {
   await jsClick("//button[.//strong[normalize-space(.)='Overall']]");
   await jsClick("//button[.//strong[normalize-space(.)='Asset Classes']]");
   await waitForBodyText("Direct stocks", 15000);
+  await assertAssetCommandMetricContrast("direct stock asset class command metrics");
+  await assertSubsectionCollapsibleSections("direct stock asset class subsection collapse controls");
   await assertNoFakeChartRows("direct stock asset class ranking rows");
   await assertNoChartRowOverlap("direct stock asset class ranking rows");
   await assertVisibleChartBars("direct stock asset class ranking rows");

@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, Camera, Database, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, ReceiptText, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Table2, Target, TrendingDown, TrendingUp, Upload } from "lucide-react";
-import { type CSSProperties, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase, type HoldingInsight } from "@/src/domain/analytics";
 import { deleteImportRunFromBackup, deleteTransactionFromBackup } from "@/src/domain/deleteRecords";
 import { assetSubtypeDisplayLabel, assetSubtypeLabel } from "@/src/domain/assetSubtype";
@@ -357,6 +357,62 @@ function roundPercent(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+const goalTermHelp = {
+  targetCorpus: "Future corpus required at the goal year. It is inflated monthly expense at that year x 12 x the corpus multiple.",
+  neededToday: "Corpus required today to reach the target by the goal year using the mapped asset mix and return assumptions, without extra future investment.",
+  mappedNow: "Current value mapped to this goal today. If a mapped holding has taper enabled, this uses tracked conservative value.",
+  projectedAtGoal: "Estimated goal-date value of the mapped assets using category return assumptions and any active taper setting."
+};
+
+function installCollapsibleSections(root: HTMLElement, view: string, subScope: string) {
+  const candidates = Array.from(root.querySelectorAll<HTMLElement>(".card, .chart-card, .cardless-panel, .command-hero, .analytics-scope-panel, .asset-class-card, .asset-type-hero, .asset-type-card, .asset-type-card-charts > div, .snapshot-command-panel, .goal-selector-panel, .goal-focus-panel, .goal-card, .goal-combined-panel, .goal-create-panel, .entry-selector-panel, .entry-form-panel"));
+  for (const card of candidates) {
+    const ownToggle = card.querySelector(":scope > .collapse-toggle, :scope > .collapsible-header > .collapse-toggle, :scope > .section-head > .collapse-toggle, :scope > .goal-card-head > .collapse-toggle");
+    if (card.dataset.collapseBound === "true" && ownToggle) continue;
+    if (card.closest(".mini-insight, .signal-item, .metric-card")) continue;
+    const header = card.querySelector<HTMLElement>(":scope > .section-head, :scope > .goal-card-head") ?? card.querySelector<HTMLElement>(":scope > h2, :scope > h3") ?? card.querySelector<HTMLElement>(":scope > div:first-child");
+    const titleSource = card.querySelector<HTMLElement>(":scope > .section-head h2, :scope > h2, :scope > h3, :scope > .goal-card-head input, :scope > .panel-heading span, :scope > .asset-type-card-head span, :scope > .hero-ledger .eyebrow, :scope > .asset-type-hero .eyebrow, :scope > div:first-child h2, :scope > div:first-child .eyebrow, :scope > div:first-child span");
+    const title = (titleSource instanceof HTMLInputElement ? titleSource.value : titleSource?.textContent ?? "Section").trim();
+    if (!header || !title || title.length > 80) continue;
+    card.dataset.collapseBound = "true";
+    card.classList.add("collapsible-section");
+    header.classList.add("collapsible-header");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "collapse-toggle";
+    button.setAttribute("aria-label", "Collapse " + title);
+    button.title = "Collapse or expand this section";
+    const storageKey = "portfolio-collapse:" + view + ":" + subScope + ":" + title;
+    const sync = () => {
+      const collapsed = card.classList.contains("is-collapsed");
+      button.dataset.state = collapsed ? "collapsed" : "expanded";
+      button.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      button.setAttribute("aria-label", (collapsed ? "Expand " : "Collapse ") + title);
+      button.title = (collapsed ? "Expand " : "Collapse ") + title;
+    };
+    if (localStorage.getItem(storageKey) === "collapsed") card.classList.add("is-collapsed");
+    sync();
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      card.classList.toggle("is-collapsed");
+      localStorage.setItem(storageKey, card.classList.contains("is-collapsed") ? "collapsed" : "expanded");
+      sync();
+    });
+    if (header.classList.contains("section-head") || header.classList.contains("goal-card-head")) {
+      header.appendChild(button);
+    } else if (header.tagName === "DIV") {
+      header.appendChild(button);
+    } else {
+      card.insertBefore(button, header.nextSibling);
+    }
+  }
+}
+
+function GoalTermLabel({ children, help }: { children: string; help: string }) {
+  return <span className="term-label" title={help} aria-label={children + ": " + help} tabIndex={0}>{children}</span>;
+}
+
 export function TrackerApp() {
   const [backup, setBackup] = useState<PortfolioBackup>(() => createEmptyBackup("INR"));
   const [view, setView] = useState<View>("dashboard");
@@ -415,6 +471,24 @@ export function TrackerApp() {
   const [snapshotName, setSnapshotName] = useState(() => "Snapshot " + new Date().toISOString().slice(0, 10));
   const [snapshotNotes, setSnapshotNotes] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
+
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>(".main");
+    if (!root) return;
+    const scope = analyticsTab + ":" + analyticsScope + ":" + selectedGoalId;
+    let frame = 0;
+    const run = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => installCollapsibleSections(root, view, scope));
+    };
+    run();
+    const observer = new MutationObserver(run);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [analyticsScope, analyticsTab, selectedGoalId, view]);
   const [taxFinancialYear, setTaxFinancialYear] = useState(() => currentIndianFinancialYear());
 
   const summary = useMemo(() => calculatePortfolioSummary(backup), [backup]);
@@ -1585,7 +1659,7 @@ function GoalsView(props: {
             <label className="goal-selector-control">
               <span>Selected goal snapshot</span>
               <select value={selectedGoalValue} onChange={(event) => { props.setSelectedGoalId(event.target.value); props.setMappingGoalId(event.target.value); }}>
-                {props.goalProgress.map((progress) => <option value={progress.goal.id} key={progress.goal.id}>{progress.goal.name} - {progress.corpusTodayFundedPercent.toFixed(1)}% ready today</option>)}
+                {props.goalProgress.map((progress) => <option value={progress.goal.id} key={progress.goal.id}>{progress.goal.name}</option>)}
               </select>
             </label>
             <MiniInsight label="Needed today" value={formatMoney(selectedProgress.requiredCorpusToday, props.backup.baseCurrency)} detail="present corpus required" />
@@ -1671,11 +1745,11 @@ function GoalSnapshot({ progress, backup, currency }: { progress: GoalProgress; 
   return (
     <div className="goal-snapshot">
       <h3>{progress.goal.name}</h3>
-      <div className="goal-snapshot-value"><span>Target corpus</span><strong>{formatMoney(progress.targetCorpus, currency)}</strong></div>
-      <div className="goal-progress-line"><span>Corpus needed today</span><strong>{formatMoney(progress.requiredCorpusToday, currency)}</strong></div>
-      <div className="goal-progress-line"><span>Mapped now</span><strong>{formatMoney(progress.mappedCurrentValue, currency)}</strong></div>
+      <div className="goal-snapshot-value"><GoalTermLabel help={goalTermHelp.targetCorpus}>Target corpus</GoalTermLabel><strong>{formatMoney(progress.targetCorpus, currency)}</strong></div>
+      <div className="goal-progress-line"><GoalTermLabel help={goalTermHelp.neededToday}>Corpus needed today</GoalTermLabel><strong>{formatMoney(progress.requiredCorpusToday, currency)}</strong></div>
+      <div className="goal-progress-line"><GoalTermLabel help={goalTermHelp.mappedNow}>Mapped now</GoalTermLabel><strong>{formatMoney(progress.mappedCurrentValue, currency)}</strong></div>
       <div className="goal-progress-rail"><div style={{ width: todayWidth + "%" }} /></div>
-      <div className="goal-progress-line"><span>Projected at goal</span><strong>{formatMoney(progress.projectedValue, currency)}</strong></div>
+      <div className="goal-progress-line"><GoalTermLabel help={goalTermHelp.projectedAtGoal}>Projected at goal</GoalTermLabel><strong>{formatMoney(progress.projectedValue, currency)}</strong></div>
       <div className="goal-progress-rail projected"><div style={{ width: projectedWidth + "%" }} /></div>
       <div className="goal-mini-grid">
         <MiniInsight label="Today readiness" value={progress.corpusTodayFundedPercent.toFixed(1) + "%"} detail={progress.corpusTodayGap <= 0 ? "no extra corpus needed now" : "versus needed today"} />
@@ -2136,8 +2210,8 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <div className="card"><div className="metric-label">{label}</div><div className="metric-value">{value}</div></div>;
 }
 
-function MiniInsight({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return <div className="mini-insight"><span>{label}</span><strong title={value}>{value}</strong><small>{detail}</small></div>;
+function MiniInsight({ label, value, detail, explain }: { label: string; value: string; detail: string; explain?: string }) {
+  return <div className="mini-insight" title={explain}><span>{label}</span><strong title={value}>{value}</strong><small>{detail}</small></div>;
 }
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
