@@ -15,6 +15,7 @@ import { calculatePortfolioTaxReport, getTaxProfile, updateTaxProfile, type TaxP
 import { formatUsdEquivalent, getDisplayCurrencySettings, updateDisplayCurrencySettings, type DisplayCurrencySettings } from "@/src/domain/displayCurrency";
 import { taperPresets } from "@/src/domain/tapering";
 import { buildReconciliationReport } from "@/src/domain/reconciliation";
+import { calculateGoalDrawdowns, calculatePerformanceAttribution, calculateRebalancingPlan, calculateScenarioPlan, compareSnapshots, getPlanningSettings, updatePlanningSettings, type GoalDrawdownReport, type PerformanceAttribution, type PlanningSettings, type PlanningSettingsPatch, type RebalanceRow, type ScenarioPlan, type SnapshotComparison } from "@/src/domain/planning";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
 import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type CasCanonicalImport, type CasParseResult } from "@/src/importers/casText";
@@ -41,7 +42,7 @@ const assetClassCards = [
 
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
-type View = "dashboard" | "holdings" | "transactions" | "goals" | "tax" | "snapshots" | "add-entry" | "imports" | "data" | "settings" | "backup";
+type View = "dashboard" | "holdings" | "transactions" | "goals" | "planning" | "tax" | "snapshots" | "add-entry" | "imports" | "data" | "settings" | "backup";
 type AnalyticsTab = "overview" | "allocation" | "returns" | "risk" | "history";
 type AnalyticsScope = "portfolio" | "goals-combined" | `goal:${string}`;
 type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
@@ -473,6 +474,7 @@ export function TrackerApp() {
   const [snapshotName, setSnapshotName] = useState(() => "Snapshot " + new Date().toISOString().slice(0, 10));
   const [snapshotNotes, setSnapshotNotes] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
+  const [selectedHoldingDetailId, setSelectedHoldingDetailId] = useState("");
 
   useEffect(() => {
     const root = document.querySelector<HTMLElement>(".main");
@@ -504,10 +506,15 @@ export function TrackerApp() {
   const snapshotHistory = useMemo(() => buildSnapshotHistory(backup.snapshots), [backup.snapshots]);
   const taxProfile = useMemo(() => getTaxProfile(backup), [backup]);
   const displayCurrencySettings = useMemo(() => getDisplayCurrencySettings(backup), [backup]);
+  const planningSettings = useMemo(() => getPlanningSettings(backup), [backup]);
   const usdSecondary = (value: number | undefined) => formatUsdEquivalent(value, backup);
   const taxFinancialYears = useMemo(() => availableTaxFinancialYears(backup), [backup]);
   const taxReport = useMemo(() => calculatePortfolioTaxReport(backup, { financialYear: taxFinancialYear }), [backup, taxFinancialYear]);
   const reconciliationReport = useMemo(() => buildReconciliationReport(backup), [backup]);
+  const scenarioPlan = useMemo(() => calculateScenarioPlan(backup, planningSettings), [backup, planningSettings]);
+  const rebalancingPlan = useMemo(() => calculateRebalancingPlan(backup, planningSettings), [backup, planningSettings]);
+  const goalDrawdowns = useMemo(() => calculateGoalDrawdowns(goalProgress, planningSettings), [goalProgress, planningSettings]);
+  const attribution = useMemo(() => calculatePerformanceAttribution(backup), [backup]);
   const scopedAnalytics = useMemo(() => buildScopedAnalytics({ backup, scope: analyticsScope, summary, insights, performance, holdingReturns, goalProgress, goalSummary }), [analyticsScope, backup, goalProgress, goalSummary, holdingReturns, insights, performance, summary]);
   const scopedPerformance = scopedAnalytics.performance;
   const chartData = scopedAnalytics.chartData;
@@ -681,7 +688,17 @@ export function TrackerApp() {
   }
 
   function exportBackup() {
-    const blob = new Blob([JSON.stringify({ ...backup, exportedAt: new Date().toISOString() }, null, 2)], {
+    const exportable = {
+      ...backup,
+      exportedAt: new Date().toISOString(),
+      settings: {
+        ...backup.settings,
+        planning: getPlanningSettings(backup),
+        displayCurrency: getDisplayCurrencySettings(backup),
+        taxProfile: getTaxProfile(backup)
+      }
+    };
+    const blob = new Blob([JSON.stringify(exportable, null, 2)], {
       type: "application/json"
     });
     const link = document.createElement("a");
@@ -1066,6 +1083,11 @@ export function TrackerApp() {
     setStatus("Display currency settings updated locally. Export JSON to preserve the setting.");
   }
 
+  function updatePlanningSettingsFromForm(patch: PlanningSettingsPatch) {
+    setBackup((current) => updatePlanningSettings(current, patch));
+    setStatus("Planning assumptions updated locally. Real portfolio valuations are unchanged; export JSON to preserve assumptions.");
+  }
+
   function resetPortfolio() {
     setBackup(createEmptyBackup("INR"));
     setErrors([]);
@@ -1300,6 +1322,7 @@ export function TrackerApp() {
           <button className={view === "holdings" ? "active" : ""} onClick={() => setView("holdings")}><Table2 size={18} /> Holdings</button>
           <button className={view === "transactions" ? "active" : ""} onClick={() => setView("transactions")}><Pencil size={18} /> Transactions</button>
           <button className={view === "goals" ? "active" : ""} onClick={() => setView("goals")}><Target size={18} /> Goals</button>
+          <button className={view === "planning" ? "active" : ""} onClick={() => setView("planning")}><TrendingUp size={18} /> Planning</button>
           <button className={view === "tax" ? "active" : ""} onClick={() => setView("tax")}><ReceiptText size={18} /> Tax</button>
           <button className={view === "snapshots" ? "active" : ""} onClick={() => setView("snapshots")}><Camera size={18} /> Snapshots</button>
           <button className={view === "add-entry" ? "active" : ""} onClick={() => setView("add-entry")}><PlusCircle size={18} /> Add Entry</button>
@@ -1484,7 +1507,10 @@ export function TrackerApp() {
                     {filteredHoldings.map((holding) => (
                       holdingEditMode ?
                         <HoldingEditRow key={holding.id} balance={backup.manualBalances.find((balance) => balance.id === holding.id)!} updateBalance={updateBalance} /> :
-                        <HoldingRow key={holding.id} holding={holding} baseCurrency={backup.baseCurrency} returns={holdingReturns.get(holding.id)} usdSecondary={usdSecondary} />
+                        <div className="holding-detail-group" key={holding.id}>
+                          <HoldingRow holding={holding} baseCurrency={backup.baseCurrency} returns={holdingReturns.get(holding.id)} usdSecondary={usdSecondary} expanded={selectedHoldingDetailId === holding.id} onDetails={() => setSelectedHoldingDetailId(selectedHoldingDetailId === holding.id ? "" : holding.id)} />
+                          {selectedHoldingDetailId === holding.id && <HoldingDetailDrawer backup={backup} holding={holding} returns={holdingReturns.get(holding.id)} taxReport={taxReport} goalProgress={goalProgress} currency={backup.baseCurrency} close={() => setSelectedHoldingDetailId("")} usdSecondary={usdSecondary} />}
+                        </div>
                     ))}
                   </div>
                 </>
@@ -1519,6 +1545,8 @@ export function TrackerApp() {
 
         {view === "tax" && <TaxView report={taxReport} currency={backup.baseCurrency} financialYears={taxFinancialYears} selectedFinancialYear={taxFinancialYear} setSelectedFinancialYear={setTaxFinancialYear} />}
 
+        {view === "planning" && <PlanningView backup={backup} settings={planningSettings} scenario={scenarioPlan} rebalancing={rebalancingPlan} goalDrawdowns={goalDrawdowns} attribution={attribution} updatePlanningSettings={updatePlanningSettingsFromForm} updateGoalRecord={updateGoalRecord} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
+
         {view === "snapshots" && <SnapshotsView {...{ backup, snapshotName, setSnapshotName, snapshotNotes, setSnapshotNotes, selectedSnapshotId, setSelectedSnapshotId, snapshotHistory, takePortfolioSnapshot, deletePortfolioSnapshot }} />}
 
         {view === "add-entry" && <AddEntryView {...{ backup, entryHoldingId, setEntryHoldingId, entryActionId, setEntryActionId, entryDate, setEntryDate, entryAmount, setEntryAmount, entryQuantity, setEntryQuantity, entryPrice, setEntryPrice, entryFees, setEntryFees, entryTaxes, setEntryTaxes, entryCurrentValue, setEntryCurrentValue, entryInvestedAmount, setEntryInvestedAmount, entryNotes, setEntryNotes, addManualEntryFromForm, goalName, setGoalName, goalType, setGoalType, goalMonthlyExpense, setGoalMonthlyExpense, goalInflation, setGoalInflation, goalTargetYear, setGoalTargetYear, goalMultiplier, setGoalMultiplier, goalEquityReturn, setGoalEquityReturn, goalDebtReturn, setGoalDebtReturn, goalGoldReturn, setGoalGoldReturn, goalCashReturn, setGoalCashReturn, goalOtherReturn, setGoalOtherReturn, addGoalFromForm, applyGoalPreset }} />}
@@ -1527,7 +1555,7 @@ export function TrackerApp() {
 
         {view === "data" && <DataAuditView report={reconciliationReport} currency={backup.baseCurrency} />}
 
-        {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} displaySettings={displayCurrencySettings} updateDisplaySettings={updateDisplayCurrencyFromForm} />}
+        {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} displaySettings={displayCurrencySettings} updateDisplaySettings={updateDisplayCurrencyFromForm} planningSettings={planningSettings} updatePlanningSettings={updatePlanningSettingsFromForm} />}
 
         {view === "backup" && (
           <section className="grid two">
@@ -1540,6 +1568,103 @@ export function TrackerApp() {
   );
 }
 
+
+
+function PlanningView({ backup, settings, scenario, rebalancing, goalDrawdowns, attribution, updatePlanningSettings, updateGoalRecord, currency, usdSecondary }: { backup: PortfolioBackup; settings: PlanningSettings; scenario: ScenarioPlan; rebalancing: RebalanceRow[]; goalDrawdowns: GoalDrawdownReport[]; attribution: PerformanceAttribution; updatePlanningSettings: (patch: PlanningSettingsPatch) => void; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+  const largestRebalance = [...rebalancing].sort((a, b) => Math.abs(b.driftValue) - Math.abs(a.driftValue))[0];
+  const drawdownRows = goalDrawdowns.map((row) => ({ name: row.goalName, value: row.surplusAtHorizon > 0 ? row.surplusAtHorizon : row.startingCorpus, tag: row.depletionYear ? "depletes " + row.depletionYear : "survives", category: "Others" as AssetCategory }));
+  return (
+    <section className="grid planning-workspace">
+      <div className="card wide-card planning-hero-card">
+        <div className="section-head">
+          <div><h2>Planning Lab</h2><p>Decision-support analytics built from the real canonical portfolio. Scenario, rebalance, and drawdown assumptions are saved in Settings and never mutate actual values, transactions, tax lots, or XIRR.</p></div>
+        </div>
+        <div className="holding-command-strip">
+          <MiniInsight label="Current value" value={formatMoney(scenario.currentValue, currency)} secondary={usdSecondary(scenario.currentValue)} detail="real portfolio total" />
+          <MiniInsight label="Stress value" value={formatMoney(scenario.stressedValue, currency)} secondary={usdSecondary(scenario.stressedValue)} detail={formatMoney(scenario.stressDelta, currency) + " scenario delta"} />
+          <MiniInsight label="One-year scenario" value={formatMoney(scenario.oneYearProjectedValue, currency)} secondary={usdSecondary(scenario.oneYearProjectedValue)} detail="using configured returns" />
+          <MiniInsight label="Largest drift" value={largestRebalance ? largestRebalance.category : "-"} detail={largestRebalance ? formatMoney(Math.abs(largestRebalance.driftValue), currency) + " " + largestRebalance.action : "target matched"} />
+        </div>
+      </div>
+
+      <div className="analytics-grid">
+        <div className="card planning-card">
+          <h2>Scenario Planning</h2>
+          <p className="chart-note compact-note">Hypothetical stress and one-year projection. Change assumptions below or in Settings; actual holdings stay unchanged.</p>
+          <div className="settings-grid compact-settings-grid">
+            <label><span>Equity return %</span><input type="number" step="0.1" value={settings.scenario.equityReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, equityReturn: Number(event.target.value) } })} /></label>
+            <label><span>Debt return %</span><input type="number" step="0.1" value={settings.scenario.debtReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, debtReturn: Number(event.target.value) } })} /></label>
+            <label><span>Inflation %</span><input type="number" step="0.1" value={settings.scenario.inflationRate} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, inflationRate: Number(event.target.value) } })} /></label>
+            <label><span>Equity correction %</span><input type="number" step="1" value={settings.scenario.marketCorrectionPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, marketCorrectionPercent: Number(event.target.value) } })} /></label>
+            <label><span>USD/INR shock %</span><input type="number" step="1" value={settings.scenario.usdInrShockPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, usdInrShockPercent: Number(event.target.value) } })} /></label>
+          </div>
+          <div className="table-wrap"><table><thead><tr><th>Class</th><th>Current</th><th>Stress</th><th>1Y projected</th><th>Return</th></tr></thead><tbody>{scenario.categoryRows.filter((row) => row.currentValue > 0).map((row) => <tr key={row.category}><td>{row.category}</td><td>{formatMoney(row.currentValue, currency)}</td><td>{formatMoney(row.stressedValue, currency)}</td><td>{formatMoney(row.oneYearProjectedValue, currency)}</td><td>{row.returnRate.toFixed(1)}%</td></tr>)}</tbody></table></div>
+        </div>
+
+        <div className="card planning-card">
+          <h2>Rebalancing View</h2>
+          <p className="chart-note compact-note">Current allocation versus configured targets. Suggested add/reduce values are advisory and do not place trades.</p>
+          <div className="settings-grid compact-settings-grid target-grid">{categoryOrder.map((category) => <label key={category}><span>{category} target %</span><input type="number" step="1" value={settings.targetAllocation[category]} onChange={(event) => updatePlanningSettings({ targetAllocation: { ...settings.targetAllocation, [category]: Number(event.target.value) } })} /></label>)}</div>
+          <div className="table-wrap"><table><thead><tr><th>Class</th><th>Current</th><th>Current %</th><th>Target %</th><th>Drift</th><th>Action</th></tr></thead><tbody>{rebalancing.map((row) => <tr key={row.category}><td>{row.category}</td><td>{formatMoney(row.currentValue, currency)}</td><td>{row.currentPercent.toFixed(1)}%</td><td>{row.targetPercent.toFixed(1)}%</td><td>{formatMoney(row.driftValue, currency)}</td><td><span className={"status-pill " + (row.action === "hold" ? "implemented" : row.action === "add" ? "partial" : "planned")}>{row.action}</span></td></tr>)}</tbody></table></div>
+        </div>
+
+        <ChartCard title="Performance Attribution"><AttributionBridge attribution={attribution} currency={currency} /></ChartCard>
+        <ChartCard title="Goal Longevity Summary"><RankingBar data={drawdownRows} formatValue={(value) => formatMoney(value, currency)} emptyMessage="Map goals to assets before drawdown planning." /></ChartCard>
+      </div>
+
+      <div className="card wide-card goal-drawdown-card">
+        <div className="section-head"><div><h2>Goal Drawdown Longevity</h2><p>Projects each goal from the goal date forward using mapped corpus, first-year spending, per-goal spend growth, horizon, withdrawal timing, and mapped asset return mix.</p></div></div>
+        <p className="chart-note compact-note">Each goal can use different drawdown assumptions. Settings stores the defaults used when a goal has not been customized.</p>
+        {goalDrawdowns.length === 0 ? <p className="message">Create goals and map assets to model drawdown longevity.</p> : <div className="drawdown-grid">{goalDrawdowns.map((row) => <GoalDrawdownCard key={row.goalId} report={row} updateGoalRecord={updateGoalRecord} currency={currency} usdSecondary={usdSecondary} />)}</div>}
+      </div>
+    </section>
+  );
+}
+
+function AttributionBridge({ attribution, currency }: { attribution: PerformanceAttribution; currency: string }) {
+  return (
+    <div className="attribution-bridge">
+      <div className="holding-command-strip compact-command-strip">
+        <MiniInsight label="External cash in" value={formatMoney(attribution.externalCashIn, currency)} detail="capital entering portfolio" />
+        <MiniInsight label="External cash out" value={formatMoney(attribution.externalCashOut, currency)} detail="capital returned/withdrawn" />
+        <MiniInsight label="Income" value={formatMoney(attribution.income, currency)} detail="dividend/interest rows" />
+        <MiniInsight label="Market gain" value={formatMoney(attribution.marketGain, currency)} detail="current value less cost basis" />
+      </div>
+      <div className="metric-bar-list attribution-list">{attribution.rows.map((row, index) => {
+        const max = Math.max(...attribution.rows.map((item) => Math.abs(item.value)), 1);
+        const width = Math.max(4, Math.abs(row.value) / max * 100);
+        const color = row.value >= 0 ? chartColors[index % chartColors.length] : "#dc2626";
+        return <div className="metric-bar-row" key={row.key} title={row.description} style={{ "--bar-color": color, "--bar-percent": width + "%" } as CSSProperties}><div className="metric-bar-label"><span>{index + 1}</span><strong>{row.label}</strong><em>{row.value >= 0 ? "adds" : "reduces"}</em></div><div className="metric-bar-track" aria-hidden="true"><span style={{ width: width + "%", background: color }} /></div><strong className="metric-bar-value">{formatMoney(row.value, currency)}</strong></div>;
+      })}</div>
+    </div>
+  );
+}
+
+function GoalDrawdownCard({ report, updateGoalRecord, currency, usdSecondary }: { report: GoalDrawdownReport; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+  return (
+    <div className="goal-drawdown-item">
+      <div className="section-head drawdown-item-head"><div><h3>{report.goalName}</h3><p>{report.depletionYear ? "Projected depletion in " + report.depletionYear : "Projected to last full horizon"} · weighted return {report.weightedReturn.toFixed(1)}%</p></div></div>
+      <div className="settings-grid compact-settings-grid drawdown-goal-settings">
+        <label><span>Spend growth %</span><input type="number" step="0.1" value={report.annualSpendGrowth} onChange={(event) => updateGoalRecord(report.goalId, { drawdownSpendGrowth: Number(event.target.value) })} /></label>
+        <label><span>Horizon years</span><input type="number" step="1" value={report.horizonYears} onChange={(event) => updateGoalRecord(report.goalId, { drawdownHorizonYears: Number(event.target.value) })} /></label>
+        <label><span>Withdrawal timing</span><select value={report.withdrawalTiming} onChange={(event) => updateGoalRecord(report.goalId, { drawdownWithdrawalTiming: event.target.value as Goal["drawdownWithdrawalTiming"] })}><option value="beginning">Beginning of year</option><option value="end">End of year</option></select></label>
+      </div>
+      <div className="holding-command-strip compact-command-strip">
+        <MiniInsight label="Start corpus" value={formatMoney(report.startingCorpus, currency)} secondary={usdSecondary(report.startingCorpus)} detail="at goal date" />
+        <MiniInsight label="First withdrawal" value={formatMoney(report.firstYearWithdrawal, currency)} secondary={usdSecondary(report.firstYearWithdrawal)} detail="first goal year" />
+        <MiniInsight label="Lasts" value={report.depletionYear ? String(report.lastsYears) + " years" : report.horizonYears + "+ years"} detail={report.depletionYear ? "depletion estimate" : "not depleted"} />
+        <MiniInsight label="Horizon surplus" value={formatMoney(report.surplusAtHorizon, currency)} secondary={usdSecondary(report.surplusAtHorizon)} detail="end of model" />
+      </div>
+      <GoalDrawdownChart report={report} currency={currency} />
+      <div className="table-wrap"><table><thead><tr><th>Year</th><th>Start corpus</th><th>Withdrawal</th><th>Growth</th><th>Ending corpus</th></tr></thead><tbody>{report.points.slice(0, 12).map((point) => <tr key={point.year}><td>{point.calendarYear}</td><td>{formatMoney(point.startingCorpus, currency)}</td><td>{formatMoney(point.withdrawal, currency)}</td><td>{formatMoney(point.growth, currency)}</td><td>{formatMoney(point.endingCorpus, currency)}</td></tr>)}</tbody></table></div>
+    </div>
+  );
+}
+
+function GoalDrawdownChart({ report, currency }: { report: GoalDrawdownReport; currency: string }) {
+  const points = report.points.map((point) => ({ ts: Date.parse(String(point.calendarYear) + "-01-01T00:00:00.000Z"), date: String(point.calendarYear), value: point.endingCorpus }));
+  return <NativeLineChart currency={currency} emptyMessage="No drawdown points yet." note="Planning line only: it uses configured assumptions and does not change actual portfolio values." series={[{ key: report.goalId, label: report.goalName, color: "#0e7490", points }]} />;
+}
 
 
 function SnapshotsView(props: {
@@ -1556,6 +1681,13 @@ function SnapshotsView(props: {
 }) {
   const selectedSnapshot = props.backup.snapshots.find((snapshot) => snapshot.id === props.selectedSnapshotId) ?? props.backup.snapshots.at(-1);
   const selectedAnalytics = selectedSnapshot ? snapshotAnalytics(selectedSnapshot) : undefined;
+  const [compareFromId, setCompareFromId] = useState(() => props.backup.snapshots[0]?.id ?? "");
+  const [compareToId, setCompareToId] = useState(() => props.backup.snapshots.at(-1)?.id ?? "");
+  const snapshotComparison = useMemo(() => {
+    const from = props.backup.snapshots.find((snapshot) => snapshot.id === (compareFromId || props.backup.snapshots[0]?.id));
+    const to = props.backup.snapshots.find((snapshot) => snapshot.id === (compareToId || props.backup.snapshots.at(-1)?.id));
+    return from && to && from.id !== to.id ? compareSnapshots(from, to) : null;
+  }, [compareFromId, compareToId, props.backup.snapshots]);
   const latestPoint = props.snapshotHistory.at(-1);
   const categoryKeys = categoryOrder.filter((category) => props.snapshotHistory.some((point) => (point.category[category] ?? 0) > 0));
   const regionKeys = topSnapshotKeys(props.snapshotHistory, "region", 5);
@@ -1582,6 +1714,8 @@ function SnapshotsView(props: {
           <MiniInsight label="Goal readiness" value={latestPoint && latestPoint.goalRequiredToday > 0 ? ((latestPoint.goalMappedCurrent / latestPoint.goalRequiredToday) * 100).toFixed(1) + "%" : "-"} detail="mapped now vs needed today" />
         </div>
       </div>
+
+      {props.backup.snapshots.length >= 2 && <SnapshotComparisonPanel snapshots={props.backup.snapshots} comparison={snapshotComparison} compareFromId={compareFromId || props.backup.snapshots[0]?.id || ""} compareToId={compareToId || props.backup.snapshots.at(-1)?.id || ""} setCompareFromId={setCompareFromId} setCompareToId={setCompareToId} currency={props.backup.baseCurrency} />}
 
       <div className="snapshot-history-grid">
         <ChartCard title="Snapshot History"><SnapshotPortfolioHistoryChart points={props.snapshotHistory} currency={props.backup.baseCurrency} /></ChartCard>
@@ -1616,6 +1750,21 @@ function SnapshotsView(props: {
         <FrozenSnapshotReport snapshot={selectedSnapshot} analytics={selectedAnalytics} currency={props.backup.baseCurrency} />
       </div>
     </section>
+  );
+}
+
+
+function SnapshotComparisonPanel({ snapshots, comparison, compareFromId, compareToId, setCompareFromId, setCompareToId, currency }: { snapshots: PortfolioBackup["snapshots"]; comparison: SnapshotComparison | null; compareFromId: string; compareToId: string; setCompareFromId: (value: string) => void; setCompareToId: (value: string) => void; currency: string }) {
+  const deltaRows = comparison ? categoryOrder.map((category) => ({ name: category, value: Math.abs(comparison.categoryDeltas[category]), tag: comparison.categoryDeltas[category] >= 0 ? "up" : "down", category })).filter((row) => row.value > 0) : [];
+  return (
+    <div className="card wide-card snapshot-compare-card">
+      <div className="section-head"><div><h2>Snapshot Comparison</h2><p>Compare two frozen JSON snapshots without fetching market data. Deltas show what changed between saved states.</p></div></div>
+      <div className="snapshot-compare-controls">
+        <label><span>From</span><select value={compareFromId} onChange={(event) => setCompareFromId(event.target.value)}>{snapshots.map((snapshot) => <option value={snapshot.id} key={snapshot.id}>{snapshot.name} · {snapshot.asOfDate}</option>)}</select></label>
+        <label><span>To</span><select value={compareToId} onChange={(event) => setCompareToId(event.target.value)}>{snapshots.map((snapshot) => <option value={snapshot.id} key={snapshot.id}>{snapshot.name} · {snapshot.asOfDate}</option>)}</select></label>
+      </div>
+      {!comparison ? <p className="message">Choose two different snapshots to compare.</p> : <><div className="holding-command-strip"><MiniInsight label="Net worth delta" value={formatMoney(comparison.netWorthDelta, currency)} detail={comparison.fromName + " → " + comparison.toName} /><MiniInsight label="Invested delta" value={formatMoney(comparison.investedDelta, currency)} detail="frozen cost basis change" /><MiniInsight label="Profit delta" value={formatMoney(comparison.profitDelta, currency)} detail="frozen P/L change" /><MiniInsight label="Goal readiness delta" value={formatMoney(comparison.goalMappedDelta - comparison.goalRequiredTodayDelta, currency)} detail="mapped minus need movement" /></div><ChartCard title="Asset Class Delta"><RankingBar data={deltaRows} formatValue={(value) => formatMoney(value, currency)} emptyMessage="No asset-class movement between selected snapshots." /></ChartCard></>}
+    </div>
   );
 }
 
@@ -2036,6 +2185,7 @@ function ImportsView(props: {
   const npsTransactionCount = npsParses.reduce((sum, parsed) => sum + parsed.transactions.length, 0);
   const npsWarningCount = npsParses.reduce((sum, parsed) => sum + parsed.warnings.length, 0);
   const npsHasErrors = npsParses.some((parsed) => parsed.errors.length > 0);
+  const stagedPreview = nativeStagedPreviewRows(props.backup, props.stagedCas ? [props.stagedCas] : [], props.stagedInd ? [props.stagedInd] : [], props.stagedEpfo ?? [], props.stagedNps ?? []);
   return (
     <section className="grid">
       <div className="grid two">
@@ -2055,6 +2205,7 @@ function ImportsView(props: {
           {props.indParse && <div className="detection"><div><span>Rows</span><strong>{props.indParse.rows.length}</strong></div><div><span>Canonical</span><strong>{props.indParse.canonicalRows.length}</strong></div><div><span>Positions</span><strong>{props.indParse.positions.length}</strong></div><div><span>Warnings</span><strong>{props.indParse.warnings.length}</strong></div><button className="primary" onClick={props.commitStagedIndMoney} disabled={!props.stagedInd || props.indParse.errors.length > 0}>Commit INDMoney Import</button></div>}
           {props.epfoParse && <div className="detection"><div><span>Files</span><strong>{epfoParses.length}</strong></div><div><span>Balances</span><strong>{epfoBalanceCount}</strong></div><div><span>Contributions</span><strong>{epfoContributionCount}</strong></div><div><span>Interest</span><strong>{epfoInterestCount}</strong></div><div><span>Latest as of</span><strong>{latestAsOfDate(epfoParses.map((parsed) => parsed.asOfDate))}</strong></div><div><span>Warnings</span><strong>{epfoWarningCount}</strong></div><button className="primary" onClick={props.commitStagedEpfo} disabled={!props.stagedEpfo || epfoHasErrors}>Commit PF Import</button></div>}
           {props.npsParse && <div className="detection"><div><span>Files</span><strong>{npsParses.length}</strong></div><div><span>Schemes</span><strong>{npsHoldingCount}</strong></div><div><span>Transactions</span><strong>{npsTransactionCount}</strong></div><div><span>Latest as of</span><strong>{latestAsOfDate(npsParses.map((parsed) => parsed.asOfDate))}</strong></div><div><span>Warnings</span><strong>{npsWarningCount}</strong></div><button className="primary" onClick={props.commitStagedNps} disabled={!props.stagedNps || npsHasErrors}>Commit NPS Import</button></div>}
+          <NativeStagedPreviewPanel rows={stagedPreview} currency={props.backup.baseCurrency} />
         </div>
         <div className="card"><h2>Provider Support</h2><div className="support-list">{providerImportSpecs.map((spec) => <div className="support-row" key={spec.id}><span>{spec.label}</span><strong className={`status-pill ${spec.status}`}>{spec.status}</strong></div>)}</div></div>
       </div>
@@ -2077,12 +2228,20 @@ function TaxView({ report, currency, financialYears, selectedFinancialYear, setS
   const unrealizedGainRows = unrealizedGrouped.filter((row) => row.gain > 0).slice(0, 8).map((row) => ({ name: row.assetName + " · " + taxBucketLabel(row.bucket), value: row.gain, tag: "net rough tax " + formatMoney(row.potentialTaxBeforeSetoff, currency) }));
   const harvestRows = report.unrealized.harvestCandidates.slice(0, 12);
   const detailRows = unrealizedGrouped.slice(0, 100);
+  function exportTaxSummary() {
+    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), report }, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "portfolio-tax-summary-" + selectedFinancialYear + ".json";
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
   return (
     <section className="grid tax-workspace">
       <div className="card wide-card">
         <div className="section-head">
           <div><h2>Portfolio Tax Estimates</h2><p>Estimate layer for an Indian resident individual. Realized tax uses FY sale lots after bucket-level loss set-off/exemption. Unrealized tax is only a rough what-if if open lots are sold now.</p></div>
-          <label className="tax-year-picker"><span>Financial year</span><select value={selectedFinancialYear} onChange={(event) => setSelectedFinancialYear(event.target.value)}>{financialYears.map((year) => <option value={year} key={year}>FY {year}</option>)}</select></label>
+          <div className="tax-head-actions"><label className="tax-year-picker"><span>Financial year</span><select value={selectedFinancialYear} onChange={(event) => setSelectedFinancialYear(event.target.value)}>{financialYears.map((year) => <option value={year} key={year}>FY {year}</option>)}</select></label><button onClick={exportTaxSummary}><Download size={15} /> Export FY Summary</button></div>
         </div>
         <div className="holding-command-strip">
           <MiniInsight label="Estimated tax payable" value={formatMoney(report.estimatedTax.totalTax, currency)} detail="realized capital-gain tax + taxable income tax" />
@@ -2155,7 +2314,7 @@ function DataAuditView({ report, currency }: { report: ReturnType<typeof buildRe
   );
 }
 
-function SettingsView({ profile, updateTaxProfile, displaySettings, updateDisplaySettings }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void; displaySettings: DisplayCurrencySettings; updateDisplaySettings: (patch: Partial<DisplayCurrencySettings>) => void }) {
+function SettingsView({ profile, updateTaxProfile, displaySettings, updateDisplaySettings, planningSettings, updatePlanningSettings }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void; displaySettings: DisplayCurrencySettings; updateDisplaySettings: (patch: Partial<DisplayCurrencySettings>) => void; planningSettings: PlanningSettings; updatePlanningSettings: (patch: PlanningSettingsPatch) => void }) {
   return (
     <section className="grid settings-workspace">
       <div className="card wide-card">
@@ -2170,6 +2329,17 @@ function SettingsView({ profile, updateTaxProfile, displaySettings, updateDispla
         </div>
         <div className="settings-panel">
           <label className="toggle-row"><input type="checkbox" checked={displaySettings.showUsdEquivalent} onChange={(event) => updateDisplaySettings({ showUsdEquivalent: event.target.checked })} /><span><strong>Show USD equivalents</strong><small>Display-only secondary USD values under INR portfolio, holding, and goal amounts when a real USD/INR snapshot exists.</small></span></label>
+        </div>
+        <div className="settings-panel planning-settings-panel">
+          <h3>Planning Assumptions</h3>
+          <p className="message">These global values feed Scenario Planning and Rebalancing. Goal drawdown spend growth, horizon, and withdrawal timing are edited per goal in Planning because each goal can behave differently. All assumptions are hypothetical; actual portfolio values and tax lots remain unchanged.</p>
+          <div className="settings-grid">
+            <label><span>Scenario equity return %</span><input type="number" step="0.1" value={planningSettings.scenario.equityReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, equityReturn: Number(event.target.value) } })} /></label>
+            <label><span>Scenario debt return %</span><input type="number" step="0.1" value={planningSettings.scenario.debtReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, debtReturn: Number(event.target.value) } })} /></label>
+            <label><span>Planning inflation %</span><input type="number" step="0.1" value={planningSettings.scenario.inflationRate} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, inflationRate: Number(event.target.value) } })} /></label>
+            <label><span>Stress correction %</span><input type="number" step="1" value={planningSettings.scenario.marketCorrectionPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, marketCorrectionPercent: Number(event.target.value) } })} /></label>
+            <label><span>USD/INR shock %</span><input type="number" step="1" value={planningSettings.scenario.usdInrShockPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, usdInrShockPercent: Number(event.target.value) } })} /></label>
+          </div>
         </div>
         <p className="message">The Tax section intentionally estimates portfolio tax only. Salary, deductions, Form 16, full ITR schedules, and ESPP payroll/perquisite treatment stay outside this tracker unless explicitly added later.</p>
       </div>
@@ -2199,6 +2369,48 @@ type TaxGainRowWithTrace = ReturnType<typeof calculatePortfolioTaxReport>["reali
 
 function hasTaxTrace(row: ReturnType<typeof calculatePortfolioTaxReport>["realized"]["rows"][number]): row is TaxGainRowWithTrace {
   return Boolean(row.trace);
+}
+
+
+type NativePreviewImport = { transactions?: unknown[]; manualBalances?: Array<{ value?: number; currency?: string; label?: string }>; priceSnapshots?: unknown[]; importRun?: { provider?: string; fileName?: string; label?: string } };
+
+type NativeStagedPreviewRow = { provider: string; label: string; balances: number; transactions: number; prices: number; estimatedValue: number; afterHoldings: number; afterTransactions: number };
+
+function nativeStagedPreviewRows(backup: PortfolioBackup, ...groups: NativePreviewImport[][]): NativeStagedPreviewRow[] {
+  return groups.flatMap((imports) => imports.length === 0 ? [] : imports.map((item) => {
+    const balances = item.manualBalances ?? [];
+    const transactions = item.transactions ?? [];
+    const prices = item.priceSnapshots ?? [];
+    const estimatedValue = balances.reduce((sum, balance) => sum + (typeof balance.value === "number" ? balance.value : 0), 0);
+    return {
+      provider: item.importRun?.provider ?? "staged",
+      label: item.importRun?.label ?? item.importRun?.fileName ?? item.importRun?.provider ?? "Staged import",
+      balances: balances.length,
+      transactions: transactions.length,
+      prices: prices.length,
+      estimatedValue: roundMoney(estimatedValue),
+      afterHoldings: backup.manualBalances.length + balances.length,
+      afterTransactions: backup.transactions.length + transactions.length
+    };
+  }));
+}
+
+function NativeStagedPreviewPanel({ rows, currency }: { rows: NativeStagedPreviewRow[]; currency: string }) {
+  if (rows.length === 0) return null;
+  const totals = rows.reduce((sum, row) => ({ balances: sum.balances + row.balances, transactions: sum.transactions + row.transactions, prices: sum.prices + row.prices, estimatedValue: sum.estimatedValue + row.estimatedValue }), { balances: 0, transactions: 0, prices: 0, estimatedValue: 0 });
+  return (
+    <div className="native-preview-panel">
+      <h3>Native Import Preview</h3>
+      <p className="message">Parsed native files are staged here before commit. Review counts and warnings, then commit to write canonical records.</p>
+      <div className="holding-command-strip compact-command-strip">
+        <MiniInsight label="Staged holdings" value={String(totals.balances)} detail="balances ready to commit" />
+        <MiniInsight label="Staged transactions" value={String(totals.transactions)} detail="ledger rows ready" />
+        <MiniInsight label="Market rows" value={String(totals.prices)} detail="price/NAV/FX snapshots" />
+        <MiniInsight label="Staged value" value={formatMoney(totals.estimatedValue, currency)} detail="local-currency estimate before FX" />
+      </div>
+      <div className="table-wrap"><table><thead><tr><th>Provider</th><th>File/import</th><th>Holdings</th><th>Transactions</th><th>Prices</th><th>After holdings</th><th>After transactions</th></tr></thead><tbody>{rows.map((row, index) => <tr key={row.provider + row.label + index}><td>{row.provider}</td><td>{row.label}</td><td>{row.balances}</td><td>{row.transactions}</td><td>{row.prices}</td><td>{row.afterHoldings}</td><td>{row.afterTransactions}</td></tr>)}</tbody></table></div>
+    </div>
+  );
 }
 
 function TaxRuleTrace({ rows, currency }: { rows: TaxGainRowWithTrace[]; currency: string }) {
@@ -2415,7 +2627,7 @@ function NativeLineChart({ series, currency, note, emptyMessage }: { series: Nat
 
   const width = 780;
   const height = 320;
-  const pad = { left: 76, right: 18, top: 30, bottom: 52 };
+  const pad = { left: 76, right: 22, top: 30, bottom: 68 };
   const xs = allPoints.map((point) => point.ts);
   const values = allPoints.map((point) => point.value);
   const minX = Math.min(...xs);
@@ -2442,7 +2654,7 @@ function NativeLineChart({ series, currency, note, emptyMessage }: { series: Nat
           const y = yFor(tick);
           return <g key={tick.toFixed(2)}><line className="native-line-grid" x1={pad.left} x2={width - pad.right} y1={y} y2={y} /><text className="native-line-axis" x={pad.left - 10} y={y + 4} textAnchor="end">{compactMoney(tick)}</text></g>;
         })}
-        {xTicks.map((tick) => <text className="native-line-axis" key={tick.ts} x={xFor(tick.ts)} y={height - 18} textAnchor="middle">{tick.label}</text>)}
+        {xTicks.map((tick) => <text className="native-line-axis native-line-x-axis" key={tick.ts} x={xFor(tick.ts)} y={height - 24} textAnchor="end" transform={"rotate(-35 " + xFor(tick.ts) + " " + (height - 24) + ")"}>{tick.label}</text>)}
         {visibleSeries.map((item) => {
           const path = linePath(item.points, xFor, yFor);
           return (
@@ -2491,14 +2703,19 @@ function linePath(points: NativeLinePoint[], xFor: (ts: number) => number, yFor:
 function nativeTimelineTicks(points: Array<{ ts: number; date: string }>): Array<{ ts: number; label: string }> {
   if (points.length === 0) return [];
   const sorted = [...points].sort((a, b) => a.ts - b.ts);
-  const ticks = new Map<number, string>();
-  ticks.set(sorted[0].ts, timelineTickLabel(sorted[0].ts));
+  const unique: Array<{ ts: number; label: string }> = [];
+  const seen = new Set<string>();
   for (const point of sorted) {
     const label = timelineTickLabel(point.ts);
-    if (![...ticks.values()].includes(label)) ticks.set(point.ts, label);
+    if (seen.has(label)) continue;
+    seen.add(label);
+    unique.push({ ts: point.ts, label });
   }
-  ticks.set(sorted.at(-1)!.ts, timelineTickLabel(sorted.at(-1)!.ts));
-  return [...ticks.entries()].map(([ts, label]) => ({ ts, label })).slice(0, 7);
+  if (unique.length <= 5) return unique;
+  const lastIndex = unique.length - 1;
+  const indexes = new Set<number>();
+  for (let index = 0; index < 5; index += 1) indexes.add(Math.round((index / 4) * lastIndex));
+  return [...indexes].sort((a, b) => a - b).map((index) => unique[index]);
 }
 
 function snapshotPointTs(point: Pick<SnapshotTimelinePoint, "createdAt" | "asOfDate">): number {
@@ -2750,7 +2967,7 @@ function RankingBar({ data, formatValue, emptyMessage, tone = "value" }: Ranking
     </div>
   );
 }
-function HoldingRow({ holding, baseCurrency, returns, usdSecondary }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; returns?: HoldingReturn; usdSecondary: (value: number | undefined) => string | undefined }) {
+function HoldingRow({ holding, baseCurrency, returns, usdSecondary, expanded, onDetails }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; returns?: HoldingReturn; usdSecondary: (value: number | undefined) => string | undefined; expanded: boolean; onDetails: () => void }) {
   const value = holding.valueInBase === undefined ? "FX needed" : formatMoney(holding.valueInBase, baseCurrency);
   const price = holding.price === undefined ? "-" : formatMoney(holding.price, holding.currency);
   const priceDetail = holding.price === undefined ? "not available" : holding.quantity === undefined ? "latest unit price" : "per unit/share";
@@ -2760,8 +2977,33 @@ function HoldingRow({ holding, baseCurrency, returns, usdSecondary }: { holding:
   const costKnown = returns?.costBasisKnown === true;
   const xirrDetail = returns?.missingFx.length ? "FX needed" : returns?.hasCashFlows ? "cash-flow return" : "needs transactions";
   const subtype = assetSubtypeLabel(holding);
-  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge subtype-badge">{subtype}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong>{usdSecondary(holding.valueInBase) && <em className="usd-secondary">{usdSecondary(holding.valueInBase)}</em>}<small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Price</span><strong>{price}</strong><small>{priceDetail}</small></div><div className="holding-metric"><span>Tracked</span><strong>{trackedValue}</strong><small>{trackedDetail}</small></div><div className="holding-metric"><span>Invested</span><strong>{costKnown ? formatMoney(returns?.netInvested ?? 0, baseCurrency) : "-"}</strong><small>{costKnown ? "remaining cost basis" : "not provided"}</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{xirrDetail}</small></div></div>;
+  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge subtype-badge">{subtype}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong>{usdSecondary(holding.valueInBase) && <em className="usd-secondary">{usdSecondary(holding.valueInBase)}</em>}<small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Price</span><strong>{price}</strong><small>{priceDetail}</small></div><div className="holding-metric"><span>Tracked</span><strong>{trackedValue}</strong><small>{trackedDetail}</small></div><div className="holding-metric"><span>Invested</span><strong>{costKnown ? formatMoney(returns?.netInvested ?? 0, baseCurrency) : "-"}</strong><small>{costKnown ? "remaining cost basis" : "not provided"}</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{xirrDetail}</small></div><button className="detail-button" onClick={onDetails} aria-expanded={expanded}>{expanded ? "Hide" : "Details"}</button></div>;
 }
+
+function HoldingDetailDrawer({ backup, holding, returns, taxReport, goalProgress, currency, close, usdSecondary }: { backup: PortfolioBackup; holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; returns?: HoldingReturn; taxReport: ReturnType<typeof calculatePortfolioTaxReport>; goalProgress: GoalProgress[]; currency: string; close: () => void; usdSecondary: (value: number | undefined) => string | undefined }) {
+  const balance = backup.manualBalances.find((item) => item.id === holding.id);
+  const transactions = balance ? backup.transactions.filter((tx) => tx.accountId === balance.accountId && (balance.instrumentId ? tx.instrumentId === balance.instrumentId : !tx.instrumentId)).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 80) : [];
+  const goalRows = goalProgress.flatMap((goal) => goal.mappedHoldings.filter((mapped) => mapped.balance.id === holding.id).map((mapped) => ({ goal: goal.goal.name, percent: mapped.mappedPercent, value: mapped.value, projected: mapped.projectedValue })));
+  const realizedTaxRows = taxReport.realized.byAssetBucket.filter((row) => row.assetName === holding.label || displayHoldingName(row.assetName) === displayHoldingName(holding.label));
+  const unrealizedTaxRows = taxReport.unrealized.byAssetBucket.filter((row) => row.assetName === holding.label || displayHoldingName(row.assetName) === displayHoldingName(holding.label));
+  return (
+    <div className="holding-detail-drawer card wide-card" role="dialog" aria-label="Holding detail">
+      <div className="section-head"><div><h2>{displayHoldingName(holding.label)}</h2><p>{holding.assetKind} · {holding.region} · {holding.provider} · detailed ledger and planning context</p></div><button onClick={close}>Hide details</button></div>
+      <div className="holding-command-strip compact-command-strip">
+        <MiniInsight label="Current value" value={holding.valueInBase === undefined ? "FX needed" : formatMoney(holding.valueInBase, currency)} secondary={usdSecondary(holding.valueInBase)} detail={holding.quantity === undefined ? "no quantity" : formatNumber(holding.quantity) + " units/shares"} />
+        <MiniInsight label="Cost basis" value={returns?.costBasisKnown ? formatMoney(returns.netInvested, currency) : "-"} detail={returns?.costBasisKnown ? "remaining basis" : "not available"} />
+        <MiniInsight label="Profit / Loss" value={returns?.profit === undefined ? "-" : formatMoney(returns.profit, currency)} detail={returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"} />
+        <MiniInsight label="XIRR" value={returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"} detail={returns?.hasCashFlows ? "cash-flow return" : "needs transactions"} />
+      </div>
+      <div className="detail-drawer-grid">
+        <div className="detail-pane"><h3>Goal Mappings</h3>{goalRows.length === 0 ? <p className="message">Not mapped to a goal.</p> : <div className="table-wrap"><table><thead><tr><th>Goal</th><th>Mapped %</th><th>Current</th><th>Projected</th></tr></thead><tbody>{goalRows.map((row) => <tr key={row.goal}><td>{row.goal}</td><td>{row.percent.toFixed(1)}%</td><td>{formatMoney(row.value, currency)}</td><td>{formatMoney(row.projected, currency)}</td></tr>)}</tbody></table></div>}</div>
+        <div className="detail-pane"><h3>Tax Lots</h3>{realizedTaxRows.length === 0 && unrealizedTaxRows.length === 0 ? <p className="message">No tax rows for selected FY.</p> : <div className="table-wrap"><table><thead><tr><th>Mode</th><th>Bucket</th><th>Qty</th><th>Gain/Loss</th><th>Tax</th></tr></thead><tbody>{realizedTaxRows.map((row) => <tr key={row.assetName + row.bucket + "realized"}><td>Realized</td><td>{taxBucketLabel(row.bucket)}</td><td>{formatNumber(row.quantity)}</td><td>{formatMoney(row.gain, currency)}</td><td>{formatMoney(row.allocatedTaxAfterSetoff, currency)}</td></tr>)}{unrealizedTaxRows.map((row) => <tr key={row.assetName + row.bucket + "unrealized"}><td>Unrealized</td><td>{taxBucketLabel(row.bucket)}</td><td>{formatNumber(row.quantity)}</td><td>{formatMoney(row.gain, currency)}</td><td>{formatMoney(row.potentialTaxBeforeSetoff, currency)}</td></tr>)}</tbody></table></div>}</div>
+      </div>
+      <div className="detail-pane"><h3>Recent Transactions</h3>{transactions.length === 0 ? <p className="message">No matching transactions for this holding.</p> : <div className="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Qty</th><th>Fees/tax</th><th>Source</th></tr></thead><tbody>{transactions.map((tx) => <tr key={tx.id}><td>{tx.date}</td><td>{tx.type}</td><td>{formatMoney(tx.amount, tx.currency)}</td><td>{tx.quantity === undefined ? "-" : formatNumber(tx.quantity)}</td><td>{tx.fees || tx.taxes ? formatMoney((tx.fees ?? 0) + (tx.taxes ?? 0), tx.currency) : "-"}</td><td>{tx.source.provider ?? tx.source.type}</td></tr>)}</tbody></table></div>}</div>
+    </div>
+  );
+}
+
 function HoldingEditRow({ balance, updateBalance }: { balance: ManualBalance; updateBalance: (id: string, patch: Partial<ManualBalance>) => void }) {
   const taperMode = balance.taperMode ?? "none";
   return <div className="edit-row holding-edit-row"><input value={balance.label} onChange={(event) => updateBalance(balance.id, { label: event.target.value })} /><select value={balance.category} onChange={(event) => updateBalance(balance.id, { category: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select><input value={balance.currency} onChange={(event) => updateBalance(balance.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={balance.value} onChange={(event) => updateBalance(balance.id, { value: Number(event.target.value) })} /><input type="number" step="0.01" placeholder="Invested" value={balance.investedAmount ?? ""} onChange={(event) => updateBalance(balance.id, { investedAmount: event.target.value === "" ? undefined : Number(event.target.value) })} /><input placeholder="Inv curr" value={balance.investedCurrency ?? ""} onChange={(event) => updateBalance(balance.id, { investedCurrency: event.target.value === "" ? undefined : event.target.value.toUpperCase() })} /><input type="date" value={balance.investedAsOfDate ?? balance.asOfDate} onChange={(event) => updateBalance(balance.id, { investedAsOfDate: event.target.value })} /><input type="number" step="0.000001" value={balance.quantity ?? ""} onChange={(event) => updateBalance(balance.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={balance.price ?? ""} onChange={(event) => updateBalance(balance.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><select className="taper-mode-select" value={taperMode} onChange={(event) => updateBalance(balance.id, { taperMode: event.target.value as TaperMode, taperFactor: event.target.value === "custom" ? (balance.taperFactor ?? 0.05) : undefined })}>{taperPresets.map((preset) => <option key={preset.mode} value={preset.mode}>{preset.label}</option>)}</select><input className="taper-factor-input" type="number" min="0" max="1" step="0.01" placeholder="k" disabled={taperMode !== "custom"} value={taperMode === "custom" ? (balance.taperFactor ?? 0.05) : ""} onChange={(event) => updateBalance(balance.id, { taperFactor: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="date" value={balance.asOfDate} onChange={(event) => updateBalance(balance.id, { asOfDate: event.target.value })} /><input value={balance.notes ?? ""} onChange={(event) => updateBalance(balance.id, { notes: event.target.value })} /></div>;

@@ -12,7 +12,8 @@ This file is machine-readable operating guidance for AI coding agents working on
 - Preserve user/manual edits during reimports unless the user explicitly chooses overwrite.
 - Do not silently accept uncertain imported data. Stage it and require review.
 - Keep the canonical JSON backup format versioned and migration-friendly.
-- Goals, goal mappings, snapshots, and settings are part of the canonical JSON snapshot and must round-trip through browser export/restore tests when changed.
+- Goals, goal mappings, snapshots, settings, planning assumptions, and planning overlays are part of the canonical JSON snapshot and must round-trip through browser export/restore tests when changed.
+- Be explicit about factual source-of-truth analytics versus advisory overlays. Scenario planning, rebalance suggestions, goal drawdowns, USD equivalents, and tapering are add-ons; they must never mask or mutate actual imports, current value, cost basis, tax, XIRR, market refresh, or frozen snapshots.
 
 ## Preferred Commands
 
@@ -77,9 +78,17 @@ Current automated CAS support includes browser PDF upload, password entry, clien
 
 ## Data Reconciliation Rule
 
-- Data and Reconciliation is the trust layer. It must surface import counts, source totals, validation checks, parser warnings, market-data gaps, per-holding/FX market-data health, and the Data Quality Matrix. Keep the Data Quality Matrix in Data/Audit, not in the main Analytics cockpit.
+- Data and Reconciliation is the trust layer. It must surface import counts, source totals, validation checks, parser warnings, market-data gaps, per-holding/FX market-data health, staged import previews, and the Data Quality Matrix. Keep the Data Quality Matrix in Data/Audit, not in the main Analytics cockpit.
 - Do not hide uncertain data quality behind clean UI. If finite values, FX, prices, NAVs, or parser confidence are missing, report it explicitly. Manual CSV imports should offer a non-mutating preview path before commit when possible.
-- Browser smoke must cover Tax, Data, Settings, core analytics, holdings, goals, snapshots, JSON exact restore plus explicit refresh, responsive layouts at desktop/laptop/tablet/mobile representative widths, visible charts, default-expanded chevron disclosure controls for sections and subsections with no visible Expand/Collapse text pills, clear heading hierarchy where section titles visually outrank nested subsection labels, goal term hover/focus explanations, no fake axis rows, no chart/table page overflow, contained scrolling for wide tables, non-wrapping numeric finance cells, no cramped/escaping cards, and native tooltip behavior.
+- Browser smoke must cover Tax, Data, Settings, core analytics, holdings, goals, planning, snapshots, JSON exact restore plus explicit refresh, responsive layouts at desktop/laptop/tablet/mobile representative widths, visible charts, readable native timeline axes, inline holding detail expansion, default-expanded chevron disclosure controls for sections and subsections with no visible Expand/Collapse text pills, clear heading hierarchy where section titles visually outrank nested subsection labels, goal term hover/focus explanations, no fake axis rows, no chart/table page overflow, contained scrolling for wide tables, non-wrapping numeric finance cells, no cramped/escaping cards, and native tooltip behavior.
+
+## Planning Overlay Rule
+
+- Planning features are advisory and must be visibly separate from source-of-truth portfolio analytics. Scenario/stress/rebalance/drawdown outputs may use configurable assumptions, but actual holdings, current values, invested cost, P/L, tax, XIRR, imports, and explicit market refresh remain factual ledger/market-data paths.
+- Planning assumptions must persist in canonical JSON settings, restore exactly, and be editable from Settings without forcing users to maintain CSV assumptions.
+- Goal drawdown/longevity must be calculated from goal mappings, per-goal drawdown assumptions, and category returns. It must show corpus path, depletion year or horizon surplus, and not imply guaranteed returns. Global planning settings may provide defaults, but visible drawdown controls belong with the individual goal result.
+- Snapshot comparison must compare frozen saved snapshot analytics only. It must not fetch market data, recalculate live values, or alter existing snapshots.
+- Rebalance suggestions must be expressed as planning deltas against target allocation and must not create transactions or modify holdings unless a separate explicit action is implemented test-first.
 
 ## INR-First Analytics Rule
 

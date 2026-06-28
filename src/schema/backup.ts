@@ -145,6 +145,9 @@ export const goalSchema = z.object({
   goldReturn: z.number().min(0).max(100).default(6),
   cashReturn: z.number().min(0).max(100).default(6),
   otherReturn: z.number().min(0).max(100).default(6),
+  drawdownSpendGrowth: z.number().min(0).max(100).default(6),
+  drawdownHorizonYears: z.number().int().min(1).max(100).default(45),
+  drawdownWithdrawalTiming: z.enum(["beginning", "end"]).default("beginning"),
   createdAt: timestampSchema,
   updatedAt: timestampSchema
 });

@@ -63,6 +63,9 @@ describe("canonical backup schema", () => {
       goldReturn: 6,
       cashReturn: 6,
       otherReturn: 6,
+      drawdownSpendGrowth: 6,
+      drawdownHorizonYears: 45,
+      drawdownWithdrawalTiming: "beginning",
       createdAt: "2026-06-22T00:00:00.000Z",
       updatedAt: "2026-06-22T00:00:00.000Z"
     });

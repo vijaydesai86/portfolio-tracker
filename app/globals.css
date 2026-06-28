@@ -5244,3 +5244,90 @@ textarea {
     align-items: flex-start;
   }
 }
+
+
+/* Planning drawdown and inline holding detail refinement */
+.drawdown-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.goal-drawdown-item {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #d9e7ef;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+
+.goal-drawdown-item .drawdown-item-head h3 {
+  margin: 0 0 4px;
+  font-size: clamp(1.1rem, 1.6vw, 1.35rem);
+  line-height: 1.2;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.goal-drawdown-item .drawdown-item-head p {
+  font-size: 0.84rem;
+  color: #475569;
+}
+
+.drawdown-goal-settings {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  padding: 12px;
+  border: 1px solid #e2edf3;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.goal-drawdown-item .native-line-chart-block {
+  min-height: 300px;
+}
+
+.goal-drawdown-item .native-line-chart {
+  min-height: 270px;
+}
+
+.native-line-x-axis {
+  font-size: 11px;
+  dominant-baseline: central;
+}
+
+.holding-detail-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.holding-detail-group .holding-detail-drawer {
+  margin: 0 0 8px;
+  border-color: #cbdce5;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.08);
+}
+
+.holding-detail-group .holding-row:has(+ .holding-detail-drawer) {
+  border-color: #0f766e;
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.08);
+}
+
+@media (max-width: 760px) {
+  .goal-drawdown-item {
+    padding: 12px;
+  }
+
+  .drawdown-goal-settings {
+    grid-template-columns: 1fr;
+  }
+
+  .native-line-axis {
+    font-size: 10px;
+  }
+
+  .goal-drawdown-item .table-wrap table {
+    min-width: 760px;
+  }
+}

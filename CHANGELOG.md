@@ -4,6 +4,10 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Added a Planning workspace with JSON-persisted scenario assumptions, stress projection, target-allocation drift, rebalance suggestions, performance attribution, snapshot comparison, and goal corpus longevity/drawdown analytics; refined drawdown into per-goal spend-growth/horizon/withdrawal assumptions, made holding details expand inline below the selected row, tightened native timeline tick sampling, and added real-browser Selenium coverage for responsive planning, holding detail drilldowns, snapshot comparison, settings persistence, and exported planning assumptions.
+
+- Added staged native import previews for CAS, INDMoney, PF, and NPS batches plus a holding detail drawer for per-holding transactions, goal mappings, and tax lots without changing committed portfolio math before user confirmation.
+
 - Restructured the Analytics cockpit into Overview, Allocation, Returns, Risk, and History tabs; moved asset-class deep dives into Allocation; added scope-aware returns/risk panels, a Goals coverage matrix, a Data-section-only Data Quality Matrix, and an optional JSON-persisted display-only USD-equivalent toggle backed by real stored USD/INR snapshots; extended domain and Selenium real-browser coverage for these changes.
 
 - Fixed Manual CSV Preview rendering so metric tiles and preview tables stay contained inside the Imports card with internal scrolling across responsive widths; added Selenium coverage for the exact overflow case.

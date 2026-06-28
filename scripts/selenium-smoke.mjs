@@ -496,9 +496,9 @@ async function assertResponsiveCorePages() {
   for (const [label, width, height] of [["desktop", 1440, 950], ["laptop", 1280, 800], ["tablet", 980, 900], ["mobile", 390, 860]]) {
     await driver.manage().window().setRect({ width, height });
     await driver.sleep(350);
-    for (const page of ["Analytics", "Holdings", "Goals", "Tax", "Data", "Settings"]) {
+    for (const page of ["Analytics", "Holdings", "Goals", "Planning", "Tax", "Snapshots", "Data", "Settings"]) {
       await jsClick("//button[contains(., '" + page + "')]");
-      await waitForBodyText(page === "Data" ? "Data Reconciliation" : page, 15000);
+      await waitForBodyText(page === "Data" ? "Data Reconciliation" : page === "Planning" ? "Planning Lab" : page === "Snapshots" ? "Frozen portfolio archive" : page, 15000);
       await assertNoPageOverflow(label + " " + page);
       await assertNoChartRowOverlap(label + " " + page + " chart rows");
       await assertCardsContained(label + " " + page + " cards");
@@ -515,6 +515,12 @@ async function assertResponsiveCorePages() {
         }
       }
       if (page === "Goals") await assertGoalsReadable(label + " Goals");
+      if (page === "Planning") {
+        await waitForBodyText("Scenario Planning", 15000);
+        await waitForBodyText("Rebalancing View", 15000);
+        await waitForBodyText("Goal Drawdown Longevity", 15000);
+      }
+      if (page === "Snapshots") await waitForBodyText("Snapshot Library", 15000);
     }
   }
   await driver.manage().window().setRect({ width: 1440, height: 950 });
@@ -572,7 +578,7 @@ try {
   await driver.get(url);
   await driver.wait(until.elementLocated(By.css("h1")), 15000);
   const title = await driver.findElement(By.css("h1")).getText();
-  if (!/Portfolio Analytics|Holdings|Transactions|Goals|Tax|Snapshots|Add Entry|Imports|Data|Settings|Backup/.test(title)) {
+  if (!/Portfolio Analytics|Holdings|Transactions|Goals|Planning|Tax|Snapshots|Add Entry|Imports|Data|Settings|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
   for (const label of ["Overview", "Allocation", "Returns", "Risk", "History"]) {
@@ -659,6 +665,7 @@ try {
   await jsClick("//button[contains(., 'Settings')]");
   await waitForBodyText("Tax regime", 15000);
   await waitForBodyText("Resident Indian individual", 15000);
+  await waitForBodyText("Planning Assumptions", 15000);
 
   await jsClick("//button[contains(., 'Add Entry')]");
   await waitForBodyText("Add Goal");
@@ -676,6 +683,24 @@ try {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("retirement") && body.includes("needed today") && body.includes("combined goals") && body.includes("map assets to goals");
   }, 15000);
+  await jsClick("//button[contains(., 'Planning')]");
+  await waitForBodyText("Planning Lab", 15000);
+  await waitForBodyText("Scenario Planning", 15000);
+  await waitForBodyText("Rebalancing View", 15000);
+  await waitForBodyText("Goal Drawdown Longevity", 15000);
+  await waitForBodyText("Performance Attribution", 15000);
+  await waitForBodyText("Spend growth %", 15000);
+  await waitForBodyText("Withdrawal timing", 15000);
+  await assertNoPageOverflow("Planning page");
+  await assertVisibleNativeLineCharts("planning drawdown chart", 1);
+  await jsClick("//button[contains(., 'Holdings')]");
+  await waitForBodyText("XIRR Coverage", 15000);
+  await jsClick("(//button[normalize-space(.)='Details'])[1]");
+  await waitForBodyText("Recent Transactions", 15000);
+  await waitForBodyText("Goal Mappings", 15000);
+  await waitForBodyText("Tax Lots", 15000);
+  await assertNoPageOverflow("holding detail drawer");
+  await jsClick("//button[normalize-space(.)='Hide details']");
   await jsClick("//button[contains(., 'Analytics')]");
   await waitForBodyText("Analytics scope");
   await jsClick("//button[.//strong[normalize-space(.)='Allocation']]");
@@ -706,6 +731,8 @@ try {
   await jsClick("//button[contains(., 'Take Snapshot')]");
   await waitForBodyText("Snapshot captured locally");
   await waitForBodyText("Snapshot Library");
+  await waitForBodyText("Snapshot Comparison");
+  await waitForBodyText("Net worth delta");
   await waitForBodyText("No market fetch");
   await waitForBodyText("Frozen snapshot history uses only saved snapshot analytics", 20000);
   await assertNoStackedAreaTimeline("snapshot frozen timelines");
@@ -720,6 +747,9 @@ try {
   }
   if (!Array.isArray(exported.snapshots) || exported.snapshots.length < 2 || !exported.snapshots[0].analytics?.timelinePoint?.netWorth) {
     throw new Error("Exported JSON did not include the browser-created frozen snapshot analytics");
+  }
+  if (!exported.settings?.planning?.scenario || !exported.settings?.planning?.drawdown) {
+    throw new Error("Exported JSON did not include planning assumptions");
   }
   await jsClick("//button[contains(., 'Reset')]");
   await waitForBodyText("Portfolio reset locally");
@@ -810,6 +840,11 @@ try {
   await assertNoFakeChartRows("direct stock asset class ranking rows");
   await assertNoChartRowOverlap("direct stock asset class ranking rows");
   await assertVisibleChartBars("direct stock asset class ranking rows");
+  await jsClick("//button[contains(., 'Planning')]");
+  await waitForBodyText("Planning Lab", 15000);
+  await waitForBodyText("Scenario Planning", 15000);
+  await waitForBodyText("Rebalancing View", 15000);
+  await assertNoPageOverflow("Fidelity planning page");
   await jsClick("//button[contains(., 'Tax')]");
   await waitForBodyText("Realized Lot Audit", 15000);
   await waitForBodyText("Tax Rule Trace", 15000);
@@ -822,6 +857,7 @@ try {
   await jsClick("//button[contains(., 'Settings')]");
   await waitForBodyText("Portfolio tax estimate", 15000);
   await waitForBodyText("Show USD equivalents", 15000);
+  await waitForBodyText("Planning Assumptions", 15000);
   const usdToggle = await driver.wait(until.elementLocated(By.xpath("//label[contains(., 'Show USD equivalents')]//input[@type='checkbox']")), 15000);
   await driver.executeScript("arguments[0].scrollIntoView({block: 'center'});", usdToggle);
   await usdToggle.click();

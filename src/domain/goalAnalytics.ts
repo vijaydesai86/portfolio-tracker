@@ -18,6 +18,9 @@ export type GoalDraft = {
   goldReturn?: number;
   cashReturn?: number;
   otherReturn?: number;
+  drawdownSpendGrowth?: number;
+  drawdownHorizonYears?: number;
+  drawdownWithdrawalTiming?: Goal["drawdownWithdrawalTiming"];
 };
 
 export type GoalProgress = {
@@ -101,6 +104,9 @@ export function buildGoal(input: GoalDraft, now = new Date().toISOString()): Goa
     goldReturn: input.goldReturn ?? 6,
     cashReturn: input.cashReturn ?? 6,
     otherReturn: input.otherReturn ?? 6,
+    drawdownSpendGrowth: input.drawdownSpendGrowth ?? 6,
+    drawdownHorizonYears: input.drawdownHorizonYears ?? 45,
+    drawdownWithdrawalTiming: input.drawdownWithdrawalTiming ?? "beginning",
     createdAt: now,
     updatedAt: now
   };
