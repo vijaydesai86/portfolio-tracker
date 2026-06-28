@@ -13,6 +13,7 @@ describe("goal analytics", () => {
     expect(goal.targetDate).toBe("2036-01-01");
     expect(goal.targetAmount).toBeGreaterThan(60000000);
     expect(goal.corpusMultiple).toBe(35);
+    expect(goal.includeInCombinedGoals).toBe(true);
   });
 
   it("projects mapped goal corpus using category return assumptions", () => {
@@ -36,6 +37,7 @@ describe("goal analytics", () => {
       drawdownSpendGrowth: 6,
       drawdownHorizonYears: 45,
       drawdownWithdrawalTiming: "beginning",
+      includeInCombinedGoals: true,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z"
     });
@@ -98,6 +100,7 @@ describe("goal analytics", () => {
       drawdownSpendGrowth: 6,
       drawdownHorizonYears: 45,
       drawdownWithdrawalTiming: "beginning",
+      includeInCombinedGoals: true,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z"
     });
@@ -149,6 +152,7 @@ describe("goal analytics", () => {
       drawdownSpendGrowth: 6,
       drawdownHorizonYears: 45,
       drawdownWithdrawalTiming: "beginning",
+      includeInCombinedGoals: true,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z"
     });
@@ -185,6 +189,7 @@ describe("goal analytics", () => {
       drawdownSpendGrowth: 6,
       drawdownHorizonYears: 45,
       drawdownWithdrawalTiming: "beginning",
+      includeInCombinedGoals: true,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z"
     });
@@ -224,6 +229,7 @@ describe("goal analytics", () => {
       drawdownSpendGrowth: 6,
       drawdownHorizonYears: 45,
       drawdownWithdrawalTiming: "beginning",
+      includeInCombinedGoals: true,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z"
     });

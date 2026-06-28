@@ -15,7 +15,7 @@ import { calculatePortfolioTaxReport, getTaxProfile, updateTaxProfile, type TaxP
 import { formatUsdEquivalent, getDisplayCurrencySettings, updateDisplayCurrencySettings, type DisplayCurrencySettings } from "@/src/domain/displayCurrency";
 import { taperPresets } from "@/src/domain/tapering";
 import { buildReconciliationReport } from "@/src/domain/reconciliation";
-import { calculateGoalDrawdowns, calculatePerformanceAttribution, calculateRebalancingPlan, calculateScenarioPlan, compareSnapshots, getPlanningSettings, updatePlanningSettings, type GoalDrawdownReport, type PerformanceAttribution, type PlanningSettings, type PlanningSettingsPatch, type RebalanceRow, type ScenarioPlan, type SnapshotComparison } from "@/src/domain/planning";
+import { calculateGoalDrawdowns, calculateGoalRebalancingPlans, calculateIncomeProjection, calculatePerformanceAttribution, calculateRebalancingPlan, calculateScenarioPlan, compareSnapshots, getPlanningSettings, updatePlanningSettings, type GoalDrawdownReport, type GoalRebalancePlan, type IncomeProjection, type PerformanceAttribution, type PlanningSettings, type PlanningSettingsPatch, type RebalanceRow, type ScenarioPlan, type SnapshotComparison } from "@/src/domain/planning";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
 import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type CasCanonicalImport, type CasParseResult } from "@/src/importers/casText";
@@ -121,6 +121,9 @@ type ScopedAnalyticsData = {
   eyebrow: string;
   description: string;
   current: number;
+  planningValue: number;
+  planningAdjustment: number;
+  planningBasis: string;
   performance: {
     grossCashIn: number;
     current: number;
@@ -176,6 +179,7 @@ function portfolioScopedAnalytics(input: {
   holdingReturns: Map<string, HoldingReturn>;
 }): ScopedAnalyticsData {
   const holdings = input.insights.holdings.map((holding) => scopedHoldingFromInsight(holding, holding.valueInBase ?? 0, input.holdingReturns.get(holding.id))).sort((a, b) => b.scopedValue - a.scopedValue);
+  const planningValue = roundMoney(holdings.reduce((sum, holding) => sum + (holding.trackedValueInBase ?? holding.scopedValue), 0));
   return {
     scope: "portfolio",
     scopeKind: "portfolio",
@@ -183,6 +187,9 @@ function portfolioScopedAnalytics(input: {
     eyebrow: "Portfolio command center",
     description: `${holdings.length} holdings. Overall analytics use the full canonical portfolio ledger and current valuations.`,
     current: input.performance.current,
+    planningValue,
+    planningAdjustment: roundMoney(planningValue - input.performance.current),
+    planningBasis: "tracked planning value; actual net worth remains unchanged",
     performance: input.performance,
     xirrLabel: input.insights.xirrBase === null ? "-" : input.insights.xirrBase.toFixed(2) + "%",
     xirrDetail: "Timing-aware return using transaction-date FX when available",
@@ -202,10 +209,12 @@ function goalScopedAnalytics(input: {
   const progresses = selected ? [selected] : input.goalProgress;
   const holdingsById = new Map(input.insights.holdings.map((holding) => [holding.id, holding]));
   const rows: ScopedHolding[] = [];
+  let actualCurrent = 0;
   for (const progress of progresses) {
     for (const mapped of progress.mappedHoldings) {
       const insight = holdingsById.get(mapped.balance.id);
       if (!insight) continue;
+      actualCurrent += mapped.actualValue;
       rows.push(scopedHoldingFromInsight(insight, mapped.value, undefined, {
         invested: mapped.invested,
         profit: mapped.profit,
@@ -235,6 +244,9 @@ function goalScopedAnalytics(input: {
       ? `${selected.goal.name} analytics are scoped to assets mapped to this goal. Values are weighted by mapping percentage and use the same holdings cost basis as the portfolio.`
       : `Combined goal analytics sum every goal's mapped corpus. If one asset is mapped to multiple goals, it is counted once per goal purpose because this is a goal-funding view, not portfolio net worth.`,
     current,
+    planningValue: current,
+    planningAdjustment: roundMoney(current - actualCurrent),
+    planningBasis: "mapped goal planning value; taper is applied only to planning",
     performance: {
       grossCashIn: 0,
       current,
@@ -502,7 +514,8 @@ export function TrackerApp() {
   const holdingReturns = useMemo(() => calculateHoldingReturns(backup), [backup]);
   const performance = useMemo(() => calculateDashboardPerformance(summary, insights.transactionStats, holdingReturns.values()), [holdingReturns, insights.transactionStats, summary]);
   const goalProgress = useMemo(() => calculateGoalProgress(backup), [backup]);
-  const goalSummary = useMemo(() => summarizeGoalProgress(goalProgress), [goalProgress]);
+  const combinedGoalProgress = useMemo(() => goalProgress.filter((goal) => goal.goal.includeInCombinedGoals !== false), [goalProgress]);
+  const goalSummary = useMemo(() => summarizeGoalProgress(combinedGoalProgress), [combinedGoalProgress]);
   const snapshotHistory = useMemo(() => buildSnapshotHistory(backup.snapshots), [backup.snapshots]);
   const taxProfile = useMemo(() => getTaxProfile(backup), [backup]);
   const displayCurrencySettings = useMemo(() => getDisplayCurrencySettings(backup), [backup]);
@@ -513,9 +526,11 @@ export function TrackerApp() {
   const reconciliationReport = useMemo(() => buildReconciliationReport(backup), [backup]);
   const scenarioPlan = useMemo(() => calculateScenarioPlan(backup, planningSettings), [backup, planningSettings]);
   const rebalancingPlan = useMemo(() => calculateRebalancingPlan(backup, planningSettings), [backup, planningSettings]);
+  const goalRebalancingPlans = useMemo(() => calculateGoalRebalancingPlans(goalProgress, planningSettings), [goalProgress, planningSettings]);
+  const incomeProjection = useMemo(() => calculateIncomeProjection(backup), [backup]);
   const goalDrawdowns = useMemo(() => calculateGoalDrawdowns(goalProgress, planningSettings), [goalProgress, planningSettings]);
   const attribution = useMemo(() => calculatePerformanceAttribution(backup), [backup]);
-  const scopedAnalytics = useMemo(() => buildScopedAnalytics({ backup, scope: analyticsScope, summary, insights, performance, holdingReturns, goalProgress, goalSummary }), [analyticsScope, backup, goalProgress, goalSummary, holdingReturns, insights, performance, summary]);
+  const scopedAnalytics = useMemo(() => buildScopedAnalytics({ backup, scope: analyticsScope, summary, insights, performance, holdingReturns, goalProgress: analyticsScope === "goals-combined" ? combinedGoalProgress : goalProgress, goalSummary }), [analyticsScope, backup, combinedGoalProgress, goalProgress, goalSummary, holdingReturns, insights, performance, summary]);
   const scopedPerformance = scopedAnalytics.performance;
   const chartData = scopedAnalytics.chartData;
 
@@ -1376,7 +1391,7 @@ export function TrackerApp() {
               </div>
             </div>
 
-            <AnalyticsScopeSelector scope={analyticsScope} setScope={setAnalyticsScope} goals={goalProgress} />
+            <AnalyticsScopeSelector scope={analyticsScope} setScope={setAnalyticsScope} goals={goalProgress} combinedGoalCount={combinedGoalProgress.length} />
 
             <AnalyticsTabs active={analyticsTab} setActive={setAnalyticsTab} />
 
@@ -1401,6 +1416,7 @@ export function TrackerApp() {
                 </div>
                 <div className="sub-analytics-strip">
                   <MiniInsight label="Cost Basis" value={formatMoney(scopedPerformance.netInvested, backup.baseCurrency)} secondary={usdSecondary(scopedPerformance.netInvested)} detail={scopedAnalytics.scopeKind === "portfolio" ? "same basis used for headline P/L" : "mapped goal cost basis"} />
+                  <MiniInsight label="Conservative adjustment" value={formatMoney(scopedAnalytics.planningAdjustment, backup.baseCurrency)} secondary={usdSecondary(scopedAnalytics.planningAdjustment)} detail={scopedAnalytics.planningBasis} explain="Negative values mean tapering reduced the planning value; actual net worth and tax remain based on real market value." />
                   <MiniInsight label="Required Today" value={scopedAnalytics.requiredToday === undefined ? "-" : formatMoney(scopedAnalytics.requiredToday, backup.baseCurrency)} secondary={scopedAnalytics.requiredToday === undefined ? undefined : usdSecondary(scopedAnalytics.requiredToday)} detail={scopedAnalytics.requiredToday === undefined ? "portfolio scope" : "corpus needed today"} />
                   <MiniInsight label="Projected" value={scopedAnalytics.projected === undefined ? "-" : formatMoney(scopedAnalytics.projected, backup.baseCurrency)} secondary={scopedAnalytics.projected === undefined ? undefined : usdSecondary(scopedAnalytics.projected)} detail={scopedAnalytics.projected === undefined ? "portfolio scope" : "at goal date"} />
                   <MiniInsight label={scopedAnalytics.scopeKind === "portfolio" ? "Fees & Taxes" : "Goal Gap"} value={scopedAnalytics.scopeKind === "portfolio" ? formatMoney(scopedPerformance.feesAndTax, backup.baseCurrency) : formatMoney(scopedAnalytics.goalGap ?? 0, backup.baseCurrency)} secondary={scopedAnalytics.scopeKind === "portfolio" ? usdSecondary(scopedPerformance.feesAndTax) : usdSecondary(scopedAnalytics.goalGap ?? 0)} detail={scopedAnalytics.scopeKind === "portfolio" ? "recorded charges and tax fields" : "projected gap/surplus"} />
@@ -1545,7 +1561,7 @@ export function TrackerApp() {
 
         {view === "tax" && <TaxView report={taxReport} currency={backup.baseCurrency} financialYears={taxFinancialYears} selectedFinancialYear={taxFinancialYear} setSelectedFinancialYear={setTaxFinancialYear} />}
 
-        {view === "planning" && <PlanningView backup={backup} settings={planningSettings} scenario={scenarioPlan} rebalancing={rebalancingPlan} goalDrawdowns={goalDrawdowns} attribution={attribution} updatePlanningSettings={updatePlanningSettingsFromForm} updateGoalRecord={updateGoalRecord} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
+        {view === "planning" && <PlanningView backup={backup} settings={planningSettings} scenario={scenarioPlan} rebalancing={rebalancingPlan} goalRebalancing={goalRebalancingPlans} incomeProjection={incomeProjection} goalDrawdowns={goalDrawdowns} attribution={attribution} updatePlanningSettings={updatePlanningSettingsFromForm} updateGoalRecord={updateGoalRecord} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
 
         {view === "snapshots" && <SnapshotsView {...{ backup, snapshotName, setSnapshotName, snapshotNotes, setSnapshotNotes, selectedSnapshotId, setSelectedSnapshotId, snapshotHistory, takePortfolioSnapshot, deletePortfolioSnapshot }} />}
 
@@ -1570,7 +1586,7 @@ export function TrackerApp() {
 
 
 
-function PlanningView({ backup, settings, scenario, rebalancing, goalDrawdowns, attribution, updatePlanningSettings, updateGoalRecord, currency, usdSecondary }: { backup: PortfolioBackup; settings: PlanningSettings; scenario: ScenarioPlan; rebalancing: RebalanceRow[]; goalDrawdowns: GoalDrawdownReport[]; attribution: PerformanceAttribution; updatePlanningSettings: (patch: PlanningSettingsPatch) => void; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing, incomeProjection, goalDrawdowns, attribution, updatePlanningSettings, updateGoalRecord, currency, usdSecondary }: { backup: PortfolioBackup; settings: PlanningSettings; scenario: ScenarioPlan; rebalancing: RebalanceRow[]; goalRebalancing: GoalRebalancePlan[]; incomeProjection: IncomeProjection; goalDrawdowns: GoalDrawdownReport[]; attribution: PerformanceAttribution; updatePlanningSettings: (patch: PlanningSettingsPatch) => void; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
   const largestRebalance = [...rebalancing].sort((a, b) => Math.abs(b.driftValue) - Math.abs(a.driftValue))[0];
   const drawdownRows = goalDrawdowns.map((row) => ({ name: row.goalName, value: row.surplusAtHorizon > 0 ? row.surplusAtHorizon : row.startingCorpus, tag: row.depletionYear ? "depletes " + row.depletionYear : "survives", category: "Others" as AssetCategory }));
   return (
@@ -1594,7 +1610,7 @@ function PlanningView({ backup, settings, scenario, rebalancing, goalDrawdowns, 
           <div className="settings-grid compact-settings-grid">
             <label><span>Equity return %</span><input type="number" step="0.1" value={settings.scenario.equityReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, equityReturn: Number(event.target.value) } })} /></label>
             <label><span>Debt return %</span><input type="number" step="0.1" value={settings.scenario.debtReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, debtReturn: Number(event.target.value) } })} /></label>
-            <label><span>Inflation %</span><input type="number" step="0.1" value={settings.scenario.inflationRate} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, inflationRate: Number(event.target.value) } })} /></label>
+            <label><span>Scenario inflation %</span><input type="number" step="0.1" value={settings.scenario.inflationRate} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, inflationRate: Number(event.target.value) } })} /></label>
             <label><span>Equity correction %</span><input type="number" step="1" value={settings.scenario.marketCorrectionPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, marketCorrectionPercent: Number(event.target.value) } })} /></label>
             <label><span>USD/INR shock %</span><input type="number" step="1" value={settings.scenario.usdInrShockPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, usdInrShockPercent: Number(event.target.value) } })} /></label>
           </div>
@@ -1605,10 +1621,12 @@ function PlanningView({ backup, settings, scenario, rebalancing, goalDrawdowns, 
           <h2>Rebalancing View</h2>
           <p className="chart-note compact-note">Current allocation versus configured targets. Suggested add/reduce values are advisory and do not place trades.</p>
           <div className="settings-grid compact-settings-grid target-grid">{categoryOrder.map((category) => <label key={category}><span>{category} target %</span><input type="number" step="1" value={settings.targetAllocation[category]} onChange={(event) => updatePlanningSettings({ targetAllocation: { ...settings.targetAllocation, [category]: Number(event.target.value) } })} /></label>)}</div>
-          <div className="table-wrap"><table><thead><tr><th>Class</th><th>Current</th><th>Current %</th><th>Target %</th><th>Drift</th><th>Action</th></tr></thead><tbody>{rebalancing.map((row) => <tr key={row.category}><td>{row.category}</td><td>{formatMoney(row.currentValue, currency)}</td><td>{row.currentPercent.toFixed(1)}%</td><td>{row.targetPercent.toFixed(1)}%</td><td>{formatMoney(row.driftValue, currency)}</td><td><span className={"status-pill " + (row.action === "hold" ? "implemented" : row.action === "add" ? "partial" : "planned")}>{row.action}</span></td></tr>)}</tbody></table></div>
+          <div className="table-wrap"><table><thead><tr><th>Class</th><th>Current</th><th>Current %</th><th>Target %</th><th>Drift</th><th>Add/reduce</th><th>Action</th></tr></thead><tbody>{rebalancing.map((row) => <tr key={row.category}><td>{row.category}</td><td>{formatMoney(row.currentValue, currency)}</td><td>{row.currentPercent.toFixed(1)}%</td><td>{row.targetPercent.toFixed(1)}%</td><td>{formatMoney(row.driftValue, currency)}</td><td>{row.action === "hold" ? "-" : formatMoney(row.actionAmount, currency)}</td><td><span className={"status-pill " + (row.action === "hold" ? "implemented" : row.action === "add" ? "partial" : "planned")}>{row.action}</span></td></tr>)}</tbody></table></div>
+          <GoalRebalancingPanel plans={goalRebalancing} currency={currency} />
         </div>
 
         <ChartCard title="Performance Attribution"><AttributionBridge attribution={attribution} currency={currency} /></ChartCard>
+        <IncomeProjectionCard projection={incomeProjection} currency={currency} usdSecondary={usdSecondary} />
         <ChartCard title="Goal Longevity Summary"><RankingBar data={drawdownRows} formatValue={(value) => formatMoney(value, currency)} emptyMessage="Map goals to assets before drawdown planning." /></ChartCard>
       </div>
 
@@ -1618,6 +1636,40 @@ function PlanningView({ backup, settings, scenario, rebalancing, goalDrawdowns, 
         {goalDrawdowns.length === 0 ? <p className="message">Create goals and map assets to model drawdown longevity.</p> : <div className="drawdown-grid">{goalDrawdowns.map((row) => <GoalDrawdownCard key={row.goalId} report={row} updateGoalRecord={updateGoalRecord} currency={currency} usdSecondary={usdSecondary} />)}</div>}
       </div>
     </section>
+  );
+}
+
+function IncomeProjectionCard({ projection, currency, usdSecondary }: { projection: IncomeProjection; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+  const rows = projection.rows.filter((row) => row.captured > 0 || row.projectedAnnual > 0);
+  return (
+    <div className="card planning-card income-projection-card">
+      <h2>Income Projection</h2>
+      <p className="chart-note compact-note">Separate from capital gains. Projection repeats captured trailing income rows over a one-year run rate; maturity cash is shown as a known cash event, not recurring yield.</p>
+      <div className="holding-command-strip compact-command-strip">
+        <MiniInsight label="Captured income" value={formatMoney(projection.capturedTotal, currency)} secondary={usdSecondary(projection.capturedTotal)} detail={projection.observationStart ? projection.observationStart + " to " + projection.observationEnd : "no income rows"} />
+        <MiniInsight label="Projected annual" value={formatMoney(projection.projectedAnnual, currency)} secondary={usdSecondary(projection.projectedAnnual)} detail="dividend and interest run rate" />
+      </div>
+      {rows.length === 0 ? <p className="message">No dividend, interest, or maturity rows available for income projection yet.</p> : <div className="table-wrap"><table><thead><tr><th>Income type</th><th>Captured</th><th>Projected annual</th><th>Detail</th></tr></thead><tbody>{rows.map((row) => <tr key={row.key}><td>{row.label}</td><td>{formatMoney(row.captured, currency)}</td><td>{formatMoney(row.projectedAnnual, currency)}</td><td>{row.detail}</td></tr>)}</tbody></table></div>}
+    </div>
+  );
+}
+
+function GoalRebalancingPanel({ plans, currency }: { plans: GoalRebalancePlan[]; currency: string }) {
+  const actionable = plans.map((plan) => ({ ...plan, rows: plan.rows.filter((row) => row.action !== "hold") })).filter((plan) => plan.currentValue > 0);
+  const displayRows: Array<{ plan: GoalRebalancePlan; row: RebalanceRow | null }> = [];
+  actionable.forEach((plan) => {
+    if (plan.rows.length === 0) {
+      displayRows.push({ plan, row: null });
+      return;
+    }
+    plan.rows.forEach((row) => displayRows.push({ plan, row }));
+  });
+  return (
+    <div className="goal-rebalance-panel">
+      <h3>Goal-level advisory drift</h3>
+      <p className="chart-note compact-note">Uses the same target allocation as the portfolio view. Add or reduce amounts are planning guidance only.</p>
+      {displayRows.length === 0 ? <p className="message">Map assets to goals to see goal-level rebalance guidance.</p> : <div className="table-wrap"><table><thead><tr><th>Goal</th><th>Class</th><th>Current</th><th>Target</th><th>Add or reduce</th><th>Action</th></tr></thead><tbody>{displayRows.map(({ plan, row }) => <tr key={plan.goalId + (row?.category ?? "aligned")}><td>{plan.goalName}</td><td>{row?.category ?? "Aligned"}</td><td>{row ? formatMoney(row.currentValue, currency) : formatMoney(plan.currentValue, currency)}</td><td>{row ? row.targetPercent.toFixed(1) + "%" : "target"}</td><td>{row ? formatMoney(row.actionAmount, currency) : "-"}</td><td>{row ? row.action : "hold"}</td></tr>)}</tbody></table></div>}
+    </div>
   );
 }
 
@@ -1856,7 +1908,7 @@ function GoalsView(props: {
         </div>
       </div>
 
-      {props.goalProgress.length > 0 && <GoalCombinedPanel summary={props.goalSummary} progress={props.goalProgress} backup={props.backup} currency={props.backup.baseCurrency} usdSecondary={props.usdSecondary} />}
+      {props.goalProgress.length > 0 && <GoalCombinedPanel summary={props.goalSummary} progress={props.goalProgress.filter((goal) => goal.goal.includeInCombinedGoals !== false)} backup={props.backup} currency={props.backup.baseCurrency} usdSecondary={props.usdSecondary} />}
 
       {props.goalProgress.length > 0 && <GoalCoverageMatrix progress={props.goalProgress} currency={props.backup.baseCurrency} usdSecondary={props.usdSecondary} />}
 
@@ -1903,7 +1955,7 @@ function GoalCoverageMatrix({ progress, currency, usdSecondary }: { progress: Go
   return (
     <div className="card wide-card goal-coverage-card">
       <div className="section-head"><div><h2>Goal Coverage Matrix</h2><p>Goal-by-goal readiness across required corpus, mapped corpus, projection, and asset-class funding.</p></div></div>
-      <div className="table-wrap"><table><thead><tr><th>Goal</th><th>Needed today</th><th>Mapped now</th><th>Readiness</th><th>Projected</th><th>Equity</th><th>Debt</th><th>Cash</th></tr></thead><tbody>{progress.map((row) => <tr key={row.goal.id}><td>{row.goal.name}</td><td>{formatMoney(row.requiredCorpusToday, currency)}{usdSecondary(row.requiredCorpusToday) && <small className="usd-secondary table-usd">{usdSecondary(row.requiredCorpusToday)}</small>}</td><td>{formatMoney(row.mappedCurrentValue, currency)}{usdSecondary(row.mappedCurrentValue) && <small className="usd-secondary table-usd">{usdSecondary(row.mappedCurrentValue)}</small>}</td><td>{row.corpusTodayFundedPercent.toFixed(1)}%</td><td>{formatMoney(row.projectedValue, currency)}{usdSecondary(row.projectedValue) && <small className="usd-secondary table-usd">{usdSecondary(row.projectedValue)}</small>}</td><td>{formatMoney(row.categoryValues.Equity, currency)}</td><td>{formatMoney(row.categoryValues.Debt, currency)}</td><td>{formatMoney(row.categoryValues.Cash, currency)}</td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>Goal</th><th>Combined</th><th>Needed today</th><th>Mapped now</th><th>Readiness</th><th>Projected</th><th>Equity</th><th>Debt</th><th>Cash</th></tr></thead><tbody>{progress.map((row) => <tr key={row.goal.id}><td>{row.goal.name}</td><td>{row.goal.includeInCombinedGoals !== false ? "Included" : "Excluded"}</td><td>{formatMoney(row.requiredCorpusToday, currency)}{usdSecondary(row.requiredCorpusToday) && <small className="usd-secondary table-usd">{usdSecondary(row.requiredCorpusToday)}</small>}</td><td>{formatMoney(row.mappedCurrentValue, currency)}{usdSecondary(row.mappedCurrentValue) && <small className="usd-secondary table-usd">{usdSecondary(row.mappedCurrentValue)}</small>}</td><td>{row.corpusTodayFundedPercent.toFixed(1)}%</td><td>{formatMoney(row.projectedValue, currency)}{usdSecondary(row.projectedValue) && <small className="usd-secondary table-usd">{usdSecondary(row.projectedValue)}</small>}</td><td>{formatMoney(row.categoryValues.Equity, currency)}</td><td>{formatMoney(row.categoryValues.Debt, currency)}</td><td>{formatMoney(row.categoryValues.Cash, currency)}</td></tr>)}</tbody></table></div>
     </div>
   );
 }
@@ -1915,7 +1967,7 @@ function GoalCombinedPanel({ summary, progress, backup, currency, usdSecondary }
       <div>
         <span className="eyebrow">Combined goals</span>
         <h2>{formatMoney(summary.targetCorpus, currency)}</h2>
-        <p>{summary.goalCount} goal(s). Required today is the amount needed now, under each goal's mapped asset mix, to reach all target corpuses without further investment.</p>
+        <p>{summary.goalCount} included goal(s). Required today is the amount needed now, under each goal's mapped asset mix, to reach all target corpuses without further investment.</p>
       </div>
       <div className="goal-combined-metrics">
         <MiniInsight label="Needed today" value={formatMoney(summary.requiredCorpusToday, currency)} secondary={usdSecondary(summary.requiredCorpusToday)} detail="present value of all targets" />
@@ -1962,7 +2014,7 @@ function GoalCard({ progress, currency, usdSecondary, selected, setSelectedGoalI
     <div className={"goal-card" + (selected ? " selected" : "")} onClick={() => setSelectedGoalId(goal.id)}>
       <div className="goal-card-head">
         <div><input value={goal.name} onChange={(event) => updateGoalRecord(goal.id, { name: event.target.value })} onClick={(event) => event.stopPropagation()} /><span>{goal.type === "retirement" ? "Retirement" : "Custom"} · {targetYear} · {progress.yearsToGoal.toFixed(1)} years</span></div>
-        <button className="danger-button" onClick={(event) => { event.stopPropagation(); deleteGoalRecord(goal.id); }}>Delete</button>
+        <div className="goal-card-actions"><label className="goal-include-toggle" title="When off, this goal remains visible individually but is excluded from Combined Goals totals."><input type="checkbox" checked={goal.includeInCombinedGoals !== false} onClick={(event) => event.stopPropagation()} onChange={(event) => updateGoalRecord(goal.id, { includeInCombinedGoals: event.target.checked })} /><span>Combined</span></label><button className="danger-button" onClick={(event) => { event.stopPropagation(); deleteGoalRecord(goal.id); }}>Delete</button></div>
       </div>
       <div className="goal-card-metrics">
         <MiniInsight label="Target" value={formatMoney(progress.targetCorpus, currency)} secondary={usdSecondary(progress.targetCorpus)} detail="future corpus" />
@@ -2264,6 +2316,7 @@ function TaxView({ report, currency, financialYears, selectedFinancialYear, setS
           <div><span>Set-off</span><strong>Losses reduce gains inside the bucket</strong><small>Per-holding tax is therefore an estimate/contribution, not a separate legal bill per holding.</small></div>
           <div><span>Unrealized</span><strong>Open holdings only</strong><small>Useful for planning; not tax payable until you sell.</small></div>
           <div><span>Migration rows</span><strong>Zero-value broker transfer rows ignored</strong><small>They preserve holdings but are not treated as taxable disposals.</small></div>
+          <div><span>FMV override</span><strong>Tax only, never performance</strong><small>Optional transaction FMV changes tax lots while actual price/amount still drives value, P/L, and XIRR.</small></div>
         </div>
       </div>
 
@@ -2336,7 +2389,7 @@ function SettingsView({ profile, updateTaxProfile, displaySettings, updateDispla
           <div className="settings-grid">
             <label><span>Scenario equity return %</span><input type="number" step="0.1" value={planningSettings.scenario.equityReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, equityReturn: Number(event.target.value) } })} /></label>
             <label><span>Scenario debt return %</span><input type="number" step="0.1" value={planningSettings.scenario.debtReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, debtReturn: Number(event.target.value) } })} /></label>
-            <label><span>Planning inflation %</span><input type="number" step="0.1" value={planningSettings.scenario.inflationRate} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, inflationRate: Number(event.target.value) } })} /></label>
+            <label><span>Scenario inflation %</span><input type="number" step="0.1" value={planningSettings.scenario.inflationRate} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, inflationRate: Number(event.target.value) } })} /></label>
             <label><span>Stress correction %</span><input type="number" step="1" value={planningSettings.scenario.marketCorrectionPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, marketCorrectionPercent: Number(event.target.value) } })} /></label>
             <label><span>USD/INR shock %</span><input type="number" step="1" value={planningSettings.scenario.usdInrShockPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, usdInrShockPercent: Number(event.target.value) } })} /></label>
           </div>
@@ -2572,7 +2625,7 @@ function AssetClassCard({ insight, currency }: { insight: AssetClassInsight; cur
   );
 }
 
-function AnalyticsScopeSelector({ scope, setScope, goals }: { scope: AnalyticsScope; setScope: (scope: AnalyticsScope) => void; goals: GoalProgress[] }) {
+function AnalyticsScopeSelector({ scope, setScope, goals, combinedGoalCount }: { scope: AnalyticsScope; setScope: (scope: AnalyticsScope) => void; goals: GoalProgress[]; combinedGoalCount: number }) {
   return (
     <div className="analytics-scope-panel">
       <div>
@@ -2581,7 +2634,7 @@ function AnalyticsScopeSelector({ scope, setScope, goals }: { scope: AnalyticsSc
       </div>
       <div className="analytics-scope-control" role="tablist" aria-label="Analytics scope">
         <button className={scope === "portfolio" ? "active" : ""} onClick={() => setScope("portfolio")}><strong>Overall</strong><span>full portfolio</span></button>
-        <button className={scope === "goals-combined" ? "active" : ""} onClick={() => setScope("goals-combined")} disabled={goals.length === 0}><strong>Combined Goals</strong><span>sum of goal mappings</span></button>
+        <button className={scope === "goals-combined" ? "active" : ""} onClick={() => setScope("goals-combined")} disabled={combinedGoalCount === 0}><strong>Combined Goals</strong><span>{combinedGoalCount} included goal(s)</span></button>
         {goals.map((goal) => {
           const id = `goal:${goal.goal.id}` as AnalyticsScope;
           return <button key={goal.goal.id} className={scope === id ? "active" : ""} onClick={() => setScope(id)}><strong>{goal.goal.name}</strong><span>{goal.corpusTodayFundedPercent.toFixed(1)}% ready today</span></button>;
@@ -3015,7 +3068,7 @@ function TransactionRow({ tx, backup }: { tx: Transaction; backup: PortfolioBack
 }
 
 function TransactionEditRow({ tx, updateTransaction, deleteTransaction }: { tx: Transaction; updateTransaction: (id: string, patch: Partial<Transaction>) => void; deleteTransaction: (id: string) => void }) {
-  return <div className="edit-row transaction-edit-row"><input type="date" value={tx.date} onChange={(event) => updateTransaction(tx.id, { date: event.target.value })} /><select value={tx.type} onChange={(event) => updateTransaction(tx.id, { type: event.target.value as Transaction["type"] })}>{transactionTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select><input value={tx.currency} onChange={(event) => updateTransaction(tx.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={tx.amount} onChange={(event) => updateTransaction(tx.id, { amount: Number(event.target.value) })} /><input type="number" step="0.000001" value={tx.quantity ?? ""} onChange={(event) => updateTransaction(tx.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={tx.price ?? ""} onChange={(event) => updateTransaction(tx.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.01" value={tx.fees ?? 0} onChange={(event) => updateTransaction(tx.id, { fees: Number(event.target.value) })} /><input type="number" step="0.01" value={tx.taxes ?? 0} onChange={(event) => updateTransaction(tx.id, { taxes: Number(event.target.value) })} /><button className="danger-button" onClick={() => deleteTransaction(tx.id)}>Delete</button></div>;
+  return <div className="edit-row transaction-edit-row"><input type="date" value={tx.date} onChange={(event) => updateTransaction(tx.id, { date: event.target.value })} /><select value={tx.type} onChange={(event) => updateTransaction(tx.id, { type: event.target.value as Transaction["type"] })}>{transactionTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select><input value={tx.currency} onChange={(event) => updateTransaction(tx.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={tx.amount} onChange={(event) => updateTransaction(tx.id, { amount: Number(event.target.value) })} /><input type="number" step="0.000001" value={tx.quantity ?? ""} onChange={(event) => updateTransaction(tx.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={tx.price ?? ""} onChange={(event) => updateTransaction(tx.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} title="Actual transaction price used for portfolio math" /><input type="number" step="0.0001" placeholder="FMV / tax price" value={tx.taxFmvPrice ?? ""} onChange={(event) => updateTransaction(tx.id, { taxFmvPrice: event.target.value === "" ? undefined : Number(event.target.value) })} title="Optional fair market value per unit in transaction currency. Tax uses this if filled; portfolio value, invested, P/L, and XIRR keep using actual price/amount." /><input type="number" step="0.01" value={tx.fees ?? 0} onChange={(event) => updateTransaction(tx.id, { fees: Number(event.target.value) })} /><input type="number" step="0.01" value={tx.taxes ?? 0} onChange={(event) => updateTransaction(tx.id, { taxes: Number(event.target.value) })} /><button className="danger-button" onClick={() => deleteTransaction(tx.id)}>Delete</button></div>;
 }
 
 

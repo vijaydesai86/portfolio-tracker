@@ -107,6 +107,7 @@ export function buildGoal(input: GoalDraft, now = new Date().toISOString()): Goa
     drawdownSpendGrowth: input.drawdownSpendGrowth ?? 6,
     drawdownHorizonYears: input.drawdownHorizonYears ?? 45,
     drawdownWithdrawalTiming: input.drawdownWithdrawalTiming ?? "beginning",
+    includeInCombinedGoals: true,
     createdAt: now,
     updatedAt: now
   };

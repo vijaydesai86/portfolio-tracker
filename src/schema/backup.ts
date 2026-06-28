@@ -83,6 +83,7 @@ export const transactionSchema = z.object({
   ]),
   quantity: z.number().optional(),
   price: z.number().optional(),
+  taxFmvPrice: z.number().finite().positive().optional(),
   amount: z.number(),
   currency: currencySchema,
   fees: z.number().default(0),
@@ -148,6 +149,7 @@ export const goalSchema = z.object({
   drawdownSpendGrowth: z.number().min(0).max(100).default(6),
   drawdownHorizonYears: z.number().int().min(1).max(100).default(45),
   drawdownWithdrawalTiming: z.enum(["beginning", "end"]).default("beginning"),
+  includeInCombinedGoals: z.boolean().default(true),
   createdAt: timestampSchema,
   updatedAt: timestampSchema
 });

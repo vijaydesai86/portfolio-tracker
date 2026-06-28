@@ -154,6 +154,8 @@ type Lot = {
   originalAmount: number;
   originalFees: number;
   originalFxRate?: number;
+  originalTaxAmount: number;
+  originalTaxFmvPrice?: number;
   accountId: string;
   assetName: string;
   accountType: Account["type"];
@@ -248,6 +250,7 @@ export function calculatePortfolioTaxReport(backup: PortfolioBackup, options?: {
     if (isZeroAmountLotTransfer(tx)) continue;
 
     if (isLotBuy(tx)) {
+      const taxCostAmount = taxableTransactionAmount(tx, "cost");
       lots.push({
         instrumentId: tx.instrumentId,
         accountId: tx.accountId,
@@ -259,12 +262,14 @@ export function calculatePortfolioTaxReport(backup: PortfolioBackup, options?: {
         buyDate: tx.date,
         quantity: tx.quantity,
         originalQuantity: tx.quantity,
-        originalCostBase: convertedAmount(Math.abs(tx.amount) + Math.abs(tx.fees ?? 0), tx.currency, backup, tx.date, notes),
+        originalCostBase: convertedAmount(taxCostAmount, tx.currency, backup, tx.date, notes),
         originalCurrency: tx.currency,
         originalAmount: Math.abs(tx.amount),
         originalFees: Math.abs(tx.fees ?? 0),
         originalFxRate: tx.currency === backup.baseCurrency ? undefined : findFxRateForTax(tx.currency, backup.baseCurrency, backup, tx.date)?.price,
-        costBase: convertedAmount(Math.abs(tx.amount) + Math.abs(tx.fees ?? 0), tx.currency, backup, tx.date, notes)
+        originalTaxAmount: taxCostAmount,
+        originalTaxFmvPrice: tx.taxFmvPrice,
+        costBase: convertedAmount(taxCostAmount, tx.currency, backup, tx.date, notes)
       });
       continue;
     }
@@ -317,7 +322,7 @@ export function calculatePortfolioTaxReport(backup: PortfolioBackup, options?: {
 function consumeLots(lots: Lot[], tx: Transaction, backup: PortfolioBackup, notes: string[], emit: boolean, account: Account, instrument: Instrument): TaxGainRow[] {
   let remaining = Math.abs(tx.quantity ?? 0);
   const rows: TaxGainRow[] = [];
-  const proceedsTotal = convertedAmount(Math.abs(tx.amount) - Math.abs(tx.fees ?? 0), tx.currency, backup, tx.date, notes);
+  const proceedsTotal = convertedAmount(taxableTransactionAmount(tx, "proceeds"), tx.currency, backup, tx.date, notes);
   while (remaining > 0.0000001) {
     const lot = lots.find((item) => item.instrumentId === tx.instrumentId && item.accountId === tx.accountId && item.quantity > 0);
     if (!lot) {
@@ -359,13 +364,13 @@ function consumeLots(lots: Lot[], tx: Transaction, backup: PortfolioBackup, note
 
 function buildTaxTrace(input: { tx: Transaction; lot: Lot; used: number; proceeds: number; cost: number; gain: number; bucket: TaxBucketId; taxRate: number; backup: PortfolioBackup; account: Account; instrument: Instrument }): TaxTrace {
   const originalSaleQuantity = Math.abs(input.tx.quantity ?? input.used);
-  const saleAmount = Math.abs(input.tx.amount);
-  const saleFees = Math.abs(input.tx.fees ?? 0);
+  const saleBasis = typeof input.tx.taxFmvPrice === "number" ? "tax FMV " + formatNumber(input.tx.taxFmvPrice) + " x " + formatNumber(originalSaleQuantity) : "sale amount " + formatNumber(Math.abs(input.tx.amount));
   const saleFx = input.tx.currency === input.backup.baseCurrency ? undefined : findFxRateForTax(input.tx.currency, input.backup.baseCurrency, input.backup, input.tx.date)?.price;
-  const saleNet = saleAmount - saleFees;
+  const saleNet = taxableTransactionAmount(input.tx, "proceeds");
   const lotRatio = input.used / input.lot.originalQuantity;
   const sellRatio = input.used / originalSaleQuantity;
-  const buyGross = input.lot.originalAmount + input.lot.originalFees;
+  const buyGross = input.lot.originalTaxAmount;
+  const buyBasis = typeof input.lot.originalTaxFmvPrice === "number" ? "tax FMV " + formatNumber(input.lot.originalTaxFmvPrice) + " x " + formatNumber(input.lot.originalQuantity) : "buy amount " + formatNumber(input.lot.originalAmount);
   return {
     accountId: input.tx.accountId,
     instrumentId: input.tx.instrumentId,
@@ -374,8 +379,8 @@ function buildTaxTrace(input: { tx: Transaction; lot: Lot; used: number; proceed
     sellDate: input.tx.date,
     quantityUsed: roundQuantity(input.used),
     originalSaleQuantity: roundQuantity(originalSaleQuantity),
-    proceedsFormula: formulaText([formatNumber(saleNet), input.tx.currency, sellRatio !== 1 ? "x sale ratio " + formatNumber(sellRatio) : "", saleFx ? "x FX " + formatNumber(saleFx) : "base currency"]) + " = " + formatInr(input.proceeds),
-    costFormula: formulaText(["FIFO " + formatNumber(input.used) + "/" + formatNumber(input.lot.originalQuantity), "x " + formatNumber(buyGross) + " " + input.lot.originalCurrency, input.lot.originalFxRate ? "x FX " + formatNumber(input.lot.originalFxRate) : "base currency", "lot ratio " + formatNumber(lotRatio)]) + " = " + formatInr(input.cost),
+    proceedsFormula: formulaText([saleBasis, "net " + formatNumber(saleNet), input.tx.currency, sellRatio !== 1 ? "x sale ratio " + formatNumber(sellRatio) : "", saleFx ? "x FX " + formatNumber(saleFx) : "base currency"]) + " = " + formatInr(input.proceeds),
+    costFormula: formulaText(["FIFO " + formatNumber(input.used) + "/" + formatNumber(input.lot.originalQuantity), buyBasis, "tax basis " + formatNumber(buyGross) + " " + input.lot.originalCurrency, input.lot.originalFxRate ? "x FX " + formatNumber(input.lot.originalFxRate) : "base currency", "lot ratio " + formatNumber(lotRatio)]) + " = " + formatInr(input.cost),
     gainFormula: formatInr(input.proceeds) + " - " + formatInr(input.cost) + " = " + formatInr(input.gain),
     bucket: input.bucket,
     bucketReason: bucketReason(input.bucket, input.account, input.instrument, input.tx.currency, daysBetween(input.lot.buyDate, input.tx.date)),
@@ -573,6 +578,13 @@ function isZeroAmountLotTransfer(tx: Transaction): boolean {
 
 function isLotSell(tx: Transaction): boolean {
   return tx.type === "sell" || tx.type === "redemption" || tx.type === "switch_out" || tx.type === "maturity";
+}
+
+function taxableTransactionAmount(tx: Transaction, mode: "cost" | "proceeds"): number {
+  const quantity = Math.abs(tx.quantity ?? 0);
+  const fmvBase = typeof tx.taxFmvPrice === "number" && quantity > 0 ? Math.abs(tx.taxFmvPrice * quantity) : Math.abs(tx.amount);
+  const fees = Math.abs(tx.fees ?? 0);
+  return mode === "cost" ? fmvBase + fees : fmvBase - fees;
 }
 
 function isForeign(account: Account, instrument: Instrument, currency: string): boolean {

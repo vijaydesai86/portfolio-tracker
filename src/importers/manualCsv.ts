@@ -65,6 +65,7 @@ type NormalizedTransactionRow = Required<{
   country: string;
   issuer: string;
   notes: string;
+  tax_fmv_price: string;
 }>;
 
 type NormalizedLedgerRow = Required<{
@@ -322,6 +323,7 @@ function parseTransactionCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOp
       price,
       amount,
       currency: normalized.currency,
+      taxFmvPrice: optionalNumber(normalized.tax_fmv_price),
       fees: optionalNumber(normalized.fees) ?? 0,
       taxes: optionalNumber(normalized.taxes) ?? 0,
       source: { type: "import", importId: options.importId, provider: "manual_transactions", sourceRecordHash },
@@ -617,7 +619,8 @@ function normalizeTransactionRow(row: ManualCsvRow): NormalizedTransactionRow {
     isin: symbolFields.isin || pick(row, "isin").toUpperCase(),
     country: pick(row, "country", "region").toUpperCase(),
     issuer: pick(row, "issuer", "amc", "fund_house"),
-    notes: pick(row, "notes", "description")
+    notes: pick(row, "notes", "description"),
+    tax_fmv_price: cleanNumber(pick(row, "fmv", "tax_fmv", "tax_fmv_price", "fair_market_value", "tax_price"))
   };
 }
 

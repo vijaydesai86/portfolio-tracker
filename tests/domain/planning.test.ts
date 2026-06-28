@@ -3,6 +3,8 @@ import { createEmptyBackup, type PortfolioBackup } from "@/src/schema/backup";
 import { buildGoal, calculateGoalProgress, createGoalMapping } from "@/src/domain/goalAnalytics";
 import {
   calculateGoalDrawdowns,
+  calculateGoalRebalancingPlans,
+  calculateIncomeProjection,
   calculatePerformanceAttribution,
   calculateRebalancingPlan,
   calculateScenarioPlan,
@@ -74,8 +76,32 @@ describe("planning analytics", () => {
 
     expect(equity?.action).toBe("reduce");
     expect(equity?.driftValue).toBe(15000);
+    expect(equity?.actionAmount).toBe(15000);
     expect(debt?.action).toBe("add");
     expect(debt?.driftValue).toBe(-10000);
+    expect(debt?.actionAmount).toBe(10000);
+  });
+
+  it("calculates goal-level rebalancing from mapped goal values", () => {
+    const backup = updatePlanningSettings(backupFixture(), { targetAllocation: { Equity: 50, Debt: 40, Gold: 0, Others: 0, Cash: 10 } });
+    const plan = calculateGoalRebalancingPlans(calculateGoalProgress(backup), getPlanningSettings(backup))[0];
+    const equity = plan.rows.find((row) => row.category === "Equity");
+
+    expect(plan.goalName).toBe("Retirement");
+    expect(plan.currentValue).toBe(150000);
+    expect(equity?.action).toBe("reduce");
+    expect(equity?.actionAmount).toBe(15000);
+  });
+
+  it("projects portfolio income separately from capital gains", () => {
+    const backup = backupFixture();
+    const projection = calculateIncomeProjection(backup);
+    const exempt = projection.rows.find((row) => row.key === "exempt_interest");
+
+    expect(projection.capturedTotal).toBe(5000);
+    expect(projection.projectedAnnual).toBeGreaterThan(0);
+    expect(exempt?.captured).toBe(5000);
+    expect(projection.rows.find((row) => row.key === "maturity")?.projectedAnnual).toBe(0);
   });
 
   it("projects goal corpus drawdown and depletion from mapped goal corpus", () => {

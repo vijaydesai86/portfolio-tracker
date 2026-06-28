@@ -200,4 +200,28 @@ describe("Indian resident portfolio tax report", () => {
       expect.objectContaining({ assetName: "Open Harvest Fund", quantity: 10, loss: -200, cost: 1200, currentValue: 1000, lots: 1 })
     ]);
   });
+
+  it("uses optional transaction FMV only for tax cost and proceeds", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push({ id: "acct", name: "Fidelity", institution: "Fidelity", type: "us_stock", currency: "USD", createdAt: now, updatedAt: now });
+    backup.instruments.push({ id: "inst", name: "FMV Stock", type: "us_stock", symbol: "FMV", currency: "USD", country: "US", category: "Equity", issuer: "FMV", createdAt: now, updatedAt: now });
+    addFx(backup, "2026-01-01", 80);
+    addFx(backup, "2026-06-01", 90);
+    backup.transactions.push(
+      { id: "buy", accountId: "acct", instrumentId: "inst", date: "2026-01-01", type: "buy", quantity: 10, price: 100, taxFmvPrice: 120, amount: 1000, currency: "USD", fees: 0, taxes: 0, source: { type: "manual" }, userModified: false, createdAt: now, updatedAt: now },
+      { id: "sell", accountId: "acct", instrumentId: "inst", date: "2026-06-01", type: "sell", quantity: 4, price: 200, taxFmvPrice: 210, amount: 800, currency: "USD", fees: 0, taxes: 0, source: { type: "manual" }, userModified: false, createdAt: now, updatedAt: now }
+    );
+    backup.manualBalances.push({ id: "bal", accountId: "acct", instrumentId: "inst", label: "FMV Stock", category: "Equity", currency: "USD", value: 1200, quantity: 6, price: 200, asOfDate: "2026-06-01", source: { type: "manual" }, userModified: false, createdAt: now, updatedAt: now });
+
+    const report = calculatePortfolioTaxReport(backup, { financialYear: "2026-27" });
+
+    expect(backup.transactions[0].amount).toBe(1000);
+    expect(backup.transactions[1].amount).toBe(800);
+    expect(report.realized.totalProceeds).toBe(75600);
+    expect(report.realized.totalCost).toBe(38400);
+    expect(report.realized.totalGain).toBe(37200);
+    expect(report.unrealized.totalCost).toBe(57600);
+    expect(report.realized.rows[0].trace?.proceedsFormula).toContain("840 USD");
+    expect(report.realized.rows[0].trace?.costFormula).toContain("1200 USD");
+  });
 });

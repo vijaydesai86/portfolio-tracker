@@ -1,4 +1,4 @@
-import { calculatePortfolioInsights, calculatePortfolioSummary } from "@/src/domain/analytics";
+import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase } from "@/src/domain/analytics";
 import { calculateDashboardPerformance } from "@/src/domain/dashboardPerformance";
 import type { GoalProgress } from "@/src/domain/goalAnalytics";
 import { calculateHoldingReturns } from "@/src/domain/holdingReturns";
@@ -63,7 +63,32 @@ export type RebalanceRow = {
   targetValue: number;
   driftValue: number;
   driftPercent: number;
+  actionAmount: number;
   action: "add" | "reduce" | "hold";
+};
+
+export type GoalRebalancePlan = {
+  goalId: string;
+  goalName: string;
+  currentValue: number;
+  rows: RebalanceRow[];
+};
+
+export type IncomeProjectionRow = {
+  key: "indian_dividend" | "foreign_dividend" | "taxable_interest" | "exempt_interest" | "maturity";
+  label: string;
+  captured: number;
+  projectedAnnual: number;
+  detail: string;
+};
+
+export type IncomeProjection = {
+  observationStart: string | null;
+  observationEnd: string | null;
+  observationDays: number;
+  capturedTotal: number;
+  projectedAnnual: number;
+  rows: IncomeProjectionRow[];
 };
 
 export type GoalDrawdownPoint = {
@@ -248,9 +273,60 @@ export function calculateRebalancingPlan(backup: PortfolioBackup, settings = get
       targetValue: roundMoney(targetValue),
       driftValue: roundMoney(driftValue),
       driftPercent: roundPercent(driftPercent),
+      actionAmount: roundMoney(Math.abs(driftValue)),
       action: Math.abs(driftValue) < Math.max(100, summary.netWorth * 0.0025) ? "hold" : driftValue > 0 ? "reduce" : "add"
     };
   });
+}
+
+export function calculateGoalRebalancingPlans(goals: GoalProgress[], settings: PlanningSettings): GoalRebalancePlan[] {
+  const targets = normalizeTargetAllocation(settings.targetAllocation);
+  return goals.map((goal) => {
+    const total = goal.mappedCurrentValue;
+    const rows = categories.map((category) => {
+      const currentValue = goal.categoryValues[category] ?? 0;
+      const currentPercent = total <= 0 ? 0 : roundPercent((currentValue / total) * 100);
+      const targetPercent = targets[category];
+      const targetValue = total * (targetPercent / 100);
+      const driftValue = currentValue - targetValue;
+      const driftPercent = currentPercent - targetPercent;
+      return { category, currentValue: roundMoney(currentValue), currentPercent, targetPercent, targetValue: roundMoney(targetValue), driftValue: roundMoney(driftValue), driftPercent: roundPercent(driftPercent), actionAmount: roundMoney(Math.abs(driftValue)), action: Math.abs(driftValue) < Math.max(100, total * 0.0025) ? "hold" as const : driftValue > 0 ? "reduce" as const : "add" as const };
+    });
+    return { goalId: goal.goal.id, goalName: goal.goal.name, currentValue: roundMoney(total), rows };
+  });
+}
+
+export function calculateIncomeProjection(backup: PortfolioBackup): IncomeProjection {
+  const dated = backup.transactions.map((tx) => tx.date).filter(Boolean).sort();
+  const observationEnd = dated.at(-1) ?? null;
+  const observationStart = observationEnd ? dateMonthsBefore(observationEnd, 12) : null;
+  const rows: IncomeProjectionRow[] = [
+    { key: "indian_dividend", label: "Indian dividends", captured: 0, projectedAnnual: 0, detail: "taxable dividend rows from Indian holdings" },
+    { key: "foreign_dividend", label: "Foreign dividends", captured: 0, projectedAnnual: 0, detail: "foreign dividend rows converted using transaction-date FX" },
+    { key: "taxable_interest", label: "Taxable interest", captured: 0, projectedAnnual: 0, detail: "interest rows outside exempt PPF and SSY accounts" },
+    { key: "exempt_interest", label: "Exempt interest", captured: 0, projectedAnnual: 0, detail: "PPF and SSY interest rows shown separately" },
+    { key: "maturity", label: "Maturity cash", captured: 0, projectedAnnual: 0, detail: "maturity rows are shown as known cash events, not recurring yield" }
+  ];
+  const byKey = new Map(rows.map((row) => [row.key, row]));
+  const accounts = new Map(backup.accounts.map((account) => [account.id, account]));
+  for (const tx of backup.transactions) {
+    if (observationStart && tx.date < observationStart) continue;
+    if (observationEnd && tx.date > observationEnd) continue;
+    const converted = tryConvertToBase(Math.abs(tx.amount), tx.currency, backup, tx.date);
+    const value = converted ?? (tx.currency === backup.baseCurrency ? Math.abs(tx.amount) : 0);
+    if (value <= 0) continue;
+    const account = accounts.get(tx.accountId);
+    const key = tx.type === "dividend"
+      ? tx.currency !== backup.baseCurrency || account?.type === "us_stock" ? "foreign_dividend" : "indian_dividend"
+      : tx.type === "interest" || tx.type === "interest_accrual"
+        ? account?.type === "ppf" || account?.type === "ssy" ? "exempt_interest" : "taxable_interest"
+        : tx.type === "maturity" ? "maturity" : undefined;
+    if (!key) continue;
+    byKey.get(key)!.captured += value;
+  }
+  const observationDays = observationStart && observationEnd ? Math.max(1, Math.round((Date.parse(observationEnd + "T00:00:00.000Z") - Date.parse(observationStart + "T00:00:00.000Z")) / 86400000)) : 0;
+  const normalizedRows = rows.map((row) => ({ ...row, captured: roundMoney(row.captured), projectedAnnual: row.key === "maturity" ? 0 : roundMoney(observationDays > 0 ? row.captured * (365 / observationDays) : 0) }));
+  return { observationStart, observationEnd, observationDays, capturedTotal: roundMoney(normalizedRows.reduce((sum, row) => sum + row.captured, 0)), projectedAnnual: roundMoney(normalizedRows.reduce((sum, row) => sum + row.projectedAnnual, 0)), rows: normalizedRows };
 }
 
 export function calculateGoalDrawdowns(goals: GoalProgress[], settings: PlanningSettings): GoalDrawdownReport[] {
@@ -424,6 +500,13 @@ function diffNamedRows(fromRows: Array<{ name: string; value: number }>, toRows:
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function dateMonthsBefore(date: string, months: number): string {
+  const parsed = new Date(date + "T00:00:00.000Z");
+  if (Number.isNaN(parsed.getTime())) return date;
+  parsed.setUTCMonth(parsed.getUTCMonth() - months);
+  return parsed.toISOString().slice(0, 10);
 }
 
 function numberSetting(value: unknown, fallback: number): number {

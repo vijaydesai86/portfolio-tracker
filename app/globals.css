@@ -831,7 +831,7 @@ input:not([type]) {
 }
 
 .transaction-edit-row {
-  grid-template-columns: 130px 140px 90px 120px 120px 120px 100px 100px;
+  grid-template-columns: 130px 140px 90px 120px 120px 120px 120px 100px 100px 92px;
 }
 
 .edit-row input,
@@ -2089,7 +2089,7 @@ textarea {
 }
 
 .transaction-edit-row {
-  grid-template-columns: 130px 140px 90px 120px 120px 120px 100px 100px 92px;
+  grid-template-columns: 130px 140px 90px 120px 120px 120px 120px 100px 100px 92px;
 }
 
 @media (max-width: 1300px) {
@@ -5329,5 +5329,132 @@ textarea {
 
   .goal-drawdown-item .table-wrap table {
     min-width: 760px;
+  }
+}
+
+
+/* FMV, goal inclusion, and planning-panel responsive polish */
+.goal-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.goal-include-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #d8e2e8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.goal-include-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.goal-rebalance-panel,
+.income-projection-card {
+  min-width: 0;
+}
+
+.goal-rebalance-panel h3 {
+  margin: 0 0 6px;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.goal-rebalance-panel .table-wrap,
+.income-projection-card .table-wrap,
+.planning-card .table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.goal-rebalance-panel table,
+.income-projection-card table,
+.planning-card table {
+  min-width: 780px;
+}
+
+.transaction-edit-row input[title*="fair market value"] {
+  border-color: #b6c5d2;
+  background: #f8fafc;
+}
+
+.transaction-edit-row input[title*="fair market value"]:focus {
+  outline: 2px solid rgba(15, 118, 110, 0.16);
+  outline-offset: 1px;
+}
+
+.app-shell-v2 .tax-workspace table,
+.app-shell-v2 .planning-view table,
+.app-shell-v2 .goals-section table {
+  table-layout: auto;
+}
+
+.app-shell-v2 .tax-workspace td,
+.app-shell-v2 .planning-view td,
+.app-shell-v2 .goals-section td {
+  vertical-align: top;
+}
+
+.app-shell-v2 .tax-workspace td:first-child,
+.app-shell-v2 .planning-view td:first-child,
+.app-shell-v2 .goals-section td:first-child {
+  white-space: normal;
+  min-width: 150px;
+}
+
+.goal-card-head {
+  gap: 12px;
+}
+
+.goal-card-head > div:first-child {
+  min-width: 0;
+}
+
+@media (max-width: 1180px) {
+  .transaction-edit-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .goal-card-head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .goal-card-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .transaction-edit-row {
+    grid-template-columns: 1fr;
+  }
+
+  .goal-include-toggle,
+  .goal-card-actions .danger-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .goal-rebalance-panel table,
+  .income-projection-card table,
+  .planning-card table {
+    min-width: 680px;
   }
 }

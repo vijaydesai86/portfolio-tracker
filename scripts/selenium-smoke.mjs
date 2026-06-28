@@ -518,6 +518,8 @@ async function assertResponsiveCorePages() {
       if (page === "Planning") {
         await waitForBodyText("Scenario Planning", 15000);
         await waitForBodyText("Rebalancing View", 15000);
+  await waitForBodyText("Goal-level advisory drift", 15000);
+  await waitForBodyText("Income Projection", 15000);
         await waitForBodyText("Goal Drawdown Longevity", 15000);
       }
       if (page === "Snapshots") await waitForBodyText("Snapshot Library", 15000);
@@ -614,6 +616,7 @@ try {
     return body.includes("deposit") && body.includes("manual_entry") && body.includes("250");
   }, 15000);
   await jsClick("//button[contains(., 'Edit Transactions')]");
+  await driver.wait(until.elementLocated(By.xpath("//input[@placeholder='FMV / tax price']")), 15000);
   await jsClick("//button[normalize-space(.)='Delete']");
   await waitForBodyText("Transaction deleted locally");
   await jsClick("//button[contains(., 'Holdings')]");
@@ -675,6 +678,8 @@ try {
   await waitForBodyText("Selected goal snapshot");
   await waitForBodyText("Goal snapshot");
   await waitForBodyText("Target corpus");
+  await waitForBodyText("Combined", 15000);
+  await driver.wait(until.elementLocated(By.css(".goal-include-toggle input[type='checkbox']")), 15000);
   await assertGoalTermTooltips("Goals term tooltips");
   await assertCollapsibleSections("Goals collapse controls");
   await jsClick("//section[.//h2[normalize-space(.)='Map Assets to Goals']]//button[contains(., 'Save Mapping')]");
@@ -687,6 +692,8 @@ try {
   await waitForBodyText("Planning Lab", 15000);
   await waitForBodyText("Scenario Planning", 15000);
   await waitForBodyText("Rebalancing View", 15000);
+  await waitForBodyText("Goal-level advisory drift", 15000);
+  await waitForBodyText("Income Projection", 15000);
   await waitForBodyText("Goal Drawdown Longevity", 15000);
   await waitForBodyText("Performance Attribution", 15000);
   await waitForBodyText("Spend growth %", 15000);
@@ -845,6 +852,8 @@ try {
   await waitForBodyText("Planning Lab", 15000);
   await waitForBodyText("Scenario Planning", 15000);
   await waitForBodyText("Rebalancing View", 15000);
+  await waitForBodyText("Goal-level advisory drift", 15000);
+  await waitForBodyText("Income Projection", 15000);
   await assertNoPageOverflow("Fidelity planning page");
   await jsClick("//button[contains(., 'Tax')]");
   await waitForBodyText("Realized Lot Audit", 15000);

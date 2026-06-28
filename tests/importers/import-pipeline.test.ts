@@ -84,10 +84,10 @@ cash-main,2026-06-23,Manual,cash,Cash,250,INR,Cash`;
     expect([...holdingReturns.values()].filter((row) => row.costBasisKnown)).toHaveLength(4);
   });
   it("imports Fidelity-style manual US stock rows with USD price and row-level USD-INR FX", () => {
-    const csv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes
-1,15-02-2025,Fidelity,us_stock,TST,Example US Stock,buy,10,10,80,0,,USD,Equity,RSU1
-2,15-05-2025,Fidelity,us_stock,TST,Example US Stock,buy,5,12,81,0,,USD,Equity,RSU2
-3,28-05-2026,Fidelity,us_stock,TST,Example US Stock,sell,3,30,90,0,,USD,Equity,RSU1`;
+    const csv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes,FMV
+1,15-02-2025,Fidelity,us_stock,TST,Example US Stock,buy,10,10,80,0,,USD,Equity,RSU1,11
+2,15-05-2025,Fidelity,us_stock,TST,Example US Stock,buy,5,12,81,0,,USD,Equity,RSU2,13
+3,28-05-2026,Fidelity,us_stock,TST,Example US Stock,sell,3,30,90,0,,USD,Equity,RSU1,31`;
 
     const result = commitManualCsvImport(createEmptyBackup("INR"), csv, { importId: "fid_manual", fileName: "manual-fidelity.csv", now: "2026-06-24T00:00:00.000Z" });
     const holdingReturns = calculateHoldingReturns(result.backup);
@@ -99,6 +99,7 @@ cash-main,2026-06-23,Manual,cash,Cash,250,INR,Cash`;
     expect(result.addedBalances).toBe(1);
     expect(result.addedPrices).toBe(6);
     expect(result.backup.priceSnapshots.filter((snapshot) => snapshot.instrumentId === "USDINR").map((snapshot) => snapshot.price)).toEqual([80, 81, 90]);
+    expect(result.backup.transactions.map((tx) => tx.taxFmvPrice)).toEqual([11, 13, 31]);
     expect(holding.quantity).toBe(12);
     expect(holding.price).toBe(30);
     expect(holding.value).toBe(360);
