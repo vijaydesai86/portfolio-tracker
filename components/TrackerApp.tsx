@@ -1613,8 +1613,8 @@ function PlanningView({ backup, settings, scenario, rebalancing, goalDrawdowns, 
       </div>
 
       <div className="card wide-card goal-drawdown-card">
-        <div className="section-head"><div><h2>Goal Drawdown Longevity</h2><p>Projects each goal from the goal date forward using mapped corpus, first-year spending, per-goal spend growth, horizon, withdrawal timing, and mapped asset return mix.</p></div></div>
-        <p className="chart-note compact-note">Each goal can use different drawdown assumptions. Settings stores the defaults used when a goal has not been customized.</p>
+        <div className="section-head"><div><h2>Goal Drawdown Longevity</h2><p>Projects each goal from the goal date forward using mapped corpus, first-year spending, per-goal spend growth, corpus consumption years, withdrawal timing, and mapped asset return mix.</p></div></div>
+        <p className="chart-note compact-note">Each goal can use different drawdown assumptions. Corpus consumption years controls how far the chart and table project after the goal year. Settings stores defaults used when a goal has not been customized.</p>
         {goalDrawdowns.length === 0 ? <p className="message">Create goals and map assets to model drawdown longevity.</p> : <div className="drawdown-grid">{goalDrawdowns.map((row) => <GoalDrawdownCard key={row.goalId} report={row} updateGoalRecord={updateGoalRecord} currency={currency} usdSecondary={usdSecondary} />)}</div>}
       </div>
     </section>
@@ -1646,24 +1646,24 @@ function GoalDrawdownCard({ report, updateGoalRecord, currency, usdSecondary }: 
       <div className="section-head drawdown-item-head"><div><h3>{report.goalName}</h3><p>{report.depletionYear ? "Projected depletion in " + report.depletionYear : "Projected to last full horizon"} · weighted return {report.weightedReturn.toFixed(1)}%</p></div></div>
       <div className="settings-grid compact-settings-grid drawdown-goal-settings">
         <label><span>Spend growth %</span><input type="number" step="0.1" value={report.annualSpendGrowth} onChange={(event) => updateGoalRecord(report.goalId, { drawdownSpendGrowth: Number(event.target.value) })} /></label>
-        <label><span>Horizon years</span><input type="number" step="1" value={report.horizonYears} onChange={(event) => updateGoalRecord(report.goalId, { drawdownHorizonYears: Number(event.target.value) })} /></label>
+        <label><span>Corpus consumption years</span><input type="number" step="1" min="1" max="100" value={report.horizonYears} onChange={(event) => updateGoalRecord(report.goalId, { drawdownHorizonYears: Number(event.target.value) })} /></label>
         <label><span>Withdrawal timing</span><select value={report.withdrawalTiming} onChange={(event) => updateGoalRecord(report.goalId, { drawdownWithdrawalTiming: event.target.value as Goal["drawdownWithdrawalTiming"] })}><option value="beginning">Beginning of year</option><option value="end">End of year</option></select></label>
       </div>
       <div className="holding-command-strip compact-command-strip">
         <MiniInsight label="Start corpus" value={formatMoney(report.startingCorpus, currency)} secondary={usdSecondary(report.startingCorpus)} detail="at goal date" />
         <MiniInsight label="First withdrawal" value={formatMoney(report.firstYearWithdrawal, currency)} secondary={usdSecondary(report.firstYearWithdrawal)} detail="first goal year" />
-        <MiniInsight label="Lasts" value={report.depletionYear ? String(report.lastsYears) + " years" : report.horizonYears + "+ years"} detail={report.depletionYear ? "depletion estimate" : "not depleted"} />
+        <MiniInsight label="Lasts" value={report.depletionYear ? String(report.lastsYears) + " years" : report.horizonYears + "+ years"} detail={report.depletionYear ? "depletion estimate" : "full consumption window"} />
         <MiniInsight label="Horizon surplus" value={formatMoney(report.surplusAtHorizon, currency)} secondary={usdSecondary(report.surplusAtHorizon)} detail="end of model" />
       </div>
       <GoalDrawdownChart report={report} currency={currency} />
-      <div className="table-wrap"><table><thead><tr><th>Year</th><th>Start corpus</th><th>Withdrawal</th><th>Growth</th><th>Ending corpus</th></tr></thead><tbody>{report.points.slice(0, 12).map((point) => <tr key={point.year}><td>{point.calendarYear}</td><td>{formatMoney(point.startingCorpus, currency)}</td><td>{formatMoney(point.withdrawal, currency)}</td><td>{formatMoney(point.growth, currency)}</td><td>{formatMoney(point.endingCorpus, currency)}</td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>Year</th><th>Start corpus</th><th>Withdrawal</th><th>Growth</th><th>Ending corpus</th></tr></thead><tbody>{report.points.map((point) => <tr key={point.year}><td>{point.calendarYear}</td><td>{formatMoney(point.startingCorpus, currency)}</td><td>{formatMoney(point.withdrawal, currency)}</td><td>{formatMoney(point.growth, currency)}</td><td>{formatMoney(point.endingCorpus, currency)}</td></tr>)}</tbody></table></div>
     </div>
   );
 }
 
 function GoalDrawdownChart({ report, currency }: { report: GoalDrawdownReport; currency: string }) {
   const points = report.points.map((point) => ({ ts: Date.parse(String(point.calendarYear) + "-01-01T00:00:00.000Z"), date: String(point.calendarYear), value: point.endingCorpus }));
-  return <NativeLineChart currency={currency} emptyMessage="No drawdown points yet." note="Planning line only: it uses configured assumptions and does not change actual portfolio values." series={[{ key: report.goalId, label: report.goalName, color: "#0e7490", points }]} />;
+  return <NativeLineChart currency={currency} emptyMessage="No drawdown points yet." note={"Planning line only: it uses configured assumptions and projects through " + report.horizonYears + " corpus consumption year(s). It does not change actual portfolio values."} series={[{ key: report.goalId, label: report.goalName, color: "#0e7490", points }]} />;
 }
 
 

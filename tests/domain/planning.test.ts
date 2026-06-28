@@ -110,6 +110,18 @@ describe("planning analytics", () => {
     expect(education?.withdrawalTiming).toBe("end");
   });
 
+  it("uses corpus consumption years as the exact drawdown projection length", () => {
+    const backup = backupFixture();
+    backup.goals[0] = { ...backup.goals[0], drawdownHorizonYears: 8, drawdownSpendGrowth: 5, drawdownWithdrawalTiming: "beginning" };
+
+    const report = calculateGoalDrawdowns(calculateGoalProgress(backup), getPlanningSettings(backup))[0];
+
+    expect(report.horizonYears).toBe(8);
+    expect(report.points).toHaveLength(8);
+    expect(report.points[0].calendarYear).toBe(Number.parseInt(report.targetYear.toString(), 10));
+    expect(report.points.at(-1)?.calendarYear).toBe(report.targetYear + 7);
+  });
+
   it("compares frozen snapshots without market refresh", () => {
     const first = createPortfolioSnapshot(backupFixture(), { name: "First", now: "2026-06-28T00:00:00.000Z" });
     const secondBackup = backupFixture();

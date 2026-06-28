@@ -4,7 +4,7 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
-- Added a Planning workspace with JSON-persisted scenario assumptions, stress projection, target-allocation drift, rebalance suggestions, performance attribution, snapshot comparison, and goal corpus longevity/drawdown analytics; refined drawdown into per-goal spend-growth/horizon/withdrawal assumptions, made holding details expand inline below the selected row, tightened native timeline tick sampling, and added real-browser Selenium coverage for responsive planning, holding detail drilldowns, snapshot comparison, settings persistence, and exported planning assumptions.
+- Added a Planning workspace with JSON-persisted scenario assumptions, stress projection, target-allocation drift, rebalance suggestions, performance attribution, snapshot comparison, and goal corpus longevity/drawdown analytics; refined drawdown into per-goal spend-growth/corpus-consumption-year/withdrawal assumptions, made holding details expand inline below the selected row, tightened native timeline tick sampling, and added real-browser Selenium coverage for responsive planning, holding detail drilldowns, snapshot comparison, settings persistence, and exported planning assumptions.
 
 - Added staged native import previews for CAS, INDMoney, PF, and NPS batches plus a holding detail drawer for per-holding transactions, goal mappings, and tax lots without changing committed portfolio math before user confirmation.
 

@@ -690,6 +690,7 @@ try {
   await waitForBodyText("Goal Drawdown Longevity", 15000);
   await waitForBodyText("Performance Attribution", 15000);
   await waitForBodyText("Spend growth %", 15000);
+  await waitForBodyText("Corpus consumption years", 15000);
   await waitForBodyText("Withdrawal timing", 15000);
   await assertNoPageOverflow("Planning page");
   await assertVisibleNativeLineCharts("planning drawdown chart", 1);

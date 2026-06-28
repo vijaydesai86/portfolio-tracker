@@ -86,7 +86,7 @@ Current automated CAS support includes browser PDF upload, password entry, clien
 
 - Planning features are advisory and must be visibly separate from source-of-truth portfolio analytics. Scenario/stress/rebalance/drawdown outputs may use configurable assumptions, but actual holdings, current values, invested cost, P/L, tax, XIRR, imports, and explicit market refresh remain factual ledger/market-data paths.
 - Planning assumptions must persist in canonical JSON settings, restore exactly, and be editable from Settings without forcing users to maintain CSV assumptions.
-- Goal drawdown/longevity must be calculated from goal mappings, per-goal drawdown assumptions, and category returns. It must show corpus path, depletion year or horizon surplus, and not imply guaranteed returns. Global planning settings may provide defaults, but visible drawdown controls belong with the individual goal result.
+- Goal drawdown/longevity must be calculated from goal mappings, per-goal drawdown assumptions, and category returns. It must show corpus path, depletion year or horizon surplus, and not imply guaranteed returns. Global planning settings may provide defaults, but visible drawdown controls belong with the individual goal result. Corpus consumption years controls the drawdown projection length and must drive both chart points and table rows.
 - Snapshot comparison must compare frozen saved snapshot analytics only. It must not fetch market data, recalculate live values, or alter existing snapshots.
 - Rebalance suggestions must be expressed as planning deltas against target allocation and must not create transactions or modify holdings unless a separate explicit action is implemented test-first.
 
