@@ -1,5 +1,6 @@
-import type { Account, AssetCategory, Instrument, ManualBalance, PortfolioBackup, Transaction } from "@/src/schema/backup";
+import type { Account, AssetCategory, Instrument, ManualBalance, PortfolioBackup, TaperMode, Transaction } from "@/src/schema/backup";
 import { calculateXirr } from "@/src/domain/xirr";
+import { calculateTrackedLocalValue } from "@/src/domain/tapering";
 
 const categories: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
 
@@ -27,6 +28,14 @@ export type HoldingInsight = {
   valueInBase?: number;
   quantity?: number;
   price?: number;
+  taperMode?: TaperMode;
+  taperFactor?: number;
+  taperLabel: string;
+  taperApplied: boolean;
+  trackedValue?: number;
+  trackedValueInBase?: number;
+  trackedPrice?: number;
+  taperDetail: string;
   asOfDate: string;
   provider: string;
   institution: string;
@@ -176,6 +185,8 @@ function buildHoldingInsight(balance: ManualBalance, backup: PortfolioBackup, mi
   const instrument = balance.instrumentId ? backup.instruments.find((item) => item.id === balance.instrumentId) : undefined;
   const valueInBase = tryConvertToBase(balance.value, balance.currency, backup);
   if (valueInBase === undefined) missingFx.add(balance.currency + "/" + backup.baseCurrency);
+  const tracked = calculateTrackedLocalValue(balance);
+  const trackedValueInBase = tryConvertToBase(tracked.trackedLocalValue, balance.currency, backup);
 
   return {
     id: balance.id,
@@ -190,6 +201,14 @@ function buildHoldingInsight(balance: ManualBalance, backup: PortfolioBackup, mi
     valueInBase: valueInBase === undefined ? undefined : roundMoney(valueInBase),
     quantity: balance.quantity,
     price: balance.price,
+    taperMode: balance.taperMode,
+    taperFactor: balance.taperFactor,
+    taperLabel: tracked.label,
+    taperApplied: tracked.applied,
+    trackedValue: tracked.trackedLocalValue,
+    trackedValueInBase: trackedValueInBase === undefined ? undefined : roundMoney(trackedValueInBase),
+    trackedPrice: tracked.trackedPrice,
+    taperDetail: tracked.applied ? "k=" + tracked.factor.toFixed(2) : tracked.reason,
     asOfDate: balance.asOfDate,
     provider: cleanDimension(balance.source.provider) ?? balance.source.type,
     institution: cleanDimension(account?.institution) ?? cleanDimension(balance.source.provider) ?? "Manual",

@@ -4,6 +4,28 @@ All meaningful project changes are recorded here.
 
 ## 0.1.0 - Unreleased
 
+- Added per-holding conservative value taper controls for goal planning, with no/light/medium/strong/custom factors using the tracked-price formula while preserving actual portfolio value, tax value, and market refresh behavior; added domain and Selenium coverage for taper persistence, goal projection, JSON export/restore, refresh, and responsive Goals rendering.
+
+- Changed canonical JSON restore to reproduce the exported portfolio state exactly without implicit market refresh; users now press Refresh explicitly to update live NAV/quote/FX values after restore, and Selenium verifies both static restore and explicit refresh.
+
+- Hardened chart and finance-table rendering across analytics, goals, snapshots, tax, and data workspaces by applying the Holdings-style stacked layout model, keeping numeric tax/audit cells on one line inside contained scrollers, clarifying tax set-off column labels, and adding real-browser assertions for cramped cards and unreadable tables.
+
+- Fixed Refresh status so explicit market refresh reports how many current holding valuations changed while frozen portfolio snapshots remain unchanged.
+
+- Fixed Fidelity/manual transaction CSV dashed numeric dates to parse as `DD-MM-YYYY`, so rows such as `01-06-2026` are treated as 1 June 2026, not 6 January 2026.
+
+- Hardened responsive rendering for goal mappings and tax/data audit tables, added laptop viewport coverage to the real Selenium browser smoke test, and added a browser restore-refresh flow with deterministic market data assertions.
+
+- Corrected loss-harvesting tax planning to use only FIFO-reachable sale prefixes; later loss lots are no longer shown as harvestable when older gain lots must be sold first.
+
+- Reworked the Tax workspace into an auditable per-holding view: zero-value broker migration rows are ignored as taxable disposals, realized sales are summarized by holding and tax bucket with gross and allocated tax estimates, unrealized lots are grouped by STCG/LTCG bucket with rough potential tax, and explanatory notes clarify set-off, income, and loss-harvesting sections.
+
+- Added an Indian resident individual portfolio Tax workspace with configurable regime, slab, surcharge, and cess settings; FIFO realized-lot audit; capital-gains and portfolio-income estimates; unrealized gain/loss review; and JSON-persisted tax assumptions.
+
+- Added a Data and Reconciliation workspace that audits committed imports, source totals, market-data gaps, validation checks, and source-ledger totals before analytics are trusted.
+
+- Expanded Selenium browser smoke coverage across Tax, Data, and Settings views with responsive overflow checks so chart rows, audit tables, and navigation cannot silently regress visually.
+
 - Made frozen snapshot ranking cards full-width so values and bars stay visible, and added native timeline hover/focus tooltips that show all series values for the selected date across history and snapshot charts.
 
 - Reworked History and Snapshot timelines to deterministic native SVG line/dot charts, removed the redundant Analytics Holdings tab in favor of the dedicated Holdings workspace, widened ranking rows for readable holding names, and broadened Selenium visual checks across donut, bar, ranking, history, and snapshot chart families.

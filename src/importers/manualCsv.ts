@@ -843,11 +843,9 @@ function parseDateCell(value?: string): string {
 
   const dash = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
   if (dash) {
-    const first = Number(dash[1]);
-    const second = Number(dash[2]);
+    const day = Number(dash[1]);
+    const month = Number(dash[2]);
     const year = Number(dash[3]);
-    const month = first > 12 ? second : first;
-    const day = first > 12 ? first : second;
     if (isValidDateParts(year, month, day)) return year + "-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
   }
 

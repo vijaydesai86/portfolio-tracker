@@ -1,6 +1,7 @@
 import { calculateHoldingReturns } from "@/src/domain/holdingReturns";
 import { signedPortfolioTransactionAmount, tryConvertToBase } from "@/src/domain/analytics";
 import { calculateXirr } from "@/src/domain/xirr";
+import { calculateTrackedLocalValue, hasAppliedTaper } from "@/src/domain/tapering";
 import type { AssetCategory, Goal, GoalMapping, ManualBalance, PortfolioBackup, Transaction } from "@/src/schema/backup";
 
 export type GoalDraft = {
@@ -42,7 +43,7 @@ export type GoalProgress = {
   xirrTotal: number;
   categoryValues: Record<AssetCategory, number>;
   projectedCategoryValues: Record<AssetCategory, number>;
-  mappedHoldings: Array<{ balance: ManualBalance; mappedPercent: number; value: number; projectedValue: number; invested?: number; profit?: number; xirr?: number | null }>;
+  mappedHoldings: Array<{ balance: ManualBalance; mappedPercent: number; value: number; actualValue: number; trackedDiscount: number; projectedValue: number; invested?: number; profit?: number; xirr?: number | null; taperApplied: boolean }>;
 };
 
 export type GoalSummary = {
@@ -128,8 +129,12 @@ export function calculateGoalProgress(backup: PortfolioBackup): GoalProgress[] {
       const percent = mappingPercentForBalance(backup.goalMappings, recalculated.id, balance);
       if (percent <= 0) continue;
       const returns = holdingReturns.get(balance.id);
-      const current = returns?.currentValue ?? tryConvertToBase(balance.value, balance.currency, backup) ?? 0;
+      const actualCurrent = returns?.currentValue ?? tryConvertToBase(balance.value, balance.currency, backup) ?? 0;
+      const tracked = calculateTrackedLocalValue(balance);
+      const trackedCurrent = tryConvertToBase(tracked.trackedLocalValue, balance.currency, backup) ?? actualCurrent;
+      const current = tracked.applied ? trackedCurrent : actualCurrent;
       const mappedValue = current * (percent / 100);
+      const mappedActualValue = actualCurrent * (percent / 100);
       const projectedValue = mappedValue * Math.pow(1 + returnRateForCategory(recalculated, balance.category) / 100, years);
       const invested = returns?.costBasisKnown ? returns.netInvested * (percent / 100) : undefined;
       const profit = invested === undefined ? undefined : mappedValue - invested;
@@ -141,7 +146,7 @@ export function calculateGoalProgress(backup: PortfolioBackup): GoalProgress[] {
       }
       categoryValues[balance.category] += mappedValue;
       projectedCategoryValues[balance.category] += projectedValue;
-      mappedHoldings.push({ balance, mappedPercent: percent, value: roundMoney(mappedValue), projectedValue: roundMoney(projectedValue), invested: invested === undefined ? undefined : roundMoney(invested), profit: profit === undefined ? undefined : roundMoney(profit), xirr: returns?.xirr });
+      mappedHoldings.push({ balance, mappedPercent: percent, value: roundMoney(mappedValue), actualValue: roundMoney(mappedActualValue), trackedDiscount: roundMoney(mappedActualValue - mappedValue), projectedValue: roundMoney(projectedValue), invested: invested === undefined ? undefined : roundMoney(invested), profit: profit === undefined ? undefined : roundMoney(profit), xirr: returns?.xirr, taperApplied: tracked.applied });
     }
 
     const mappedCurrentValue = sumCategories(categoryValues);
@@ -317,6 +322,7 @@ function isPortfolioEquivalentGoalScope(backup: PortfolioBackup, goals: GoalProg
   let portfolioCurrent = 0;
   let mappedCurrent = 0;
   for (const balance of backup.manualBalances) {
+    if (hasAppliedTaper(balance)) return false;
     const current = tryConvertToBase(balance.value, balance.currency, backup) ?? 0;
     if (current === 0) continue;
     portfolioCurrent += current;

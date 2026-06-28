@@ -139,3 +139,23 @@ it("parses historical mutual fund NAV and stock price responses", () => {
     { symbol: "AAPL", price: 110.5, currency: "USD", asOfDate: "2026-01-02", source: "yahoo_history" }
   ]);
 });
+
+it("keeps market-linked balances refreshable after JSON backup restore", () => {
+  const csv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes
+1,15-02-2025,Fidelity,us_stock,TST,Example US Stock,buy,10,10,80,0,,USD,Equity,RSU1
+2,01-06-2026,Fidelity,us_stock,TST,Example US Stock,sell,3,30,90,0,,USD,Equity,RSU2`;
+  const imported = commitManualCsvImport(createEmptyBackup("INR"), csv, { importId: "fid_restore", fileName: "manual-fidelity.csv", now: "2026-06-24T00:00:00.000Z" }).backup;
+  const restored = JSON.parse(JSON.stringify(imported));
+
+  const updated = applyMarketDataPayload(restored, {
+    stocks: [{ symbol: "TST", price: 44, currency: "USD", asOfDate: "2026-06-24", source: "test_live_quote" }],
+    navs: [],
+    fx: { pair: "USDINR", from: "USD", to: "INR", rate: 96, asOfDate: "2026-06-24", source: "test_latest_fx" },
+    errors: []
+  });
+  const holding = updated.manualBalances.find((balance) => balance.label === "Example US Stock")!;
+
+  expect(imported.transactions.find((tx) => tx.type === "sell")?.date).toBe("2026-06-01");
+  expect(holding.userModified).toBe(false);
+  expect(holding).toMatchObject({ price: 44, value: 308, asOfDate: "2026-06-24" });
+});

@@ -114,6 +114,88 @@ async function assertNoChartRowOverlap(context) {
   if (bad.length > 0) throw new Error(context + " rendered overlapping chart row label/value blocks: " + JSON.stringify(bad));
 }
 
+async function assertFinanceTablesReadable(context) {
+  const stats = await driver.executeScript(() => {
+    const tables = [...document.querySelectorAll(".tax-workspace table, .data-audit-workspace table")];
+    const badCells = [];
+    const badScrollers = [];
+    for (const table of tables) {
+      const wrap = table.closest(".table-wrap");
+      if (!wrap) {
+        badScrollers.push("missing table-wrap");
+        continue;
+      }
+      const wrapRect = wrap.getBoundingClientRect();
+      const tableRect = table.getBoundingClientRect();
+      const pageWidth = document.documentElement.clientWidth;
+      const wrapStyle = getComputedStyle(wrap);
+      const scrollableWhenWide = table.scrollWidth <= wrap.clientWidth + 4 || /(auto|scroll)/.test(wrapStyle.overflowX + wrapStyle.overflow);
+      if (wrapRect.left < -4 || wrapRect.right > pageWidth + 4) badScrollers.push("table-wrap escapes viewport");
+      if (!scrollableWhenWide) badScrollers.push("wide table is not internally scrollable");
+      if (tableRect.width > pageWidth && wrapRect.width > pageWidth + 4) badScrollers.push("wide table expands the page instead of its scroller");
+      for (const cell of table.querySelectorAll("td, th")) {
+        const style = getComputedStyle(cell);
+        const text = cell.textContent.trim();
+        if (!/[0-9₹$%-]/.test(text)) continue;
+        if (style.whiteSpace !== "nowrap" && cell.cellIndex !== 0 && !cell.closest(".analytics-grid")) {
+          badCells.push({ text: text.slice(0, 60), whiteSpace: style.whiteSpace, wordBreak: style.wordBreak, overflowWrap: style.overflowWrap });
+        }
+        if (style.wordBreak !== "normal") {
+          badCells.push({ text: text.slice(0, 60), whiteSpace: style.whiteSpace, wordBreak: style.wordBreak, overflowWrap: style.overflowWrap });
+        }
+      }
+    }
+    return { tables: tables.length, badCells: badCells.slice(0, 8), badScrollers: badScrollers.slice(0, 8) };
+  });
+  if (stats.badCells.length > 0 || stats.badScrollers.length > 0) {
+    throw new Error(context + " rendered unreadable finance tables: " + JSON.stringify(stats));
+  }
+}
+
+async function assertCardsContained(context) {
+  const stats = await driver.executeScript(() => {
+    const pageWidth = document.documentElement.clientWidth;
+    const bad = [...document.querySelectorAll(".card, .chart-card")].map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { text: element.textContent.trim().slice(0, 80), left: rect.left, right: rect.right, width: rect.width };
+    }).filter((item) => item.width > 0 && (item.left < -4 || item.right > pageWidth + 4)).slice(0, 8);
+    return { bad };
+  });
+  if (stats.bad.length > 0) {
+    throw new Error(context + " rendered escaping cards: " + JSON.stringify(stats));
+  }
+}
+
+async function assertGoalsReadable(context) {
+  const stats = await driver.executeScript(() => {
+    const pageWidth = document.documentElement.clientWidth;
+    const bad = [];
+    const overlapPairs = [];
+    for (const element of document.querySelectorAll(".goals-section .mini-insight, .goal-card, .goal-selector-control, .goal-mapping-row")) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width > 0 && (rect.left < -4 || rect.right > pageWidth + 4)) {
+        bad.push({ text: element.textContent.trim().slice(0, 80), left: rect.left, right: rect.right, width: rect.width });
+      }
+    }
+    for (const insight of document.querySelectorAll(".goals-section .mini-insight")) {
+      const children = [...insight.children].filter((child) => child.getBoundingClientRect().width > 0 && child.getBoundingClientRect().height > 0);
+      for (let i = 0; i < children.length; i += 1) {
+        for (let j = i + 1; j < children.length; j += 1) {
+          const a = children[i].getBoundingClientRect();
+          const b = children[j].getBoundingClientRect();
+          const overlapX = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+          const overlapY = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+          if (overlapX > 2 && overlapY > 2) overlapPairs.push(insight.textContent.trim().slice(0, 100));
+        }
+      }
+    }
+    return { bad: bad.slice(0, 8), overlapPairs: overlapPairs.slice(0, 8) };
+  });
+  if (stats.bad.length > 0 || stats.overlapPairs.length > 0) {
+    throw new Error(context + " rendered unreadable goal metrics: " + JSON.stringify(stats));
+  }
+}
+
 async function assertVisibleChartBars(context) {
   const stats = await driver.executeScript(() => {
     const fills = [...document.querySelectorAll(".metric-bar-track span, .ranking-fill")].map((fill) => {
@@ -165,7 +247,7 @@ async function assertFrozenRankingVisibility(context) {
         rowWidth: rowRect.width,
         valueWidth: valueRect?.width ?? 0,
         fillWidth: fillRect?.width ?? 0,
-        valueVisible: Boolean(valueRect && valueRect.width >= 80 && valueRect.right <= rowRect.right + 2),
+        valueVisible: Boolean(valueRect && valueRect.width >= 36 && valueRect.height >= 12 && valueRect.left >= rowRect.left - 2 && valueRect.right <= rowRect.right + 2),
         fillVisible: Boolean(fillRect && fillRect.width >= 3 && fillRect.height >= 10)
       };
     });
@@ -174,6 +256,44 @@ async function assertFrozenRankingVisibility(context) {
   if (stats.cards < 2 || stats.rows < 2 || stats.bad.length > 0) {
     throw new Error(context + " rendered hidden frozen ranking values/bars: " + JSON.stringify(stats));
   }
+}
+
+async function assertNoPageOverflow(context) {
+  const stats = await driver.executeScript(() => {
+    const width = document.documentElement.clientWidth;
+    function isContainedScrollableOverflow(element) {
+      const scroller = element.closest(".table-wrap, .goal-mapping-list");
+      if (!scroller) return false;
+      const scrollerRect = scroller.getBoundingClientRect();
+      const style = getComputedStyle(scroller);
+      const scrollable = scroller.scrollWidth > scroller.clientWidth + 4 && /(auto|scroll)/.test(style.overflowX + style.overflowY + style.overflow);
+      const containerInsidePage = scrollerRect.left >= -4 && scrollerRect.right <= width + 4;
+      return scrollable && containerInsidePage;
+    }
+    const offenders = [...document.querySelectorAll("body *")].map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { element, tag: element.tagName, cls: element.className?.toString?.() ?? "", text: element.textContent?.trim?.().slice(0, 80) ?? "", left: rect.left, right: rect.right, width: rect.width };
+    }).filter((item) => item.width > 0 && (item.left < -4 || item.right > width + 4) && !isContainedScrollableOverflow(item.element)).slice(0, 8).map(({ element, ...item }) => item);
+    return { width, offenders };
+  });
+  if (stats.offenders.length > 0) throw new Error(context + " has horizontal overflow: " + JSON.stringify(stats));
+}
+
+async function assertResponsiveCorePages() {
+  for (const [label, width, height] of [["desktop", 1440, 950], ["laptop", 1280, 800], ["tablet", 980, 900], ["mobile", 390, 860]]) {
+    await driver.manage().window().setRect({ width, height });
+    await driver.sleep(350);
+    for (const page of ["Analytics", "Holdings", "Goals", "Tax", "Data", "Settings"]) {
+      await jsClick("//button[contains(., '" + page + "')]");
+      await waitForBodyText(page === "Data" ? "Data Reconciliation" : page, 15000);
+      await assertNoPageOverflow(label + " " + page);
+      await assertNoChartRowOverlap(label + " " + page + " chart rows");
+      await assertCardsContained(label + " " + page + " cards");
+      await assertFinanceTablesReadable(label + " " + page + " finance tables");
+      if (page === "Goals") await assertGoalsReadable(label + " Goals");
+    }
+  }
+  await driver.manage().window().setRect({ width: 1440, height: 950 });
 }
 
 async function assertVisibleAllocationDonut(context) {
@@ -198,7 +318,7 @@ try {
   await driver.get(url);
   await driver.wait(until.elementLocated(By.css("h1")), 15000);
   const title = await driver.findElement(By.css("h1")).getText();
-  if (!/Portfolio Analytics|Holdings|Transactions|Goals|Snapshots|Add Entry|Imports|Backup/.test(title)) {
+  if (!/Portfolio Analytics|Holdings|Transactions|Goals|Tax|Snapshots|Add Entry|Imports|Data|Settings|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
   for (const label of ["Overview", "Allocation", "History"]) {
@@ -263,6 +383,19 @@ try {
   await assertNoStackedAreaTimeline("history breakdown timelines");
   await assertVisibleNativeLineCharts("history native timelines", 5);
   await assertNativeLineTooltip("history native timeline tooltip");
+
+  await jsClick("//button[contains(., 'Tax')]");
+  await waitForBodyText("Portfolio Tax Estimates", 15000);
+  await waitForBodyText("Estimated tax", 15000);
+  await waitForBodyText("Financial year", 15000);
+  await waitForBodyText("Tax Assumptions", 15000);
+  await jsClick("//button[contains(., 'Data')]");
+  await waitForBodyText("Data Reconciliation", 15000);
+  await waitForBodyText("Validation Checks", 15000);
+  await assertVisibleChartBars("data source value bars");
+  await jsClick("//button[contains(., 'Settings')]");
+  await waitForBodyText("Tax regime", 15000);
+  await waitForBodyText("Resident Indian individual", 15000);
 
   await jsClick("//button[contains(., 'Add Entry')]");
   await waitForBodyText("Add Goal");
@@ -346,6 +479,28 @@ try {
   await assertVisibleNativeLineCharts("restored snapshot frozen timelines", 4);
   await assertNativeLineTooltip("restored snapshot frozen timeline tooltip");
 
+  await driver.executeScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.__portfolioTrackerMarketCalls = 0;
+    window.__portfolioTrackerMarketPrice = 30;
+    window.__portfolioTrackerMarketDate = "2026-06-24";
+    window.fetch = (input, init) => {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.includes("/api/market-data")) {
+        window.__portfolioTrackerMarketCalls += 1;
+        const payload = {
+          navs: [],
+          stocks: [{ symbol: "TST", price: window.__portfolioTrackerMarketPrice, currency: "USD", asOfDate: window.__portfolioTrackerMarketDate, source: "selenium_quote" }],
+          fx: { pair: "USDINR", from: "USD", to: "INR", rate: 96, asOfDate: window.__portfolioTrackerMarketDate, source: "selenium_fx" },
+          fxs: [],
+          errors: []
+        };
+        return Promise.resolve(new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      return originalFetch(input, init);
+    };
+  });
+
   const fidelityCsvPath = path.resolve("test-results/manual-fidelity-smoke.csv");
   fs.writeFileSync(fidelityCsvPath, [
     "transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes",
@@ -369,6 +524,16 @@ try {
   await assertNoFakeChartRows("holding ranking rows");
   await assertNoChartRowOverlap("holding ranking rows");
   await assertVisibleChartBars("holding ranking rows");
+  await jsClick("//button[contains(., 'Edit Holdings')]");
+  await driver.wait(async () => await driver.executeScript(() => Boolean(document.querySelector(".taper-mode-select"))), 10000);
+  await driver.executeScript(() => {
+    const select = document.querySelector(".taper-mode-select");
+    select.value = "medium";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await waitForBodyText("Medium taper", 15000);
+  await jsClick("//button[contains(., 'Done Editing')]");
+  await waitForBodyText("Tracked", 15000);
   await jsClick("//button[contains(., 'Analytics')]");
   await jsClick("//button[.//strong[normalize-space(.)='Overall']]");
   await jsClick("//button[.//strong[normalize-space(.)='Asset Classes']]");
@@ -376,6 +541,48 @@ try {
   await assertNoFakeChartRows("direct stock asset class ranking rows");
   await assertNoChartRowOverlap("direct stock asset class ranking rows");
   await assertVisibleChartBars("direct stock asset class ranking rows");
+  await jsClick("//button[contains(., 'Tax')]");
+  await waitForBodyText("Realized Lot Audit", 15000);
+  await waitForBodyText("Example US Stock", 15000);
+  await waitForBodyText("Foreign", 15000);
+  await jsClick("//button[contains(., 'Data')]");
+  await waitForBodyText("Data Reconciliation", 15000);
+  await jsClick("//button[contains(., 'Settings')]");
+  await waitForBodyText("Portfolio tax estimate", 15000);
+
+  fs.rmSync(backupDownloadPath, { force: true });
+  await jsClick("//button[contains(., 'Export')]");
+  await waitForFile(backupDownloadPath, 20000);
+  const exportedFidelity = JSON.parse(fs.readFileSync(backupDownloadPath, "utf8"));
+  if (!exportedFidelity.manualBalances.some((balance) => balance.taperMode === "medium")) {
+    throw new Error("Exported Fidelity JSON did not preserve the selected holding taper mode");
+  }
+  await driver.executeScript(() => {
+    window.__portfolioTrackerMarketCalls = 0;
+    window.__portfolioTrackerMarketPrice = 44;
+    window.__portfolioTrackerMarketDate = "2026-06-24";
+  });
+  await jsClick("//button[contains(., 'Reset')]");
+  await waitForBodyText("Portfolio reset locally");
+  await jsClick("//button[contains(., 'Backup')]");
+  const restoredFidelityInput = await driver.wait(until.elementLocated(By.xpath("//input[@type='file' and contains(@accept, 'application/json')]")), 15000);
+  await restoredFidelityInput.sendKeys(backupDownloadPath);
+  await waitForBodyText("Restored 1 balance record(s) from backup exactly as exported", 20000);
+  await driver.wait(async () => await driver.executeScript(() => window.__portfolioTrackerMarketCalls === 0), 10000);
+  await jsClick("//button[contains(., 'Holdings')]");
+  await driver.wait(async () => {
+    const body = await driver.findElement(By.css("body")).getText();
+    return body.includes("Example US Stock") && body.includes("$30.00") && body.includes("$360.00");
+  }, 15000);
+  await jsClick("//button[contains(., 'Refresh')]");
+  await waitForBodyText("holding valuation(s) updated", 20000);
+  await driver.wait(async () => await driver.executeScript(() => window.__portfolioTrackerMarketCalls >= 1), 10000);
+  await jsClick("//button[contains(., 'Holdings')]");
+  await driver.wait(async () => {
+    const body = await driver.findElement(By.css("body")).getText();
+    return body.includes("Example US Stock") && body.includes("$44.00") && body.includes("$528.00");
+  }, 15000);
+  await assertResponsiveCorePages();
   fs.writeFileSync(screenshotPath, await driver.takeScreenshot(), "base64");
   console.log(`Selenium smoke passed: ${title}`);
   console.log(`Screenshot: ${screenshotPath}`);

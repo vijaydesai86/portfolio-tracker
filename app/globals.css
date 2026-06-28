@@ -1843,7 +1843,7 @@ textarea {
 }
 
 .holding-analysis-row {
-  grid-template-columns: minmax(260px, 1.3fr) minmax(150px, auto) repeat(5, minmax(118px, 0.68fr));
+  grid-template-columns: minmax(240px, 1.2fr) minmax(145px, auto) repeat(6, minmax(108px, 0.58fr));
   align-items: stretch;
   padding: 12px;
   background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
@@ -1898,7 +1898,7 @@ textarea {
   }
 
   .holding-analysis-row {
-    grid-template-columns: minmax(0, 1fr) minmax(140px, auto) repeat(3, minmax(124px, 0.8fr));
+    grid-template-columns: minmax(0, 1fr) minmax(136px, auto) repeat(3, minmax(122px, 0.8fr));
   }
 
   .holding-metric:nth-last-child(-n + 2) {
@@ -2085,7 +2085,7 @@ textarea {
 }
 
 .holding-edit-row {
-  grid-template-columns: minmax(220px, 1.4fr) 120px 86px 120px 120px 86px 132px 110px 110px 132px minmax(160px, 1fr);
+  grid-template-columns: minmax(220px, 1.4fr) 120px 86px 120px 120px 86px 132px 100px 100px 140px 74px 132px minmax(160px, 1fr);
 }
 
 .transaction-edit-row {
@@ -2568,7 +2568,7 @@ textarea {
 
 .goal-summary-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr));
   gap: 14px;
 }
 
@@ -2614,7 +2614,7 @@ textarea {
 
 .goal-combined-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
   gap: 10px;
 }
 
@@ -2673,7 +2673,7 @@ textarea {
 
 .goal-card-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -2687,7 +2687,7 @@ textarea {
 }
 
 .goal-edit-grid {
-  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .goal-category-block {
@@ -3801,7 +3801,7 @@ textarea {
 
 .goal-selector-panel {
   display: grid;
-  grid-template-columns: minmax(280px, 1.1fr) repeat(3, minmax(170px, 0.75fr));
+  grid-template-columns: minmax(240px, 1.05fr) repeat(3, minmax(150px, 0.75fr));
   gap: 12px;
   align-items: stretch;
   margin: 14px 0 16px;
@@ -4057,4 +4057,513 @@ textarea {
 
 .native-line-tooltip b {
   font-variant-numeric: tabular-nums;
+}
+
+.tax-workspace .table-wrap,
+.data-audit-workspace .table-wrap {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.settings-grid label {
+  display: grid;
+  gap: 7px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-grid input,
+.settings-grid select {
+  min-height: 42px;
+  border: 1px solid #d9e3ea;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+@media (max-width: 980px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Contract hardening: ranking charts must never create page-level overflow. */
+.ranking-row {
+  grid-template-columns: minmax(132px, 1.15fr) minmax(84px, 1fr) minmax(86px, 112px);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.ranking-label,
+.ranking-track,
+.ranking-value-block {
+  min-width: 0;
+}
+
+.ranking-track {
+  width: 100%;
+}
+
+.ranking-value-block {
+  max-width: 112px;
+  overflow: hidden;
+}
+
+.ranking-value {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 860px) {
+  .ranking-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ranking-value-block {
+    max-width: none;
+  }
+}
+
+/* Contract hardening: cards and audit tables must fit their grid column. */
+.card,
+.chart-card,
+.analytics-grid > *,
+.table-wrap {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tax-workspace table,
+.data-audit-workspace table {
+  min-width: 0;
+  table-layout: auto;
+}
+
+.tax-workspace th,
+.tax-workspace td,
+.data-audit-workspace th,
+.data-audit-workspace td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.tax-year-picker {
+  display: grid;
+  gap: 5px;
+  min-width: 150px;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.tax-year-picker select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 0.9rem;
+  font-weight: 800;
+  padding: 0 10px;
+}
+
+/* Responsive contract: portfolio workspaces must stay useful on laptop, tablet, and mobile. */
+.goal-mapping-list {
+  max-height: min(72vh, 780px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.goal-mapping-row {
+  grid-template-columns: minmax(260px, 1fr) minmax(64px, auto) minmax(170px, auto) auto;
+  align-items: center;
+}
+
+.goal-mapping-asset,
+.goal-mapping-values {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.goal-mapping-values {
+  justify-items: end;
+  text-align: right;
+}
+
+.goal-mapping-values strong,
+.goal-mapping-values span {
+  max-width: 100%;
+}
+
+@media (max-width: 1440px) {
+  .goal-mapping-row {
+    grid-template-columns: minmax(220px, 1fr) minmax(58px, auto) minmax(152px, auto) auto;
+    gap: 10px;
+    padding: 9px 10px;
+  }
+
+  .goal-mapping-row .danger-button {
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 980px) {
+  .goal-mapping-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .goal-mapping-row > em,
+  .goal-mapping-values,
+  .goal-mapping-row .danger-button {
+    grid-column: auto;
+  }
+
+  .goal-mapping-values {
+    justify-items: start;
+    text-align: left;
+  }
+}
+
+@media (max-width: 680px) {
+  .goal-mapping-row {
+    grid-template-columns: 1fr;
+  }
+
+  .goal-mapping-row .danger-button {
+    justify-self: start;
+  }
+}
+
+.tax-workspace .table-wrap,
+.data-audit-workspace .table-wrap,
+.goal-mapping-list {
+  scrollbar-gutter: stable;
+}
+
+.tax-workspace table,
+.data-audit-workspace table {
+  min-width: 920px;
+}
+
+.tax-workspace .wide-card table,
+.data-audit-workspace .wide-card table {
+  min-width: 1120px;
+}
+
+.tax-workspace th,
+.tax-workspace td,
+.data-audit-workspace th,
+.data-audit-workspace td {
+  vertical-align: top;
+}
+
+@media (max-width: 760px) {
+  .tax-workspace .table-wrap,
+  .data-audit-workspace .table-wrap {
+    margin-inline: -4px;
+    border-radius: 8px;
+  }
+
+  .tax-workspace table,
+  .data-audit-workspace table {
+    min-width: 860px;
+    font-size: 0.82rem;
+  }
+}
+/* Final responsive containment pass: match the Holdings visual model across analytics, tax, goals, and snapshots. */
+.analytics-grid,
+.snapshot-report-charts,
+.goal-analytics-grid,
+.asset-type-card-charts,
+.frozen-ranking-charts {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 560px), 1fr));
+  align-items: stretch;
+}
+
+.tax-workspace .analytics-grid,
+.data-audit-workspace .analytics-grid {
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 1700px) {
+  .tax-workspace .analytics-grid,
+  .data-audit-workspace .analytics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.analytics-grid > *,
+.snapshot-report-charts > *,
+.goal-analytics-grid > *,
+.asset-type-card-charts > *,
+.frozen-ranking-charts > *,
+.chart-card,
+.card {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.chart-card {
+  overflow: visible;
+}
+
+.native-line-chart,
+.allocation-donut-frame,
+.allocation-donut-visual,
+.ranking-bar-chart {
+  max-width: 100%;
+}
+
+/* Ranking visuals should degrade like Holdings: full rows on wide cards, stacked rows on laptop/tablet/mobile. */
+.ranking-row,
+.metric-bar-row,
+.frozen-ranking-charts .ranking-row,
+.asset-type-card-charts .ranking-row {
+  grid-template-columns: minmax(0, 1.15fr) minmax(120px, 1fr) minmax(120px, max-content);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.ranking-label,
+.metric-bar-label,
+.ranking-track,
+.metric-bar-track,
+.ranking-value-block,
+.metric-bar-value {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ranking-label strong,
+.metric-bar-label strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ranking-value-block,
+.metric-bar-value {
+  justify-self: end;
+  justify-items: end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1360px) {
+  .analytics-grid,
+  .snapshot-report-charts,
+  .goal-analytics-grid,
+  .asset-type-card-charts,
+  .frozen-ranking-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .ranking-row,
+  .metric-bar-row,
+  .frozen-ranking-charts .ranking-row,
+  .asset-type-card-charts .ranking-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .ranking-label strong,
+  .metric-bar-label strong {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .ranking-track,
+  .metric-bar-track {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .ranking-value-block,
+  .metric-bar-value {
+    justify-self: start;
+    justify-items: start;
+  }
+}
+
+/* Wide financial tables stay readable by scrolling inside their card. Numeric columns must not wrap. */
+.tax-workspace .table-wrap,
+.data-audit-workspace .table-wrap {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+.tax-workspace table,
+.data-audit-workspace table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+
+.tax-workspace .wide-card table,
+.data-audit-workspace .wide-card table {
+  min-width: 1180px;
+}
+
+.tax-workspace th,
+.tax-workspace td,
+.data-audit-workspace th,
+.data-audit-workspace td {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.tax-workspace th:first-child,
+.tax-workspace td:first-child,
+.data-audit-workspace th:first-child,
+.data-audit-workspace td:first-child {
+  min-width: 220px;
+  max-width: 380px;
+  white-space: normal;
+}
+
+.tax-workspace th:last-child,
+.tax-workspace td:last-child,
+.data-audit-workspace th:last-child,
+.data-audit-workspace td:last-child {
+  white-space: nowrap;
+  max-width: none;
+}
+
+.tax-workspace .analytics-grid th:last-child,
+.tax-workspace .analytics-grid td:last-child,
+.data-audit-workspace .analytics-grid th:last-child,
+.data-audit-workspace .analytics-grid td:last-child {
+  white-space: normal;
+  max-width: 380px;
+}
+
+@media (max-width: 760px) {
+  .tax-workspace .wide-card table,
+  .data-audit-workspace .wide-card table {
+    min-width: 1080px;
+  }
+
+  .tax-workspace th,
+  .tax-workspace td,
+  .data-audit-workspace th,
+  .data-audit-workspace td {
+    padding: 9px 10px;
+  }
+}
+
+
+/* conservative value controls and stricter goal responsiveness */
+.taper-factor-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.goals-section .mini-insight,
+.goal-card,
+.goal-mapping-row,
+.goal-selector-panel {
+  min-width: 0;
+}
+
+.goals-section .mini-insight strong,
+.goals-section .mini-insight small,
+.goals-section .mini-insight span,
+.goal-progress-line strong,
+.goal-snapshot-value strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.goal-card .goal-category-list span,
+.goal-combined-panel .goal-category-list span {
+  flex: 1 1 150px;
+}
+
+.goal-mapping-list {
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.goal-mapping-row {
+  min-width: min(100%, 760px);
+}
+
+@media (max-width: 1380px) {
+  .goal-selector-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .goal-card-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .goal-selector-panel,
+  .goal-card-metrics,
+  .goal-combined-metrics,
+  .goal-mini-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .goal-snapshot-value,
+  .goal-progress-line {
+    display: grid;
+    align-items: start;
+  }
+
+  .goal-mapping-row {
+    grid-template-columns: minmax(220px, 1fr) 70px minmax(150px, auto) auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .goal-card-head {
+    display: grid;
+  }
+
+  .goal-card-head .danger-button,
+  .goal-mapping-row .danger-button {
+    width: 100%;
+  }
+
+  .goal-mapping-row {
+    min-width: 0;
+    grid-template-columns: 1fr;
+  }
+
+  .goal-mapping-row strong,
+  .goal-mapping-row span {
+    white-space: normal;
+  }
 }

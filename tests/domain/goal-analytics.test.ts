@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildGoal, calculateGoalProgress, calculateMappedGoalXirr, createGoalMapping, summarizeGoalProgress } from "@/src/domain/goalAnalytics";
-import { calculatePortfolioInsights } from "@/src/domain/analytics";
-import { createEmptyBackup } from "@/src/schema/backup";
+import { calculatePortfolioInsights, calculatePortfolioSummary } from "@/src/domain/analytics";
+import { calculateTrackedLocalValue, calculateTrackedUnitPrice } from "@/src/domain/tapering";
+import { createEmptyBackup, parseBackup } from "@/src/schema/backup";
 
 describe("goal analytics", () => {
   it("calculates expense-inflated corpus target from a multiplier", () => {
@@ -70,6 +71,88 @@ describe("goal analytics", () => {
     expect(summary.requiredCorpusToday).toBe(progress.requiredCorpusToday);
     expect(summary.mappedCurrentValue).toBe(progress.mappedCurrentValue);
     expect(summary.mappedProfit).toBe(progress.mappedProfit);
+  });
+
+
+  it("uses per-holding taper only for goal planning and keeps actual portfolio value unchanged", () => {
+    const backup = createEmptyBackup("INR");
+    backup.goals.push({
+      id: "goal_retire",
+      name: "Retirement",
+      type: "retirement",
+      currentMonthlyExpense: 10000,
+      targetAmount: 1200000,
+      currency: "INR",
+      targetDate: "2028-01-01",
+      inflationRate: 0,
+      corpusMultiple: 10,
+      expectedReturn: 0,
+      equityReturn: 10,
+      debtReturn: 6,
+      goldReturn: 6,
+      cashReturn: 6,
+      otherReturn: 6,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    backup.accounts.push({ id: "acct", name: "Stock", institution: "Manual", type: "us_stock", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "inst", name: "Stock", type: "us_stock", symbol: "STK", currency: "INR", country: "US", category: "Equity", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.manualBalances.push({ id: "bal", accountId: "acct", instrumentId: "inst", label: "Stock", category: "Equity", currency: "INR", value: 1000, quantity: 10, price: 100, taperMode: "medium", asOfDate: "2027-01-01", source: { type: "manual" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2027-01-01T00:00:00.000Z" });
+    backup.transactions.push({ id: "buy", accountId: "acct", instrumentId: "inst", date: "2026-01-01", type: "buy", quantity: 10, amount: 800, currency: "INR", fees: 0, taxes: 0, source: { type: "manual" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.goalMappings.push(createGoalMapping("goal_retire", "bal", 100, "2026-01-01T00:00:00.000Z"));
+
+    const trackedPrice = calculateTrackedUnitPrice(100, 0.05);
+    const tracked = calculateTrackedLocalValue(backup.manualBalances[0]);
+    const progress = calculateGoalProgress(backup)[0];
+    const summary = calculatePortfolioSummary(backup);
+    const insight = calculatePortfolioInsights(backup).holdings[0];
+    const parsed = parseBackup(JSON.parse(JSON.stringify(backup)));
+    const mappedXirr = calculateMappedGoalXirr(backup, [progress]);
+
+    expect(trackedPrice).toBeCloseTo(66.6667, 4);
+    expect(tracked.applied).toBe(true);
+    expect(tracked.trackedLocalValue).toBe(666.67);
+    expect(summary.netWorth).toBe(1000);
+    expect(progress.mappedCurrentValue).toBe(666.67);
+    expect(progress.mappedHoldings[0].actualValue).toBe(1000);
+    expect(progress.mappedHoldings[0].trackedDiscount).toBe(333.33);
+    expect(insight.valueInBase).toBe(1000);
+    expect(insight.trackedValueInBase).toBe(666.67);
+    expect(parsed.manualBalances[0].taperMode).toBe("medium");
+    expect(mappedXirr.basis).toBe("holdings");
+  });
+
+  it("falls back to actual value when taper is configured on a balance without price and quantity", () => {
+    const backup = createEmptyBackup("INR");
+    backup.goals.push({
+      id: "goal_cash",
+      name: "Cash Goal",
+      type: "custom",
+      currentMonthlyExpense: 10000,
+      targetAmount: 1200000,
+      currency: "INR",
+      targetDate: "2028-01-01",
+      inflationRate: 0,
+      corpusMultiple: 10,
+      expectedReturn: 0,
+      equityReturn: 10,
+      debtReturn: 6,
+      goldReturn: 6,
+      cashReturn: 6,
+      otherReturn: 6,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    backup.accounts.push({ id: "cash", name: "Cash", institution: "Manual", type: "cash", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.manualBalances.push({ id: "cash_bal", accountId: "cash", label: "Cash", category: "Cash", currency: "INR", value: 50000, taperMode: "strong", asOfDate: "2027-01-01", source: { type: "manual" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2027-01-01T00:00:00.000Z" });
+    backup.goalMappings.push(createGoalMapping("goal_cash", "cash_bal", 100, "2026-01-01T00:00:00.000Z"));
+
+    const tracked = calculateTrackedLocalValue(backup.manualBalances[0]);
+    const progress = calculateGoalProgress(backup)[0];
+
+    expect(tracked.applied).toBe(false);
+    expect(tracked.reason).toBe("needs price and quantity");
+    expect(progress.mappedCurrentValue).toBe(50000);
   });
 
   it("calculates actual mapped goal XIRR from mapped holding cash flows", () => {

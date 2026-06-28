@@ -4,6 +4,8 @@ export const categorySchema = z.enum(["Equity", "Debt", "Gold", "Others", "Cash"
 export type AssetCategory = z.infer<typeof categorySchema>;
 
 export const currencySchema = z.string().regex(/^[A-Z]{3}$/);
+export const taperModeSchema = z.enum(["none", "light", "medium", "strong", "custom"]);
+export type TaperMode = z.infer<typeof taperModeSchema>;
 
 const timestampSchema = z.string().datetime();
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -105,6 +107,8 @@ export const manualBalanceSchema = z.object({
   investedAsOfDate: dateSchema.optional(),
   quantity: z.number().finite().optional(),
   price: z.number().finite().optional(),
+  taperMode: taperModeSchema.optional(),
+  taperFactor: z.number().finite().min(0).max(1).optional(),
   asOfDate: dateSchema,
   notes: z.string().optional(),
   source: sourceMetadataSchema,

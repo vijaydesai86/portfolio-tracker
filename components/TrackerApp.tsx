@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Camera, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, Target, TrendingDown, TrendingUp, Upload } from "lucide-react";
+import { AlertTriangle, Camera, Database, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, ReceiptText, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Table2, Target, TrendingDown, TrendingUp, Upload } from "lucide-react";
 import { type CSSProperties, useMemo, useState } from "react";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase, type HoldingInsight } from "@/src/domain/analytics";
 import { deleteImportRunFromBackup, deleteTransactionFromBackup } from "@/src/domain/deleteRecords";
@@ -11,6 +11,9 @@ import { applyManualEntry, manualEntryActionsForAccount, type ManualEntryAction 
 import { buildPortfolioTimeline, type PortfolioTimelinePoint } from "@/src/domain/performanceTimeline";
 import { buildGoal, calculateGoalProgress, calculateMappedGoalXirr, createGoalMapping, recalculateGoalTarget, summarizeGoalProgress, type GoalProgress, type GoalSummary } from "@/src/domain/goalAnalytics";
 import { buildSnapshotHistory, createPortfolioSnapshot, snapshotAnalytics, type SnapshotAnalytics, type SnapshotTimelinePoint } from "@/src/domain/snapshots";
+import { calculatePortfolioTaxReport, getTaxProfile, updateTaxProfile, type TaxProfile } from "@/src/domain/tax";
+import { taperPresets } from "@/src/domain/tapering";
+import { buildReconciliationReport } from "@/src/domain/reconciliation";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
 import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type CasCanonicalImport, type CasParseResult } from "@/src/importers/casText";
@@ -21,7 +24,7 @@ import { commitManualCsvImport } from "@/src/importers/importPipeline";
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
-import { createEmptyBackup, parseBackup, type AssetCategory, type Goal, type ManualBalance, type PortfolioBackup, type Transaction } from "@/src/schema/backup";
+import { createEmptyBackup, parseBackup, type AssetCategory, type Goal, type ManualBalance, type PortfolioBackup, type TaperMode, type Transaction } from "@/src/schema/backup";
 
 const sampleTemplate = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes\ncash-main,2026-06-22,Manual,cash,Cash Wallet,10000,INR,Cash,,,,liquid cash\nespp-contribution,2026-06-22,Employer,espp,ESPP Contribution,2000,USD,Equity,2000,USD,2026-06-22,total contribution only\nppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,300000,INR,Debt,250000,INR,2026-06-22,latest known balance`;
 
@@ -37,10 +40,32 @@ const assetClassCards = [
 
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
-type View = "dashboard" | "holdings" | "transactions" | "goals" | "snapshots" | "add-entry" | "imports" | "backup";
+type View = "dashboard" | "holdings" | "transactions" | "goals" | "tax" | "snapshots" | "add-entry" | "imports" | "data" | "settings" | "backup";
 type AnalyticsTab = "overview" | "allocation" | "assets" | "history";
 type AnalyticsScope = "portfolio" | "goals-combined" | `goal:${string}`;
 type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
+
+function currentIndianFinancialYear(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const start = month >= 4 ? year : year - 1;
+  return start + "-" + String(start + 1).slice(2);
+}
+
+function indianFinancialYearForDate(dateText: string): string | undefined {
+  const date = new Date(dateText + "T00:00:00.000Z");
+  if (Number.isNaN(date.getTime())) return undefined;
+  return currentIndianFinancialYear(date);
+}
+
+function availableTaxFinancialYears(backup: PortfolioBackup): string[] {
+  const years = new Set<string>([currentIndianFinancialYear()]);
+  for (const tx of backup.transactions) {
+    const year = indianFinancialYearForDate(tx.date);
+    if (year) years.add(year);
+  }
+  return [...years].sort((a, b) => b.localeCompare(a));
+}
 
 
 type DashboardSignal = {
@@ -390,6 +415,7 @@ export function TrackerApp() {
   const [snapshotName, setSnapshotName] = useState(() => "Snapshot " + new Date().toISOString().slice(0, 10));
   const [snapshotNotes, setSnapshotNotes] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
+  const [taxFinancialYear, setTaxFinancialYear] = useState(() => currentIndianFinancialYear());
 
   const summary = useMemo(() => calculatePortfolioSummary(backup), [backup]);
   const insights = useMemo(() => calculatePortfolioInsights(backup), [backup]);
@@ -400,6 +426,10 @@ export function TrackerApp() {
   const goalProgress = useMemo(() => calculateGoalProgress(backup), [backup]);
   const goalSummary = useMemo(() => summarizeGoalProgress(goalProgress), [goalProgress]);
   const snapshotHistory = useMemo(() => buildSnapshotHistory(backup.snapshots), [backup.snapshots]);
+  const taxProfile = useMemo(() => getTaxProfile(backup), [backup]);
+  const taxFinancialYears = useMemo(() => availableTaxFinancialYears(backup), [backup]);
+  const taxReport = useMemo(() => calculatePortfolioTaxReport(backup, { financialYear: taxFinancialYear }), [backup, taxFinancialYear]);
+  const reconciliationReport = useMemo(() => buildReconciliationReport(backup), [backup]);
   const scopedAnalytics = useMemo(() => buildScopedAnalytics({ backup, scope: analyticsScope, summary, insights, performance, holdingReturns, goalProgress, goalSummary }), [analyticsScope, backup, goalProgress, goalSummary, holdingReturns, insights, performance, summary]);
   const scopedPerformance = scopedAnalytics.performance;
   const chartData = scopedAnalytics.chartData;
@@ -575,7 +605,7 @@ export function TrackerApp() {
       const parsed = parseBackup(JSON.parse(await file.text()));
       setBackup(parsed);
       setErrors([]);
-      setStatus(`Restored ${parsed.manualBalances.length} balance record(s) from backup.`);
+      setStatus(`Restored ${parsed.manualBalances.length} balance record(s) from backup exactly as exported. Press Refresh to update live NAV, quotes, and FX.`);
     } catch (error) {
       setErrors([error instanceof Error ? error.message : "Invalid backup file"]);
     }
@@ -875,11 +905,13 @@ export function TrackerApp() {
     try {
       const response = await fetch("/api/market-data?" + params.toString());
       const payload = (await response.json()) as MarketDataPayload;
-      setBackup(applyMarketDataPayload(portfolio, payload));
+      const refreshed = applyMarketDataPayload(portfolio, payload);
+      const updatedValuations = countChangedCurrentValuations(portfolio, refreshed);
+      setBackup(refreshed);
       setErrors(payload.errors);
       setStatus(
         (prefix ? prefix + " " : "") +
-          `Market refresh complete: ${payload.navs.length} NAV snapshot(s), ${payload.stocks.length} stock price snapshot(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s).`
+          `Market refresh complete: ${payload.navs.length} NAV snapshot(s), ${payload.stocks.length} stock price snapshot(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s), ${updatedValuations} holding valuation(s) updated.`
       );
     } catch (error) {
       setErrors([error instanceof Error ? error.message : "Market refresh failed"]);
@@ -929,6 +961,11 @@ export function TrackerApp() {
     setStatus(`Imported ${parsed.snapshots.length} USD/INR rate(s) from ${file.name}.`);
   }
 
+  function updateTaxProfileFromForm(patch: Partial<TaxProfile>) {
+    setBackup((current) => updateTaxProfile(current, patch));
+    setStatus("Tax profile updated locally. Export JSON to preserve the tax settings.");
+  }
+
   function resetPortfolio() {
     setBackup(createEmptyBackup("INR"));
     setErrors([]);
@@ -937,12 +974,13 @@ export function TrackerApp() {
 
   function updateBalance(balanceId: string, patch: Partial<ManualBalance>) {
     const now = new Date().toISOString();
+    const taperOnlyEdit = Object.keys(patch).every((key) => key === "taperMode" || key === "taperFactor");
     setBackup((current) => {
       const editedBalance = current.manualBalances.find((balance) => balance.id === balanceId);
       return {
         ...current,
         exportedAt: now,
-        manualBalances: current.manualBalances.map((balance) => balance.id === balanceId ? { ...balance, ...patch, userModified: true, updatedAt: now } : balance),
+        manualBalances: current.manualBalances.map((balance) => balance.id === balanceId ? { ...balance, ...patch, userModified: taperOnlyEdit ? balance.userModified : true, updatedAt: now } : balance),
         instruments: current.instruments.map((instrument) => editedBalance?.instrumentId === instrument.id && patch.category ? { ...instrument, category: patch.category, updatedAt: now } : instrument)
       };
     });
@@ -951,6 +989,15 @@ export function TrackerApp() {
 
   function shouldRefreshAfterImport(portfolio: PortfolioBackup, addedTransactions: number): boolean {
     return addedTransactions > 0 || portfolio.manualBalances.some((balance) => balance.currency !== portfolio.baseCurrency);
+  }
+
+
+  function countChangedCurrentValuations(before: PortfolioBackup, after: PortfolioBackup): number {
+    const beforeById = new Map(before.manualBalances.map((balance) => [balance.id, balance]));
+    return after.manualBalances.filter((balance) => {
+      const previous = beforeById.get(balance.id);
+      return previous && (previous.value !== balance.value || previous.price !== balance.price || previous.asOfDate !== balance.asOfDate || previous.currency !== balance.currency);
+    }).length;
   }
 
   function withImportLabel<T extends { importRun: { label?: string; fileName?: string } }>(imported: T, label: string): T {
@@ -1153,10 +1200,13 @@ export function TrackerApp() {
           <button className={view === "holdings" ? "active" : ""} onClick={() => setView("holdings")}><Table2 size={18} /> Holdings</button>
           <button className={view === "transactions" ? "active" : ""} onClick={() => setView("transactions")}><Pencil size={18} /> Transactions</button>
           <button className={view === "goals" ? "active" : ""} onClick={() => setView("goals")}><Target size={18} /> Goals</button>
+          <button className={view === "tax" ? "active" : ""} onClick={() => setView("tax")}><ReceiptText size={18} /> Tax</button>
           <button className={view === "snapshots" ? "active" : ""} onClick={() => setView("snapshots")}><Camera size={18} /> Snapshots</button>
           <button className={view === "add-entry" ? "active" : ""} onClick={() => setView("add-entry")}><PlusCircle size={18} /> Add Entry</button>
           <button className={view === "imports" ? "active" : ""} onClick={() => setView("imports")}><Upload size={18} /> Imports</button>
+          <button className={view === "data" ? "active" : ""} onClick={() => setView("data")}><Database size={18} /> Data</button>
           <button className={view === "backup" ? "active" : ""} onClick={() => setView("backup")}><FileJson size={18} /> Backup</button>
+          <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><Settings size={18} /> Settings</button>
         </nav>
       </aside>
 
@@ -1362,11 +1412,17 @@ export function TrackerApp() {
 
         {view === "goals" && <GoalsView {...{ backup, goalProgress, goalSummary, selectedGoalId, setSelectedGoalId, mappingGoalId, setMappingGoalId, mappingBalanceId, setMappingBalanceId, mappingPercent, setMappingPercent, updateGoalRecord, deleteGoalRecord, upsertGoalMappingFromForm, deleteGoalMapping }} />}
 
+        {view === "tax" && <TaxView report={taxReport} currency={backup.baseCurrency} financialYears={taxFinancialYears} selectedFinancialYear={taxFinancialYear} setSelectedFinancialYear={setTaxFinancialYear} />}
+
         {view === "snapshots" && <SnapshotsView {...{ backup, snapshotName, setSnapshotName, snapshotNotes, setSnapshotNotes, selectedSnapshotId, setSelectedSnapshotId, snapshotHistory, takePortfolioSnapshot, deletePortfolioSnapshot }} />}
 
         {view === "add-entry" && <AddEntryView {...{ backup, entryHoldingId, setEntryHoldingId, entryActionId, setEntryActionId, entryDate, setEntryDate, entryAmount, setEntryAmount, entryQuantity, setEntryQuantity, entryPrice, setEntryPrice, entryFees, setEntryFees, entryTaxes, setEntryTaxes, entryCurrentValue, setEntryCurrentValue, entryInvestedAmount, setEntryInvestedAmount, entryNotes, setEntryNotes, addManualEntryFromForm, goalName, setGoalName, goalType, setGoalType, goalMonthlyExpense, setGoalMonthlyExpense, goalInflation, setGoalInflation, goalTargetYear, setGoalTargetYear, goalMultiplier, setGoalMultiplier, goalEquityReturn, setGoalEquityReturn, goalDebtReturn, setGoalDebtReturn, goalGoldReturn, setGoalGoldReturn, goalCashReturn, setGoalCashReturn, goalOtherReturn, setGoalOtherReturn, addGoalFromForm, applyGoalPreset }} />}
 
         {view === "imports" && <ImportsView {...{ backup, csv, setCsv, importCsv, importLabel, setImportLabel, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
+
+        {view === "data" && <DataAuditView report={reconciliationReport} currency={backup.baseCurrency} />}
+
+        {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} />}
 
         {view === "backup" && (
           <section className="grid two">
@@ -1571,10 +1627,9 @@ function GoalsView(props: {
             <div className="goal-mapping-list">
               {mappedRows.length === 0 ? <p className="message">No assets mapped yet.</p> : mappedRows.map(({ mapping, goal, balance, mappedHolding }) => (
                 <div className="goal-mapping-row" key={mapping.id}>
-                  <div><strong>{goal.name}</strong><span>{displayHoldingName(balance.label)} · {balance.category}</span></div>
+                  <div className="goal-mapping-asset"><strong>{goal.name}</strong><span>{displayHoldingName(balance.label)} · {balance.category}</span></div>
                   <em>{mapping.percent.toFixed(1)}%</em>
-                  <strong>{formatMoney(mappedHolding?.value ?? 0, props.backup.baseCurrency)}</strong>
-                  <span>{formatMoney(mappedHolding?.projectedValue ?? 0, props.backup.baseCurrency)} projected</span>
+                  <div className="goal-mapping-values"><strong>{formatMoney(mappedHolding?.value ?? 0, props.backup.baseCurrency)}</strong><span>{formatMoney(mappedHolding?.projectedValue ?? 0, props.backup.baseCurrency)} projected</span></div>
                   <button className="danger-button" onClick={() => props.deleteGoalMapping(mapping.id)}>Delete</button>
                 </div>
               ))}
@@ -1891,6 +1946,112 @@ function ImportsView(props: {
       </div>
     </section>
   );
+}
+
+function TaxView({ report, currency, financialYears, selectedFinancialYear, setSelectedFinancialYear }: { report: ReturnType<typeof calculatePortfolioTaxReport>; currency: string; financialYears: string[]; selectedFinancialYear: string; setSelectedFinancialYear: (value: string) => void }) {
+  const realizedBucketDetails = Object.values(report.realized.byBucket).filter((bucket) => bucket.gain !== 0 || bucket.taxableGain !== 0 || bucket.tax !== 0 || bucket.positiveGain !== 0);
+  const realizedHoldingRows = report.realized.byAssetBucket.slice(0, 80);
+  const bucketRows = realizedBucketDetails.map((bucket) => ({ name: bucket.label, value: Math.abs(bucket.gain), tag: (bucket.gain < 0 ? "net loss " : "net gain ") + formatMoney(bucket.gain, currency) + " · tax " + formatMoney(bucket.tax, currency) }));
+  const realizedRows = report.realized.rows.slice(0, 160);
+  const unrealizedGrouped = report.unrealized.byAssetBucket;
+  const unrealizedPotentialTax = unrealizedGrouped.reduce((sum, row) => sum + row.potentialTaxBeforeSetoff, 0);
+  const unrealizedGainRows = unrealizedGrouped.filter((row) => row.gain > 0).slice(0, 8).map((row) => ({ name: row.assetName + " · " + taxBucketLabel(row.bucket), value: row.gain, tag: "net rough tax " + formatMoney(row.potentialTaxBeforeSetoff, currency) }));
+  const harvestRows = report.unrealized.harvestCandidates.slice(0, 12);
+  const detailRows = unrealizedGrouped.slice(0, 100);
+  return (
+    <section className="grid tax-workspace">
+      <div className="card wide-card">
+        <div className="section-head">
+          <div><h2>Portfolio Tax Estimates</h2><p>Estimate layer for an Indian resident individual. Realized tax uses FY sale lots after bucket-level loss set-off/exemption. Unrealized tax is only a rough what-if if open lots are sold now.</p></div>
+          <label className="tax-year-picker"><span>Financial year</span><select value={selectedFinancialYear} onChange={(event) => setSelectedFinancialYear(event.target.value)}>{financialYears.map((year) => <option value={year} key={year}>FY {year}</option>)}</select></label>
+        </div>
+        <div className="holding-command-strip">
+          <MiniInsight label="Estimated tax payable" value={formatMoney(report.estimatedTax.totalTax, currency)} detail="realized capital-gain tax + taxable income tax" />
+          <MiniInsight label="Realized net gain/loss" value={formatMoney(report.realized.totalGain, currency)} detail={String(report.realized.rows.length) + " taxable disposal lot row(s), after ignoring zero-value migrations"} />
+          <MiniInsight label="Unrealized gain/loss" value={formatMoney(report.unrealized.totalGain, currency)} detail="not payable until sold" />
+          <MiniInsight label="Unrealized rough tax" value={formatMoney(unrealizedPotentialTax, currency)} detail="net by holding bucket, before future FY offsets" />
+        </div>
+        <div className="sub-analytics-strip">
+          <MiniInsight label="Capital-gain tax" value={formatMoney(report.estimatedTax.capitalGainsTax, currency)} detail="after FY set-off/exemption" />
+          <MiniInsight label="Income tax" value={formatMoney(report.estimatedTax.incomeTax, currency)} detail="taxable portfolio income at configured slab" />
+          <MiniInsight label="Foreign tax paid" value={formatMoney(report.income.foreignTaxPaid, currency)} detail="withholding captured from transactions" />
+          <MiniInsight label="Surcharge + cess" value={formatMoney(report.estimatedTax.surcharge + report.estimatedTax.cess, currency)} detail={report.profile.surchargeRate.toFixed(1) + "% surcharge, " + report.profile.cessRate.toFixed(1) + "% cess"} />
+        </div>
+      </div>
+
+      <div className="card wide-card tax-explainer">
+        <h2>How To Read This</h2>
+        <div className="detection">
+          <div><span>Realized</span><strong>Only sales/redemptions in this FY</strong><small>These rows drive estimated tax payable.</small></div>
+          <div><span>Set-off</span><strong>Losses reduce gains inside the bucket</strong><small>Per-holding tax is therefore an estimate/contribution, not a separate legal bill per holding.</small></div>
+          <div><span>Unrealized</span><strong>Open holdings only</strong><small>Useful for planning; not tax payable until you sell.</small></div>
+          <div><span>Migration rows</span><strong>Zero-value broker transfer rows ignored</strong><small>They preserve holdings but are not treated as taxable disposals.</small></div>
+        </div>
+      </div>
+
+      <div className="analytics-grid">
+        <ChartCard title="Realized Bucket Magnitude"><RankingBar data={bucketRows} formatValue={(value) => formatMoney(value, currency)} emptyMessage="No realized disposal buckets in the selected FY yet." tone="profit" /></ChartCard>
+        <ChartCard title="Unrealized Gain Watch"><RankingBar data={unrealizedGainRows} formatValue={(value) => formatMoney(value, currency)} emptyMessage="No unrealized gains in open lots yet." tone="profit" /></ChartCard>
+        <div className="card"><h2>Portfolio Income</h2><p className="chart-note compact-note">Taxable income is separate from capital gains. Dividends/interest are taken from transaction rows; exempt interest is shown for context and not included in taxable income.</p><div className="signal-list"><MiniInsight label="Indian dividend" value={formatMoney(report.income.dividend, currency)} detail="taxable portfolio dividend rows" /><MiniInsight label="Foreign dividend" value={formatMoney(report.income.foreignDividend, currency)} detail="converted using transaction-date FX" /><MiniInsight label="Taxable interest" value={formatMoney(report.income.interest, currency)} detail="FD/cash/non-exempt interest" /><MiniInsight label="Exempt interest" value={formatMoney(report.income.exemptInterest, currency)} detail="PPF/SSY style rows, excluded" /></div></div>
+        <div className="card"><h2>FIFO Harvesting Watch</h2><p className="chart-note compact-note">Only shows losses reachable by selling from the front of the FIFO queue. Later loss lots are not shown if older gain lots must be sold first and the FIFO sale prefix is still profitable.</p>{harvestRows.length === 0 ? <p className="message">No FIFO-reachable loss harvesting candidate detected from current open lots.</p> : <div className="table-wrap"><table><thead><tr><th>Asset</th><th>Bucket</th><th>FIFO qty</th><th>Cost</th><th>Value</th><th>Loss</th><th>Why</th></tr></thead><tbody>{harvestRows.map((row) => <tr key={row.accountId + row.instrumentId + row.loss}><td>{displayHoldingName(row.assetName)}</td><td>{row.bucket === "mixed" ? "Mixed FIFO" : taxBucketLabel(row.bucket)}</td><td>{formatNumber(row.quantity)}</td><td>{formatMoney(row.cost, currency)}</td><td>{formatMoney(row.currentValue, currency)}</td><td>{formatMoney(row.loss, currency)}</td><td>{row.note}</td></tr>)}</tbody></table></div>}</div>
+      </div>
+
+      <div className="card wide-card"><h2>Realized Tax By Holding</h2><p className="chart-note compact-note">This is the main realized tax drilldown. Tax before offset is each profitable holding's tax before same-bucket losses are applied. Estimated tax after offset is the final bucket tax allocated back to profitable holdings after loss set-off; loss rows show zero tax because they reduce taxable gains.</p>{realizedHoldingRows.length === 0 ? <p className="message">No realized holding rows for this financial year yet.</p> : <div className="table-wrap"><table><thead><tr><th>Asset</th><th>Bucket</th><th>Lots</th><th>Qty</th><th>Proceeds</th><th>Cost</th><th>Net gain/loss</th><th>Taxable positive gain</th><th>Offset used</th><th>Tax before offset</th><th>Estimated tax after offset</th></tr></thead><tbody>{realizedHoldingRows.map((row) => <tr key={row.assetName + row.bucket}><td>{displayHoldingName(row.assetName)}</td><td>{taxBucketLabel(row.bucket)}</td><td>{row.lots}</td><td>{formatNumber(row.quantity)}</td><td>{formatMoney(row.proceeds, currency)}</td><td>{formatMoney(row.cost, currency)}</td><td>{formatMoney(row.gain, currency)}</td><td>{formatMoney(row.positiveGain, currency)}</td><td>{formatMoney(row.lossSetoff, currency)}</td><td>{formatMoney(row.grossTaxBeforeSetoff, currency)}</td><td>{formatMoney(row.allocatedTaxAfterSetoff, currency)}</td></tr>)}</tbody></table></div>}</div>
+
+      <div className="card wide-card"><h2>Realized Bucket Details</h2><p className="chart-note compact-note">Bucket totals show the actual set-off math used for estimated tax: gains and losses are netted inside each tax bucket before tax is calculated.</p>{realizedBucketDetails.length === 0 ? <p className="message">No realized tax buckets for this financial year yet.</p> : <div className="table-wrap"><table><thead><tr><th>Bucket</th><th>Total positive gains</th><th>Loss offset used</th><th>Net gain/loss</th><th>Taxable after offset</th><th>Estimated tax</th></tr></thead><tbody>{realizedBucketDetails.map((row) => <tr key={row.bucket}><td>{row.label}</td><td>{formatMoney(row.positiveGain, currency)}</td><td>{formatMoney(row.lossSetoff, currency)}</td><td>{formatMoney(row.gain, currency)}</td><td>{formatMoney(row.taxableGain, currency)}</td><td>{formatMoney(row.tax, currency)}</td></tr>)}</tbody></table></div>}</div>
+
+      <div className="card wide-card"><h2>Unrealized Tax If Sold Today</h2><p className="chart-note compact-note">Grouped by holding and STCG/LTCG bucket. A holding can appear once with LTCG gain and again with STCG loss because different purchase lots have different holding periods and costs. This is planning data only; it is not included in estimated tax payable until sold.</p>{detailRows.length === 0 ? <p className="message">No open tax lots with current valuation yet.</p> : <div className="table-wrap"><table><thead><tr><th>Asset</th><th>Bucket</th><th>Lots</th><th>Qty</th><th>Current value</th><th>Cost</th><th>Gain/loss</th><th>Rate</th><th>Net rough tax</th></tr></thead><tbody>{detailRows.map((row) => <tr key={row.assetName + row.bucket}><td>{displayHoldingName(row.assetName)}</td><td>{taxBucketLabel(row.bucket)}</td><td>{row.lots ?? 1}</td><td>{formatNumber(row.quantity)}</td><td>{formatMoney(row.currentValue, currency)}</td><td>{formatMoney(row.cost, currency)}</td><td>{formatMoney(row.gain, currency)}</td><td>{row.taxRate.toFixed(1)}%</td><td>{formatMoney(row.potentialTaxBeforeSetoff, currency)}</td></tr>)}</tbody></table></div>}</div>
+
+      <div className="card wide-card"><h2>Realized Lot Audit</h2><p className="chart-note compact-note">Raw taxable disposal lots used to build the holding and bucket summaries above. Zero-value broker migration rows are filtered out before this table.</p>{realizedRows.length === 0 ? <p className="message">No realized gain/loss lots for this financial year yet.</p> : <div className="table-wrap"><table><thead><tr><th>Date</th><th>Asset</th><th>Bucket</th><th>Qty</th><th>Proceeds</th><th>Cost</th><th>Gain</th></tr></thead><tbody>{realizedRows.map((row) => <tr key={row.transactionId + row.assetName + row.quantity}><td>{row.date}</td><td>{displayHoldingName(row.assetName)}</td><td>{taxBucketLabel(row.bucket)}</td><td>{formatNumber(row.quantity)}</td><td>{formatMoney(row.proceeds, currency)}</td><td>{formatMoney(row.cost, currency)}</td><td>{formatMoney(row.gain, currency)}</td></tr>)}</tbody></table></div>}</div>
+      <div className="card wide-card"><h2>Tax Assumptions</h2><div className="detection"><div><span>Taxpayer</span><strong>Resident Indian individual</strong></div><div><span>Regime</span><strong>{report.profile.regime}</strong></div><div><span>Slab</span><strong>{report.profile.slabRate}%</strong></div><div><span>Surcharge</span><strong>{report.profile.surchargeRate}%</strong></div><div><span>Cess</span><strong>{report.profile.cessRate}%</strong></div></div><div className="error-list">{report.notes.map((note) => <div key={note}>{note}</div>)}</div></div>
+    </section>
+  );
+}
+
+function DataAuditView({ report, currency }: { report: ReturnType<typeof buildReconciliationReport>; currency: string }) {
+  return (
+    <section className="grid data-audit-workspace">
+      <div className="card wide-card">
+        <div className="section-head"><div><h2>Data Reconciliation</h2><p>Audit imports, source totals, market-data gaps, and validation checks before trusting analytics. This is the trust layer for parser and valuation quality.</p></div><span className={report.summary.marketDataGaps === 0 ? "status-pill implemented" : "status-pill planned"}>{report.summary.marketDataGaps === 0 ? "Clean" : report.summary.marketDataGaps + " gap(s)"}</span></div>
+        <div className="holding-command-strip">
+          <MiniInsight label="Imports" value={String(report.summary.imports)} detail={report.summary.documents + " source document(s)"} />
+          <MiniInsight label="Holdings" value={String(report.summary.holdings)} detail="canonical balance records" />
+          <MiniInsight label="Transactions" value={String(report.summary.transactions)} detail="canonical ledger rows" />
+          <MiniInsight label="Market gaps" value={String(report.summary.marketDataGaps)} detail="FX/price/NAV review items" />
+        </div>
+      </div>
+      <div className="analytics-grid">
+        <ChartCard title="Source Value Mix"><HorizontalBar data={report.sourceTotals.map((row) => ({ name: row.source, value: row.value }))} currency={currency} /></ChartCard>
+        <div className="card"><h2>Validation Checks</h2><div className="signal-list">{report.validationRows.map((row) => <div className={"signal-item " + (row.status === "ok" ? "good" : "warn")} key={row.label}><ShieldCheck size={18} /><div><span>{row.label}</span><strong>{row.status.toUpperCase()}</strong><small>{row.detail}</small></div></div>)}</div></div>
+        <div className="card"><h2>Market Data Gaps</h2>{report.marketDataGaps.length === 0 ? <p className="message">No current FX/price/NAV gaps detected.</p> : <div className="table-wrap"><table><thead><tr><th>Kind</th><th>Label</th><th>Date</th><th>Severity</th></tr></thead><tbody>{report.marketDataGaps.slice(0, 40).map((gap) => <tr key={gap.kind + gap.label + gap.date}><td>{gap.kind}</td><td>{gap.label}</td><td>{gap.date ?? "-"}</td><td>{gap.severity}</td></tr>)}</tbody></table></div>}</div>
+        <div className="card"><h2>Import Quality</h2>{report.imports.length === 0 ? <p className="message">No committed imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Import</th><th>Provider</th><th>Records</th><th>Confidence</th></tr></thead><tbody>{report.imports.map((run) => <tr key={run.id}><td>{run.label}</td><td>{run.provider}</td><td>{run.records}</td><td>{run.confidence}</td></tr>)}</tbody></table></div>}</div>
+      </div>
+      <div className="card wide-card"><h2>Source Ledger Totals</h2>{report.sourceTotals.length === 0 ? <p className="message">No source records yet.</p> : <div className="table-wrap"><table><thead><tr><th>Source</th><th>Holdings</th><th>Transactions</th><th>Current Value</th></tr></thead><tbody>{report.sourceTotals.map((row) => <tr key={row.source}><td>{row.source}</td><td>{row.holdings}</td><td>{row.transactions}</td><td>{formatMoney(row.value, currency)}</td></tr>)}</tbody></table></div>}</div>
+    </section>
+  );
+}
+
+function SettingsView({ profile, updateTaxProfile }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void }) {
+  return (
+    <section className="grid settings-workspace">
+      <div className="card wide-card">
+        <div className="section-head"><div><h2>Settings</h2><p>Configure assumptions used by portfolio estimates. Settings are stored in the canonical JSON backup and restored across browsers.</p></div></div>
+        <div className="settings-grid">
+          <label><span>Taxpayer</span><select value={profile.residency} disabled><option value="resident_individual">Resident Indian individual</option></select></label>
+          <label><span>Tax regime</span><select value={profile.regime} onChange={(event) => updateTaxProfile({ regime: event.target.value as TaxProfile["regime"] })}><option value="new">New regime</option><option value="old">Old regime</option></select></label>
+          <label><span>Slab / marginal rate</span><select value={String(profile.slabRate)} onChange={(event) => updateTaxProfile({ slabRate: Number(event.target.value) })}>{[0, 5, 10, 15, 20, 25, 30].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
+          <label><span>Surcharge</span><select value={String(profile.surchargeRate)} onChange={(event) => updateTaxProfile({ surchargeRate: Number(event.target.value) })}>{[0, 10, 15, 25, 37].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
+          <label><span>Cess</span><input type="number" step="0.1" value={profile.cessRate} onChange={(event) => updateTaxProfile({ cessRate: Number(event.target.value) })} /></label>
+          <label><span>Tax mode</span><select value={profile.mode} disabled><option value="estimate">Portfolio tax estimate</option></select></label>
+        </div>
+        <p className="message">The Tax section intentionally estimates portfolio tax only. Salary, deductions, Form 16, full ITR schedules, and ESPP payroll/perquisite treatment stay outside this tracker unless explicitly added later.</p>
+      </div>
+    </section>
+  );
+}
+
+function taxBucketLabel(bucket: string): string {
+  return bucket.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function AssetClassesPanel({ insights, currency, scopeLabel }: { insights: AssetClassInsight[]; currency: string; scopeLabel: string }) {
@@ -2335,14 +2496,17 @@ function HoldingRow({ holding, baseCurrency, returns }: { holding: ReturnType<ty
   const value = holding.valueInBase === undefined ? "FX needed" : formatMoney(holding.valueInBase, baseCurrency);
   const price = holding.price === undefined ? "-" : formatMoney(holding.price, holding.currency);
   const priceDetail = holding.price === undefined ? "not available" : holding.quantity === undefined ? "latest unit price" : "per unit/share";
+  const trackedValue = holding.trackedValueInBase === undefined ? "-" : formatMoney(holding.trackedValueInBase, baseCurrency);
+  const trackedDetail = holding.taperApplied ? holding.taperLabel + " · " + holding.taperDetail : "actual for goals";
   const profitTone = (returns?.profit ?? 0) >= 0 ? "positive-text" : "negative-text";
   const costKnown = returns?.costBasisKnown === true;
   const xirrDetail = returns?.missingFx.length ? "FX needed" : returns?.hasCashFlows ? "cash-flow return" : "needs transactions";
   const subtype = assetSubtypeLabel(holding);
-  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge subtype-badge">{subtype}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong><small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Price</span><strong>{price}</strong><small>{priceDetail}</small></div><div className="holding-metric"><span>Invested</span><strong>{costKnown ? formatMoney(returns?.netInvested ?? 0, baseCurrency) : "-"}</strong><small>{costKnown ? "remaining cost basis" : "not provided"}</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{xirrDetail}</small></div></div>;
+  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge subtype-badge">{subtype}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong><small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Price</span><strong>{price}</strong><small>{priceDetail}</small></div><div className="holding-metric"><span>Tracked</span><strong>{trackedValue}</strong><small>{trackedDetail}</small></div><div className="holding-metric"><span>Invested</span><strong>{costKnown ? formatMoney(returns?.netInvested ?? 0, baseCurrency) : "-"}</strong><small>{costKnown ? "remaining cost basis" : "not provided"}</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{xirrDetail}</small></div></div>;
 }
 function HoldingEditRow({ balance, updateBalance }: { balance: ManualBalance; updateBalance: (id: string, patch: Partial<ManualBalance>) => void }) {
-  return <div className="edit-row holding-edit-row"><input value={balance.label} onChange={(event) => updateBalance(balance.id, { label: event.target.value })} /><select value={balance.category} onChange={(event) => updateBalance(balance.id, { category: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select><input value={balance.currency} onChange={(event) => updateBalance(balance.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={balance.value} onChange={(event) => updateBalance(balance.id, { value: Number(event.target.value) })} /><input type="number" step="0.01" placeholder="Invested" value={balance.investedAmount ?? ""} onChange={(event) => updateBalance(balance.id, { investedAmount: event.target.value === "" ? undefined : Number(event.target.value) })} /><input placeholder="Inv curr" value={balance.investedCurrency ?? ""} onChange={(event) => updateBalance(balance.id, { investedCurrency: event.target.value === "" ? undefined : event.target.value.toUpperCase() })} /><input type="date" value={balance.investedAsOfDate ?? balance.asOfDate} onChange={(event) => updateBalance(balance.id, { investedAsOfDate: event.target.value })} /><input type="number" step="0.000001" value={balance.quantity ?? ""} onChange={(event) => updateBalance(balance.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={balance.price ?? ""} onChange={(event) => updateBalance(balance.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="date" value={balance.asOfDate} onChange={(event) => updateBalance(balance.id, { asOfDate: event.target.value })} /><input value={balance.notes ?? ""} onChange={(event) => updateBalance(balance.id, { notes: event.target.value })} /></div>;
+  const taperMode = balance.taperMode ?? "none";
+  return <div className="edit-row holding-edit-row"><input value={balance.label} onChange={(event) => updateBalance(balance.id, { label: event.target.value })} /><select value={balance.category} onChange={(event) => updateBalance(balance.id, { category: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select><input value={balance.currency} onChange={(event) => updateBalance(balance.id, { currency: event.target.value.toUpperCase() })} /><input type="number" step="0.01" value={balance.value} onChange={(event) => updateBalance(balance.id, { value: Number(event.target.value) })} /><input type="number" step="0.01" placeholder="Invested" value={balance.investedAmount ?? ""} onChange={(event) => updateBalance(balance.id, { investedAmount: event.target.value === "" ? undefined : Number(event.target.value) })} /><input placeholder="Inv curr" value={balance.investedCurrency ?? ""} onChange={(event) => updateBalance(balance.id, { investedCurrency: event.target.value === "" ? undefined : event.target.value.toUpperCase() })} /><input type="date" value={balance.investedAsOfDate ?? balance.asOfDate} onChange={(event) => updateBalance(balance.id, { investedAsOfDate: event.target.value })} /><input type="number" step="0.000001" value={balance.quantity ?? ""} onChange={(event) => updateBalance(balance.id, { quantity: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="number" step="0.0001" value={balance.price ?? ""} onChange={(event) => updateBalance(balance.id, { price: event.target.value === "" ? undefined : Number(event.target.value) })} /><select className="taper-mode-select" value={taperMode} onChange={(event) => updateBalance(balance.id, { taperMode: event.target.value as TaperMode, taperFactor: event.target.value === "custom" ? (balance.taperFactor ?? 0.05) : undefined })}>{taperPresets.map((preset) => <option key={preset.mode} value={preset.mode}>{preset.label}</option>)}</select><input className="taper-factor-input" type="number" min="0" max="1" step="0.01" placeholder="k" disabled={taperMode !== "custom"} value={taperMode === "custom" ? (balance.taperFactor ?? 0.05) : ""} onChange={(event) => updateBalance(balance.id, { taperFactor: event.target.value === "" ? undefined : Number(event.target.value) })} /><input type="date" value={balance.asOfDate} onChange={(event) => updateBalance(balance.id, { asOfDate: event.target.value })} /><input value={balance.notes ?? ""} onChange={(event) => updateBalance(balance.id, { notes: event.target.value })} /></div>;
 }
 
 function TransactionRow({ tx, backup }: { tx: Transaction; backup: PortfolioBackup }) {
@@ -2568,6 +2732,9 @@ function viewTitle(view: View): string {
   if (view === "holdings") return "Holdings";
   if (view === "transactions") return "Transactions";
   if (view === "goals") return "Goals";
+  if (view === "tax") return "Tax";
+  if (view === "data") return "Data and Reconciliation";
+  if (view === "settings") return "Settings";
   if (view === "snapshots") return "Snapshots";
   if (view === "add-entry") return "Add Entry";
   return "Portfolio Analytics";

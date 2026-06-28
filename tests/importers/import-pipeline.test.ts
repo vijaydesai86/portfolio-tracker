@@ -128,6 +128,16 @@ cash-main,2026-06-23,Manual,cash,Cash,250,INR,Cash`;
     expect(row.currentValue).toBe(32400);
   });
 
+  it("parses Fidelity-style dashed numeric dates as DD-MM-YYYY", () => {
+    const csv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes
+1,01-06-2026,Fidelity,us_stock,TST,Example US Stock,sell,50,409,95.2,0,,USD,Equity,RSU2`;
+
+    const result = commitManualCsvImport(createEmptyBackup("INR"), csv, { importId: "fid_date", fileName: "manual-fidelity.csv", now: "2026-06-24T00:00:00.000Z" });
+
+    expect(result.errors).toEqual([]);
+    expect(result.backup.transactions[0].date).toBe("2026-06-01");
+  });
+
   it("rejects impossible dates in Fidelity-style manual rows", () => {
     const csv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes
 1,30-02-2026,Fidelity,us_stock,TST,Example US Stock,buy,1,10,80,0,,USD,Equity,bad date`;
