@@ -73,7 +73,8 @@ export function calculateSnapshotAnalytics(backup: PortfolioBackup, identity: { 
   const holdingReturns = calculateHoldingReturns(backup);
   const performance = calculateDashboardPerformance(summary, insights.transactionStats, holdingReturns.values());
   const goals = calculateGoalProgress(backup);
-  const goalSummary = summarizeGoalProgress(goals);
+  const includedGoals = goals.filter((goal) => goal.goal.includeInCombinedGoals !== false);
+  const goalSummary = summarizeGoalProgress(includedGoals);
   const holdings = insights.holdings.map((holding) => ({ holding, returns: holdingReturns.get(holding.id) }));
 
   return {
@@ -170,6 +171,7 @@ function freezeBackupData(backup: PortfolioBackup): SnapshotFrozenData {
     manualBalances: backup.manualBalances,
     priceSnapshots: backup.priceSnapshots,
     goals: backup.goals,
+    goalExpenses: backup.goalExpenses ?? [],
     goalMappings: backup.goalMappings,
     imports: backup.imports,
     sourceDocuments: backup.sourceDocuments
@@ -189,6 +191,7 @@ function backupFromFrozenData(current: PortfolioBackup, frozenData: SnapshotFroz
     manualBalances: frozenData.manualBalances,
     priceSnapshots: frozenData.priceSnapshots,
     goals: frozenData.goals,
+    goalExpenses: frozenData.goalExpenses ?? [],
     goalMappings: frozenData.goalMappings,
     snapshots: [],
     imports: frozenData.imports,

@@ -138,4 +138,30 @@ describe("portfolio performance timeline", () => {
     expect(latest.region).toMatchObject({ US: summary.netWorth });
   });
 
+
+  it("keeps same stock positions separate by account in issuer history", () => {
+    const backup = createEmptyBackup("INR");
+    const today = new Date().toISOString().slice(0, 10);
+    backup.accounts.push(
+      { id: "acct_ind", name: "INDMoney US", institution: "INDMoney", type: "us_stock", currency: "USD", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "acct_fid", name: "Fidelity US", institution: "Fidelity", type: "us_stock", currency: "USD", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.instruments.push({ id: "inst_arm", name: "Arm Holdings PLC ADR", type: "us_stock", symbol: "ARM", currency: "USD", country: "US", category: "Equity", issuer: "ARM", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.transactions.push(
+      { id: "ind_buy", accountId: "acct_ind", instrumentId: "inst_arm", date: "2026-01-01", type: "buy", quantity: 10, amount: 100, currency: "USD", fees: 0, taxes: 0, source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "fid_buy", accountId: "acct_fid", instrumentId: "inst_arm", date: "2026-01-01", type: "buy", quantity: 5, amount: 50, currency: "USD", fees: 0, taxes: 0, source: { type: "import", provider: "manual_transactions" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.priceSnapshots.push(
+      { id: "fx_buy", instrumentId: "USDINR", price: 80, currency: "INR", asOfDate: "2026-01-01", source: "test", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "quote", instrumentId: "inst_arm", price: 20, currency: "USD", asOfDate: today, source: "test", createdAt: today + "T00:00:00.000Z" },
+      { id: "fx_today", instrumentId: "USDINR", price: 80, currency: "INR", asOfDate: today, source: "test", createdAt: today + "T00:00:00.000Z" }
+    );
+
+    const latest = buildPortfolioTimeline(backup).points.at(-1)!;
+
+    expect(latest.current).toBe(24000);
+    expect(latest.issuer).toMatchObject({ INDMoney: 16000, Fidelity: 8000 });
+    expect(latest.issuer).not.toHaveProperty("ARM");
+  });
+
 });

@@ -49,6 +49,31 @@ describe("portfolio snapshots", () => {
     expect(parsed.snapshots).toHaveLength(1);
     expect(snapshotAnalytics(parsed.snapshots[0])?.performance.totalProfit).toBe(20000);
   });
+
+  it("freezes combined-goal snapshot totals using only included goals", () => {
+    const backup = fixtureBackup();
+    backup.goals.push({ ...backup.goals[0], id: "goal_excluded", name: "Excluded", includeInCombinedGoals: false });
+    backup.goalMappings.push(createGoalMapping("goal_excluded", "bal_eq", 100, "2026-01-01T00:00:00.000Z"));
+
+    const snapshot = createPortfolioSnapshot(backup, { name: "Goal filter", asOfDate: "2026-06-24", now: "2026-06-24T10:00:00.000Z" });
+    const analytics = snapshotAnalytics(snapshot)!;
+
+    expect(analytics.goals).toHaveLength(2);
+    expect(analytics.goalSummary.mappedCurrentValue).toBe(100000);
+    expect(analytics.timelinePoint.goalMappedCurrent).toBe(100000);
+  });
+
+  it("freezes goal expense rows inside snapshots", () => {
+    const backup = fixtureBackup();
+    backup.goalExpenses.push({ id: "goal_exp_retirement_grocery", goalId: "goal_retire", expense: "Grocery", amount: 50000, currency: "INR", baseDate: "2026-06-29", createdAt: "2026-06-29T00:00:00.000Z", updatedAt: "2026-06-29T00:00:00.000Z" });
+
+    const snapshot = createPortfolioSnapshot(backup, { name: "Expense freeze", asOfDate: "2026-06-29", now: "2026-06-29T10:00:00.000Z" });
+
+    expect(snapshot.frozenData.goalExpenses).toHaveLength(1);
+    expect(snapshot.frozenData.goalExpenses[0].expense).toBe("Grocery");
+    expect(snapshotAnalytics(snapshot)?.goals[0].expenseSource).toBe("expenses");
+  });
+
 });
 
 function fixtureBackup(): PortfolioBackup {

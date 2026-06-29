@@ -2,7 +2,8 @@ import { calculateHoldingReturns } from "@/src/domain/holdingReturns";
 import { signedPortfolioTransactionAmount, tryConvertToBase } from "@/src/domain/analytics";
 import { calculateXirr } from "@/src/domain/xirr";
 import { calculateTrackedLocalValue, hasAppliedTaper } from "@/src/domain/tapering";
-import type { AssetCategory, Goal, GoalMapping, ManualBalance, PortfolioBackup, Transaction } from "@/src/schema/backup";
+import { goalExpensesForGoal, summarizeGoalExpenses } from "@/src/domain/goalExpenses";
+import type { AssetCategory, Goal, GoalExpense, GoalMapping, ManualBalance, PortfolioBackup, Transaction } from "@/src/schema/backup";
 
 export type GoalDraft = {
   name: string;
@@ -21,6 +22,11 @@ export type GoalDraft = {
   drawdownSpendGrowth?: number;
   drawdownHorizonYears?: number;
   drawdownWithdrawalTiming?: Goal["drawdownWithdrawalTiming"];
+  consumptionGlideIntervalYears?: number;
+  consumptionGlideShiftPercent?: number;
+  consumptionGlideFrom?: AssetCategory;
+  consumptionGlideTo?: AssetCategory;
+  consumptionGlideFloorPercent?: number;
 };
 
 export type GoalProgress = {
@@ -28,6 +34,9 @@ export type GoalProgress = {
   yearsToGoal: number;
   startingMonthlyExpense: number;
   firstYearExpense: number;
+  expenseBaseMonthly: number;
+  expenseRowCount: number;
+  expenseSource: "manual" | "expenses";
   targetCorpus: number;
   requiredCorpusToday: number;
   mappedCurrentValue: number;
@@ -107,22 +116,32 @@ export function buildGoal(input: GoalDraft, now = new Date().toISOString()): Goa
     drawdownSpendGrowth: input.drawdownSpendGrowth ?? 6,
     drawdownHorizonYears: input.drawdownHorizonYears ?? 45,
     drawdownWithdrawalTiming: input.drawdownWithdrawalTiming ?? "beginning",
+    consumptionGlideIntervalYears: input.consumptionGlideIntervalYears ?? 5,
+    consumptionGlideShiftPercent: input.consumptionGlideShiftPercent ?? 0,
+    consumptionGlideFrom: input.consumptionGlideFrom ?? "Equity",
+    consumptionGlideTo: input.consumptionGlideTo ?? "Debt",
+    consumptionGlideFloorPercent: input.consumptionGlideFloorPercent ?? 20,
     includeInCombinedGoals: true,
     createdAt: now,
     updatedAt: now
   };
 }
 
-export function recalculateGoalTarget(goal: Goal): Goal {
-  const years = yearsUntil(goal.targetDate);
-  const startingMonthlyExpense = futureValue(goal.currentMonthlyExpense ?? 0, goal.inflationRate, years);
-  return { ...goal, targetAmount: roundMoney(startingMonthlyExpense * 12 * (goal.corpusMultiple ?? 1)) };
+export function recalculateGoalTarget(goal: Goal, expenses: GoalExpense[] = [], today = new Date()): Goal {
+  const expenseSummary = summarizeGoalExpenses(goal, expenses, today);
+  return {
+    ...goal,
+    currentMonthlyExpense: expenseSummary.currentMonthlyExpense,
+    targetAmount: roundMoney(expenseSummary.firstYearExpense * (goal.corpusMultiple ?? 1))
+  };
 }
 
 export function calculateGoalProgress(backup: PortfolioBackup): GoalProgress[] {
   const holdingReturns = calculateHoldingReturns(backup);
   return backup.goals.map((goal) => {
-    const recalculated = recalculateGoalTarget(goal);
+    const expenseRows = goalExpensesForGoal(backup, goal.id);
+    const expenseSummary = summarizeGoalExpenses(goal, expenseRows);
+    const recalculated = recalculateGoalTarget(goal, expenseRows);
     const years = yearsUntil(recalculated.targetDate);
     const categoryValues = emptyCategoryRecord();
     const projectedCategoryValues = emptyCategoryRecord();
@@ -158,8 +177,8 @@ export function calculateGoalProgress(backup: PortfolioBackup): GoalProgress[] {
 
     const mappedCurrentValue = sumCategories(categoryValues);
     const projectedValue = sumCategories(projectedCategoryValues);
-    const startingMonthlyExpense = futureValue(recalculated.currentMonthlyExpense ?? 0, recalculated.inflationRate, years);
-    const firstYearExpense = startingMonthlyExpense * 12;
+    const startingMonthlyExpense = expenseSummary.startingMonthlyExpense;
+    const firstYearExpense = expenseSummary.firstYearExpense;
     const targetCorpus = recalculated.targetAmount;
     const growthMultiplier = mappedCurrentValue > 0 ? projectedValue / mappedCurrentValue : fallbackGrowthMultiplier(recalculated, years);
     const requiredCorpusToday = growthMultiplier > 0 ? targetCorpus / growthMultiplier : targetCorpus;
@@ -168,6 +187,9 @@ export function calculateGoalProgress(backup: PortfolioBackup): GoalProgress[] {
       yearsToGoal: years,
       startingMonthlyExpense: roundMoney(startingMonthlyExpense),
       firstYearExpense: roundMoney(firstYearExpense),
+      expenseBaseMonthly: expenseSummary.baseMonthlyExpense,
+      expenseRowCount: expenseSummary.rows.length,
+      expenseSource: expenseSummary.source,
       targetCorpus: roundMoney(targetCorpus),
       requiredCorpusToday: roundMoney(requiredCorpusToday),
       mappedCurrentValue: roundMoney(mappedCurrentValue),

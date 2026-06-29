@@ -113,9 +113,18 @@ Printed On : 23-06-2026 10:58:25`);
     const newer = buildCanonicalEpfoImport(parseEpfoPassbookText(epfoText), { importId: "pf_newer", fileName: "pf-newer.pdf", now: "2026-06-22T00:00:00.000Z" });
     const older = buildCanonicalEpfoImport(parseEpfoPassbookText(olderText), { importId: "pf_older", fileName: "pf-older.pdf", now: "2026-06-22T00:00:00.000Z" });
 
-    const backup = applyCanonicalEpfoImport(applyCanonicalEpfoImport(createEmptyBackup("INR"), newer), older);
+    const first = applyCanonicalEpfoImport(createEmptyBackup("INR"), newer);
+    const employee = first.manualBalances.find((balance) => balance.label === "EPF Employee Share")!;
+    const edited = {
+      ...first,
+      manualBalances: first.manualBalances.map((balance) => balance.id === employee.id ? { ...balance, taperMode: "light" as const, taperFactor: 0.02 } : balance),
+      goalMappings: [{ id: "map_pf", goalId: "goal_1", manualBalanceId: employee.id, percent: 100, createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" }]
+    };
 
-    expect(backup.manualBalances.find((balance) => balance.label === "EPF Employee Share")).toMatchObject({ value: 123456, asOfDate: "2026-03-31" });
+    const backup = applyCanonicalEpfoImport(edited, older);
+
+    expect(backup.manualBalances.find((balance) => balance.label === "EPF Employee Share")).toMatchObject({ id: employee.id, value: 123456, asOfDate: "2026-03-31", taperMode: "light", taperFactor: 0.02 });
+    expect(backup.goalMappings).toEqual([{ id: "map_pf", goalId: "goal_1", manualBalanceId: employee.id, percent: 100, createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" }]);
     expect(backup.transactions.length).toBeGreaterThan(newer.transactions.length);
     expect(backup.imports).toHaveLength(2);
   });

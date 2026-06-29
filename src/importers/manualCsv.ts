@@ -129,7 +129,7 @@ const supportedAccountTypes = new Set<Account["type"]>([
   "other"
 ]);
 
-const dynamicPositionTypes = new Set<Account["type"]>(["mutual_fund", "indian_stock", "us_stock", "gold"]);
+const dynamicPositionTypes = new Set<Account["type"]>(["mutual_fund", "indian_stock", "us_stock", "gold", "nps"]);
 
 export function parseManualCsv(csv: string, options: ManualCsvParseOptions): ManualCsvResult {
   const parsed = Papa.parse<ManualCsvRow>(csv, {
@@ -253,6 +253,7 @@ function parseTransactionCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOp
   const priceSnapshots: PriceSnapshot[] = [];
   const errors: ImportError[] = [];
   const positions = new Map<string, PositionAccumulator>();
+  const ledgerBalances = new Map<string, LedgerAccumulator>();
 
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
@@ -380,7 +381,51 @@ function parseTransactionCsvRows(rows: ManualCsvRow[], options: ManualCsvParseOp
         positions.set(key, existing);
       }
     }
+
+    const ledgerType = transactionLedgerType(normalized.transaction_type as Transaction["type"]);
+    if (ledgerType && shouldAccumulateTransactionLedger(normalized.asset_type as Account["type"], quantity)) {
+      const key = accountId + "|" + instrumentId;
+      const existing = ledgerBalances.get(key) ?? {
+        accountId,
+        instrumentId,
+        label: normalized.asset_name,
+        category: category.data,
+        currency: normalized.currency,
+        value: 0,
+        investedAmount: 0,
+        latestDate: normalized.date,
+        notes: "Derived from mixed monthly transaction CSV. Investment/deposit/contribution rows add invested and current value; interest/dividend rows add current value only."
+      };
+      existing.value = roundMoney(existing.value + ledgerValueDelta(ledgerType, amount));
+      existing.investedAmount = roundMoney(Math.max(0, existing.investedAmount + ledgerInvestedDelta(ledgerType, amount)));
+      if (ledgerInvestedDelta(ledgerType, amount) > 0 && (!existing.investedAsOfDate || normalized.date < existing.investedAsOfDate)) existing.investedAsOfDate = normalized.date;
+      if (normalized.date > existing.latestDate) existing.latestDate = normalized.date;
+      ledgerBalances.set(key, existing);
+    }
   });
+
+  for (const balance of ledgerBalances.values()) {
+    const logicalKey = balance.accountId + "|" + balance.instrumentId;
+    const sourceRecordHash = stableHash({ provider: "manual_balance_ledger", logicalKey });
+    manualBalances.push({
+      id: slugId("bal", ["manual_balance_ledger", logicalKey]),
+      accountId: balance.accountId,
+      instrumentId: balance.instrumentId,
+      label: balance.label,
+      category: balance.category,
+      currency: balance.currency,
+      value: roundMoney(Math.max(0, balance.value)),
+      investedAmount: roundMoney(Math.max(0, balance.investedAmount)),
+      investedCurrency: balance.currency,
+      investedAsOfDate: balance.investedAsOfDate ?? balance.latestDate,
+      asOfDate: balance.latestDate,
+      notes: balance.notes,
+      source: { type: "import", importId: options.importId, provider: "manual_balance_ledger", sourceRecordHash },
+      userModified: false,
+      createdAt: now,
+      updatedAt: now
+    });
+  }
 
   for (const position of positions.values()) {
     if (position.quantity <= 0 || position.lastPrice === undefined) continue;
@@ -707,6 +752,19 @@ function categoryForAssetType(assetType: string): AccountCategory {
   if (["mutual_fund", "indian_stock", "us_stock", "espp"].includes(assetType)) return "Equity";
   if (assetType === "gold") return "Gold";
   return "Others";
+}
+
+function shouldAccumulateTransactionLedger(assetType: Account["type"], quantity: number | undefined): boolean {
+  if (dynamicPositionTypes.has(assetType) && quantity !== undefined) return false;
+  return ["cash", "espp", "fd", "ppf", "ssy", "epf", "nps", "other"].includes(assetType);
+}
+
+function transactionLedgerType(type: Transaction["type"]): "invest" | "interest" | "withdrawal" | "maturity" | undefined {
+  if (["buy", "sip", "switch_in", "deposit", "contribution"].includes(type)) return "invest";
+  if (["interest", "interest_accrual", "dividend"].includes(type)) return "interest";
+  if (["sell", "redemption", "switch_out", "withdrawal"].includes(type)) return "withdrawal";
+  if (type === "maturity") return "maturity";
+  return undefined;
 }
 
 function normalizeLedgerType(value?: string): string {

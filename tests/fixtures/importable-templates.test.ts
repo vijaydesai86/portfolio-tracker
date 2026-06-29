@@ -19,7 +19,8 @@ describe("importable canonical template pack", () => {
       "manual-balance-ledger-sample.csv",
       "manual-balances-sample.csv",
       "manual-balances-template.csv",
-      "manual-transactions-template.csv"
+      "manual-transactions-template.csv",
+      "monthly-all-assets-template.csv"
     ]);
 
     for (const file of files) {

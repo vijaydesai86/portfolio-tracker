@@ -172,4 +172,24 @@ cash-main,2026-06-23,Manual,cash,Cash,250,INR,Cash`;
     expect(preview.rows.some((row) => row.label === "New Cash" && row.action === "add")).toBe(true);
   });
 
+  it("previews replace imports with preserved user edits and stale removals", () => {
+    const backup = createEmptyBackup("INR");
+    const oldCsv = [
+      "balance_id,as_of_date,institution,asset_type,name,current_value,currency,category",
+      "cash-main,2026-06-22,Manual,cash,Cash,100,INR,Cash",
+      "ppf-main,2026-06-22,Post Office,ppf,PPF,300,INR,Debt"
+    ].join("\n");
+    const first = commitManualCsvImport(backup, oldCsv, { importId: "old", fileName: "manual.csv", now: "2026-06-22T00:00:00.000Z" }).backup;
+    first.manualBalances[0] = { ...first.manualBalances[0], userModified: true, taperMode: "medium" };
+    const replacementCsv = [
+      "balance_id,as_of_date,institution,asset_type,name,current_value,currency,category",
+      "cash-main,2026-06-23,Manual,cash,Cash,150,INR,Cash"
+    ].join("\n");
+
+    const preview = previewManualCsvImport(first, replacementCsv, { importId: "new", replaceImportId: "old", fileName: "manual.csv", now: "2026-06-23T00:00:00.000Z" });
+
+    expect(preview.rows.some((row) => row.label === "Cash" && row.action === "preserve" && row.detail.includes("user-edited"))).toBe(true);
+    expect(preview.rows.some((row) => row.label === "PPF" && row.action === "remove" && row.detail.includes("absent"))).toBe(true);
+  });
+
 });

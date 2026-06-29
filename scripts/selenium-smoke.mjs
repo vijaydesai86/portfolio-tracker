@@ -34,7 +34,7 @@ async function jsClick(xpath, timeout = 15000) {
   const element = await driver.wait(until.elementLocated(By.xpath(xpath)), timeout);
   await driver.executeScript("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", element);
   await driver.sleep(250);
-  await driver.executeScript("arguments[0].dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window}));", element);
+  await driver.executeScript("arguments[0].click();", element);
 }
 
 async function waitForBodyText(text, timeout = 15000) {
@@ -112,6 +112,24 @@ async function assertNoChartRowOverlap(context) {
     return overlaps.slice(0, 5);
   });
   if (bad.length > 0) throw new Error(context + " rendered overlapping chart row label/value blocks: " + JSON.stringify(bad));
+}
+
+async function assertInteractiveTables(context) {
+  const stats = await driver.executeScript(() => {
+    const wraps = [...document.querySelectorAll(".table-wrap")].filter((wrap) => wrap.querySelector("table tbody tr:nth-child(2)"));
+    const sortable = wraps.filter((wrap) => wrap.classList.contains("interactive-table-wrap") && wrap.querySelector("th.sortable-column"));
+    if (wraps.length === 0) return { wraps: 0, sortable: 0, sorted: true, hinted: true };
+    const target = sortable[0];
+    if (!target) return { wraps: wraps.length, sortable: 0, sorted: false, hinted: false };
+    const header = target.querySelector("th.sortable-column");
+    const hinted = Boolean(target.previousElementSibling?.classList.contains("table-interaction-hint"));
+    header.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    const sorted = header.getAttribute("aria-sort") === "ascending" || header.getAttribute("aria-sort") === "descending";
+    return { wraps: wraps.length, sortable: sortable.length, sorted, hinted };
+  });
+  if (stats.wraps > 0 && (stats.sortable < 1 || !stats.sorted || !stats.hinted)) {
+    throw new Error(context + " did not provide sortable interactive tables: " + JSON.stringify(stats));
+  }
 }
 
 async function assertFinanceTablesReadable(context) {
@@ -475,7 +493,7 @@ async function assertNoPageOverflow(context) {
   const stats = await driver.executeScript(() => {
     const width = document.documentElement.clientWidth;
     function isContainedScrollableOverflow(element) {
-      const scroller = element.closest(".table-wrap, .goal-mapping-list");
+      const scroller = element.closest(".table-wrap, .goal-mapping-list, .nav");
       if (!scroller) return false;
       const scrollerRect = scroller.getBoundingClientRect();
       const style = getComputedStyle(scroller);
@@ -492,10 +510,38 @@ async function assertNoPageOverflow(context) {
   if (stats.offenders.length > 0) throw new Error(context + " has horizontal overflow: " + JSON.stringify(stats));
 }
 
+async function assertSettingsReachableInSidebar(context) {
+  const stats = await driver.executeScript(() => {
+    const sidebar = document.querySelector(".app-shell-v2 .sidebar");
+    const settingsButton = [...document.querySelectorAll(".app-shell-v2 .nav button")].find((button) => button.textContent.includes("Settings"));
+    if (!sidebar || !settingsButton) return { hasSidebar: Boolean(sidebar), hasSettings: Boolean(settingsButton) };
+    sidebar.scrollTop = sidebar.scrollHeight;
+    const sidebarRect = sidebar.getBoundingClientRect();
+    const buttonRect = settingsButton.getBoundingClientRect();
+    const style = getComputedStyle(sidebar);
+    return {
+      hasSidebar: true,
+      hasSettings: true,
+      scrollHeight: sidebar.scrollHeight,
+      clientHeight: sidebar.clientHeight,
+      overflowY: style.overflowY,
+      settingsTop: buttonRect.top,
+      settingsBottom: buttonRect.bottom,
+      sidebarTop: sidebarRect.top,
+      sidebarBottom: sidebarRect.bottom,
+      reachable: buttonRect.bottom <= sidebarRect.bottom + 2 && buttonRect.top >= sidebarRect.top - 2
+    };
+  });
+  if (!stats.hasSidebar || !stats.hasSettings || !stats.reachable || (stats.scrollHeight > stats.clientHeight && !/(auto|scroll)/.test(stats.overflowY))) {
+    throw new Error(context + " cannot reach Settings in sidebar: " + JSON.stringify(stats));
+  }
+}
+
 async function assertResponsiveCorePages() {
-  for (const [label, width, height] of [["desktop", 1440, 950], ["laptop", 1280, 800], ["tablet", 980, 900], ["mobile", 390, 860]]) {
+  for (const [label, width, height] of [["desktop", 1440, 950], ["laptop", 1280, 800], ["short-laptop", 1366, 680], ["tablet", 980, 900], ["mobile", 390, 860]]) {
     await driver.manage().window().setRect({ width, height });
     await driver.sleep(350);
+    if (label === "desktop" || label === "laptop" || label === "short-laptop") await assertSettingsReachableInSidebar(label + " navigation");
     for (const page of ["Analytics", "Holdings", "Goals", "Planning", "Tax", "Snapshots", "Data", "Settings"]) {
       await jsClick("//button[contains(., '" + page + "')]");
       await waitForBodyText(page === "Data" ? "Data Reconciliation" : page === "Planning" ? "Planning Lab" : page === "Snapshots" ? "Frozen portfolio archive" : page, 15000);
@@ -506,6 +552,7 @@ async function assertResponsiveCorePages() {
       await assertSemanticHeadingRelations(label + " " + page + " semantic headings");
       await assertCollapsibleSections(label + " " + page + " collapsible sections");
       await assertFinanceTablesReadable(label + " " + page + " finance tables");
+      await assertInteractiveTables(label + " " + page + " interactive tables");
       if (page === "Analytics") {
         for (const tab of ["Overview", "Allocation", "Returns", "Risk", "History"]) {
           await jsClick("//button[.//strong[normalize-space(.)='" + tab + "']]");
@@ -588,7 +635,7 @@ try {
     await driver.wait(async () => {
       const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
       if (label === "Overview") return body.includes("current allocation explorer");
-      if (label === "Allocation") return body.includes("allocation map") && body.includes("by asset type") && (body.includes("asset class command center") || body.includes("no scoped asset-class data yet"));
+      if (label === "Allocation") return body.includes("allocation map") && body.includes("by asset type");
       if (label === "Returns") return body.includes("returns cockpit") && body.includes("return distribution");
       if (label === "Risk") return body.includes("risk and trust cockpit") && body.includes("currency exposure");
       return body.includes("historical charts reconstruct") && body.includes("portfolio growth");
@@ -618,7 +665,9 @@ try {
   await jsClick("//button[contains(., 'Edit Transactions')]");
   await driver.wait(until.elementLocated(By.xpath("//input[@placeholder='FMV / tax price']")), 15000);
   await jsClick("//button[normalize-space(.)='Delete']");
-  await waitForBodyText("Transaction deleted locally");
+  await waitForBodyText("Draft transaction delete captured");
+  await jsClick("//button[contains(., 'Done Editing')]");
+  await waitForBodyText("Draft edits committed locally");
   await jsClick("//button[contains(., 'Holdings')]");
   await waitForBodyText("XIRR Coverage");
   await driver.wait(async () => {

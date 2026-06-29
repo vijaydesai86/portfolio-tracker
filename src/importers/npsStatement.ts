@@ -1,4 +1,5 @@
 import { stableHash, slugId } from "@/src/domain/hash";
+import { applyImportedRecordSet } from "@/src/importers/importReplace";
 import type { Account, AssetCategory, ImportRun, Instrument, ManualBalance, PortfolioBackup, PriceSnapshot, SourceDocument, Transaction } from "@/src/schema/backup";
 
 export type NpsSchemeHolding = {
@@ -149,19 +150,8 @@ export function buildCanonicalNpsImport(parsed: NpsParseResult, options: { impor
   return { accounts: [account], instruments, transactions, manualBalances, priceSnapshots, importRun, sourceDocument };
 }
 
-export function applyCanonicalNpsImport(base: PortfolioBackup, imported: NpsCanonicalImport): PortfolioBackup {
-  const now = new Date().toISOString();
-  return {
-    ...base,
-    exportedAt: now,
-    accounts: mergeById(base.accounts, imported.accounts),
-    instruments: mergeById(base.instruments, imported.instruments),
-    transactions: mergeById(base.transactions, imported.transactions),
-    manualBalances: mergeLatestManualBalances(base.manualBalances, imported.manualBalances),
-    priceSnapshots: mergeById(base.priceSnapshots, imported.priceSnapshots),
-    imports: mergeById(base.imports, [{ ...imported.importRun, status: "committed", committedAt: now }]),
-    sourceDocuments: imported.sourceDocument ? mergeById(base.sourceDocuments, [imported.sourceDocument]) : base.sourceDocuments
-  };
+export function applyCanonicalNpsImport(base: PortfolioBackup, imported: NpsCanonicalImport, options: { replaceImportId?: string } = {}): PortfolioBackup {
+  return applyImportedRecordSet(base, imported, { now: new Date().toISOString(), replaceImportId: options.replaceImportId, latestManualBalances: true });
 }
 
 function parseHoldings(rows: string[][], fallbackDate: string): NpsSchemeHolding[] {

@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
     fxStart ? loadHistoricalUsdInr(fxStart, fxEnd, payload, errors) : Promise.resolve()
   ]);
 
+  payload.errors = compactMarketErrors(errors);
   return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -113,10 +114,6 @@ async function loadHistoricalNavs(isins: string[], start: string, end: string, p
     {
       name: "AMFI historical NAV portal",
       run: async () => parseAmfiNavAll(await fetchText("https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx?frmdt=" + amfiDate(start) + "&todt=" + amfiDate(end)), requested).map((quote) => ({ ...quote, source: "amfi_history" }))
-    },
-    {
-      name: "AMFI historical NAV www",
-      run: async () => parseAmfiNavAll(await fetchText("https://www.amfiindia.com/spages/DownloadNAVHistoryReport_Po.aspx?frmdt=" + amfiDate(start) + "&todt=" + amfiDate(end)), requested).map((quote) => ({ ...quote, source: "amfi_history" }))
     }
   ], (quotes) => quotes.length > 0);
 
@@ -125,7 +122,7 @@ async function loadHistoricalNavs(isins: string[], start: string, end: string, p
     return;
   }
 
-  errors.push("Historical mutual fund NAV fetch failed: " + [...latest.errors, ...mfapiQuotes.flatMap((result) => result.status === "rejected" ? [errorMessage(result.reason)] : []), ...amfiHistory.errors].join("; "));
+  errors.push(compactHistoricalNavWarning(isins, latest.errors, mfapiQuotes, amfiHistory.errors));
 }
 
 async function loadStockQuotes(symbols: string[], payload: MarketDataPayload, errors: string[]) {
@@ -257,6 +254,31 @@ async function fetchHistoricalStockQuotes(symbol: string, start: string, end: st
   ], (quotes) => quotes.length > 0);
   if (result.value) return result.value;
   throw new Error(symbol + ": " + result.errors.join("; "));
+}
+
+function compactHistoricalNavWarning(isins: string[], latestErrors: string[], mfapiQuotes: PromiseSettledResult<NavQuote[]>[], amfiErrors: string[]): string {
+  const failedMfapi = mfapiQuotes.filter((result) => result.status === "rejected").length;
+  const timeoutCount = [...latestErrors, ...mfapiQuotes.flatMap((result) => result.status === "rejected" ? [errorMessage(result.reason)] : []), ...amfiErrors].filter((message) => /timed out/i.test(message)).length;
+  const parts = [
+    "Historical mutual fund NAV unavailable for " + isins.length + " fund(s); current NAV valuation is unaffected, but history charts may have reduced coverage."
+  ];
+  if (failedMfapi > 0) parts.push("MFapi scheme history failed for " + failedMfapi + " scheme(s).");
+  if (timeoutCount > 0) parts.push(timeoutCount + " provider request(s) timed out.");
+  if (amfiErrors.length > 0) parts.push("AMFI historical fallback was not usable.");
+  return parts.join(" ");
+}
+
+function compactMarketErrors(errors: string[]): string[] {
+  const unique = new Map<string, string>();
+  for (const error of errors) {
+    const normalized = error
+      .replace(/(timed out after \d+ms)(; \1)+/g, "$1")
+      .replace(/(404 Not Found)(; \1)+/g, "$1")
+      .trim();
+    if (!normalized) continue;
+    unique.set(normalized, normalized);
+  }
+  return [...unique.values()];
 }
 
 async function fetchStooqStockHistory(symbol: string, start: string, end: string): Promise<StockQuote[]> {

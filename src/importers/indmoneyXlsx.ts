@@ -1,5 +1,6 @@
 import readXlsxFile from "read-excel-file/browser";
 import { stableHash, slugId } from "@/src/domain/hash";
+import { applyImportedRecordSet } from "@/src/importers/importReplace";
 import type {
   Account,
   ImportRun,
@@ -366,19 +367,8 @@ export function buildCanonicalIndMoneyImport(
   return { accounts, instruments: [...instruments.values()], transactions, manualBalances, priceSnapshots, importRun, sourceDocument };
 }
 
-export function applyCanonicalIndMoneyImport(base: PortfolioBackup, imported: IndMoneyCanonicalImport): PortfolioBackup {
-  const now = new Date().toISOString();
-  return {
-    ...base,
-    exportedAt: now,
-    accounts: mergeById(base.accounts, imported.accounts),
-    instruments: mergeById(base.instruments, imported.instruments),
-    transactions: mergeById(base.transactions, imported.transactions),
-    manualBalances: mergeById(base.manualBalances, imported.manualBalances),
-    priceSnapshots: mergeById(base.priceSnapshots, imported.priceSnapshots),
-    imports: mergeById(base.imports, [{ ...imported.importRun, status: "committed", committedAt: now }]),
-    sourceDocuments: imported.sourceDocument ? mergeById(base.sourceDocuments, [imported.sourceDocument]) : base.sourceDocuments
-  };
+export function applyCanonicalIndMoneyImport(base: PortfolioBackup, imported: IndMoneyCanonicalImport, options: { replaceImportId?: string } = {}): PortfolioBackup {
+  return applyImportedRecordSet(base, imported, { now: new Date().toISOString(), replaceImportId: options.replaceImportId });
 }
 
 function toCanonicalType(type: string, netAmount: number): Transaction["type"] | undefined {

@@ -130,6 +130,14 @@ export const priceSnapshotSchema = z.object({
 });
 export type PriceSnapshot = z.infer<typeof priceSnapshotSchema>;
 
+const goalAllocationSchema = z.object({
+  Equity: z.number().min(0).max(100).optional(),
+  Debt: z.number().min(0).max(100).optional(),
+  Gold: z.number().min(0).max(100).optional(),
+  Others: z.number().min(0).max(100).optional(),
+  Cash: z.number().min(0).max(100).optional()
+});
+
 export const goalSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -149,11 +157,30 @@ export const goalSchema = z.object({
   drawdownSpendGrowth: z.number().min(0).max(100).default(6),
   drawdownHorizonYears: z.number().int().min(1).max(100).default(45),
   drawdownWithdrawalTiming: z.enum(["beginning", "end"]).default("beginning"),
+  consumptionGlideIntervalYears: z.number().int().min(1).max(50).optional(),
+  consumptionGlideShiftPercent: z.number().min(0).max(100).optional(),
+  consumptionGlideFrom: categorySchema.optional(),
+  consumptionGlideTo: categorySchema.optional(),
+  consumptionGlideFloorPercent: z.number().min(0).max(100).optional(),
   includeInCombinedGoals: z.boolean().default(true),
+  accumulationTargetAllocation: goalAllocationSchema.optional(),
+  consumptionTargetAllocation: goalAllocationSchema.optional(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema
 });
 export type Goal = z.infer<typeof goalSchema>;
+
+export const goalExpenseSchema = z.object({
+  id: z.string().min(1),
+  goalId: z.string().min(1),
+  expense: z.string().min(1),
+  amount: z.number().finite().nonnegative(),
+  currency: currencySchema,
+  baseDate: dateSchema,
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema
+});
+export type GoalExpense = z.infer<typeof goalExpenseSchema>;
 
 export const goalMappingSchema = z.object({
   id: z.string().min(1),
@@ -198,6 +225,7 @@ export const snapshotFrozenDataSchema = z.object({
   manualBalances: z.array(manualBalanceSchema),
   priceSnapshots: z.array(priceSnapshotSchema),
   goals: z.array(goalSchema),
+  goalExpenses: z.array(goalExpenseSchema).default([]),
   goalMappings: z.array(goalMappingSchema),
   imports: z.array(importRunSchema),
   sourceDocuments: z.array(sourceDocumentSchema)
@@ -228,6 +256,7 @@ export const backupSchema = z.object({
   manualBalances: z.array(manualBalanceSchema),
   priceSnapshots: z.array(priceSnapshotSchema),
   goals: z.array(goalSchema),
+  goalExpenses: z.array(goalExpenseSchema).default([]),
   goalMappings: z.array(goalMappingSchema),
   snapshots: z.array(portfolioSnapshotSchema).default([]),
   imports: z.array(importRunSchema),
@@ -249,6 +278,7 @@ export function createEmptyBackup(baseCurrency: string): PortfolioBackup {
     manualBalances: [],
     priceSnapshots: [],
     goals: [],
+    goalExpenses: [],
     goalMappings: [],
     snapshots: [],
     imports: [],

@@ -1,0 +1,17 @@
+id,date,asset_type,platform,institution,name,symbol_or_isin,type,quantity,price,amount,fees,taxes,currency,fx_rate,category,notes,FMV
+mf-jun-1,2026-06-05,mutual_fund,MFU,Example AMC,Example Equity Mutual Fund,INF000000000,buy,25,120,,0,0,INR,,Equity,monthly mutual fund buy,
+ind-jun-1,2026-06-06,indian_stock,Indian Broker,Indian Broker,Example India Stock,EXAMPLEEQ,buy,10,950,,15,0,INR,,Equity,monthly Indian stock buy,
+us-jun-1,2026-06-07,us_stock,Fidelity,Fidelity,Example US Stock,EXMPL,buy,4,80,,0,0,USD,84.5,Equity,monthly US stock buy,82
+us-jun-2,2026-06-20,us_stock,Fidelity,Fidelity,Example US Stock,EXMPL,sell,1,95,,0,0,USD,85.2,Equity,monthly US stock sell,95
+ppf-jun-1,2026-06-08,ppf,Manual,Post Office,Public Provident Fund,,invest,,,150000,0,0,INR,,Debt,PPF annual contribution,
+ppf-jun-int,2026-06-30,ppf,Manual,Post Office,Public Provident Fund,,interest,,,1200,0,0,INR,,Debt,PPF interest credit,
+ssy-jun-1,2026-06-09,ssy,Manual,Bank,Sukanya Samriddhi Account,,invest,,,50000,0,0,INR,,Debt,SSY contribution,
+epf-jun-1,2026-06-10,epf,Manual,EPFO,EPF Employee Share,,contribution,,,25000,0,0,INR,,Debt,employee PF monthly contribution,
+epf-jun-2,2026-06-10,epf,Manual,EPFO,EPF Employer Share,,contribution,,,25000,0,0,INR,,Debt,employer PF monthly contribution,
+nps-jun-1,2026-06-11,nps,Manual,NPS,SBI PENSION FUND SCHEME E - TIER I POP,,buy,42,58,,0,0,INR,,Equity,NPS allotted units,
+nps-jun-2,2026-06-11,nps,Manual,NPS,SBI PENSION FUND SCHEME G - TIER I POP,,buy,140,43,,0,0,INR,,Debt,NPS allotted units,
+fd-jun-1,2026-06-12,fd,Manual,Example Bank,Fixed Deposit,,invest,,,100000,0,0,INR,,Debt,new FD,
+espp-jun-1,2026-06-13,espp,Manual,Employer,ESPP Contribution,,contribution,,,40000,0,0,INR,,Equity,monthly ESPP contribution,
+cash-jun-1,2026-06-14,cash,Manual,Manual,Cash Balance,,deposit,,,20000,0,0,INR,,Cash,monthly cash surplus,
+gold-jun-1,2026-06-15,gold,Manual,Manual,Manual Gold Holding,,buy,5,7000,,0,0,INR,,Gold,monthly gold units,
+other-jun-1,2026-06-16,other,Manual,Manual,Other Private Asset,,invest,,,30000,0,0,INR,,Others,custom/private asset contribution,

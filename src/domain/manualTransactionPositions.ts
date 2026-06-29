@@ -53,6 +53,8 @@ export function reconcileManualTransactionPositions(backup: PortfolioBackup, now
       price: pricePoint.price,
       asOfDate: pricePoint.asOfDate,
       notes: existing?.notes ?? "Derived from manual transaction CSV. Market refresh replaces the latest transaction price when a real quote or NAV is available.",
+      taperMode: existing?.taperMode,
+      taperFactor: existing?.taperFactor,
       source: {
         type: "import",
         importId: existing?.source.importId ?? seed.latestTransactionImportId,

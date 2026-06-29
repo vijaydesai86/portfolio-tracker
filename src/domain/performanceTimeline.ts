@@ -1,5 +1,6 @@
 import { calculatePortfolioSummary, signedPortfolioTransactionAmount, tryConvertToBase } from "@/src/domain/analytics";
-import type { Account, AssetCategory, Instrument, ManualBalance, PortfolioBackup, PriceSnapshot, Transaction } from "@/src/schema/backup";
+import { assetKindDimension, issuerOrPlatformDimension, regionDimension } from "@/src/domain/dimensions";
+import type { AssetCategory, ManualBalance, PortfolioBackup, PriceSnapshot, Transaction } from "@/src/schema/backup";
 
 export type TimelineBreakdowns = {
   category: Record<string, number>;
@@ -67,8 +68,8 @@ function buildLatestPoint(backup: PortfolioBackup, date: string): PortfolioTimel
 function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoint {
   const investedBreakdown = emptyBreakdowns();
   let invested = 0;
-  const units = new Map<string, number>();
-  const capitalizedValue = new Map<string, number>();
+  const units = new Map<string, PositionQuantity>();
+  const capitalizedValue = new Map<string, PositionValue>();
 
   for (const tx of backup.transactions.filter((item) => item.date <= date).sort((a, b) => a.date.localeCompare(b.date))) {
     const converted = tryConvertToBase(tx.amount, tx.currency, backup, tx.date);
@@ -86,63 +87,63 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
       addBreakdowns(investedBreakdown, dimensions, -convertedPortfolioFlow);
     }
 
+    const key = positionKey(tx.accountId, tx.instrumentId);
     if (tx.quantity !== undefined) {
-      const previous = units.get(tx.instrumentId) ?? 0;
-      if (unitInTypes.has(tx.type)) units.set(tx.instrumentId, previous + Math.abs(tx.quantity));
-      if (unitOutTypes.has(tx.type)) units.set(tx.instrumentId, previous - Math.abs(tx.quantity));
+      const previous = units.get(key) ?? { accountId: tx.accountId, instrumentId: tx.instrumentId, quantity: 0 };
+      if (unitInTypes.has(tx.type)) previous.quantity += Math.abs(tx.quantity);
+      if (unitOutTypes.has(tx.type)) previous.quantity -= Math.abs(tx.quantity);
+      units.set(key, previous);
     }
 
-    if (amount !== undefined && tx.type === "interest_accrual") {
-      capitalizedValue.set(tx.instrumentId, (capitalizedValue.get(tx.instrumentId) ?? 0) + amount);
-    }
-    if (amount !== undefined && cashInTypes.has(tx.type) && isCapitalizedAccount(tx, backup)) {
-      capitalizedValue.set(tx.instrumentId, (capitalizedValue.get(tx.instrumentId) ?? 0) + amount);
+    if (amount !== undefined && (tx.type === "interest_accrual" || (cashInTypes.has(tx.type) && isCapitalizedAccount(tx, backup)))) {
+      const previous = capitalizedValue.get(key) ?? { accountId: tx.accountId, instrumentId: tx.instrumentId, value: 0 };
+      previous.value += amount;
+      capitalizedValue.set(key, previous);
     }
     if (amount !== undefined && cashOutTypes.has(tx.type) && isCapitalizedAccount(tx, backup)) {
-      capitalizedValue.set(tx.instrumentId, (capitalizedValue.get(tx.instrumentId) ?? 0) - amount);
+      const previous = capitalizedValue.get(key) ?? { accountId: tx.accountId, instrumentId: tx.instrumentId, value: 0 };
+      previous.value -= amount;
+      capitalizedValue.set(key, previous);
     }
   }
 
   const currentBreakdown = emptyBreakdowns();
   const activePositions = new Set<string>();
   const valuedPositions = new Set<string>();
-  const valuedInstruments = new Set<string>();
   let current = 0;
 
-  for (const [instrumentId, quantity] of units.entries()) {
-    if (Math.abs(quantity) < 0.000001) continue;
-    activePositions.add("instrument:" + instrumentId);
-    const price = latestPrice(backup.priceSnapshots, instrumentId, date);
+  for (const [key, position] of units.entries()) {
+    if (Math.abs(position.quantity) < 0.000001) continue;
+    activePositions.add(key);
+    const price = latestPrice(backup.priceSnapshots, position.instrumentId, date);
     if (!price) continue;
-    const value = tryConvertToBase(quantity * price.price, price.currency, backup, date);
+    const value = tryConvertToBase(position.quantity * price.price, price.currency, backup, date);
     if (value === undefined) continue;
-    const dimensions = instrumentDimensions(instrumentId, backup);
+    const dimensions = instrumentDimensions(position.instrumentId, backup, position.accountId);
     current += value;
     addBreakdowns(currentBreakdown, dimensions, value);
-    valuedInstruments.add(instrumentId);
-    valuedPositions.add("instrument:" + instrumentId);
+    valuedPositions.add(key);
   }
 
-  for (const [instrumentId, value] of capitalizedValue.entries()) {
-    if (value <= 0) continue;
-    activePositions.add("instrument:" + instrumentId);
-    if (valuedInstruments.has(instrumentId)) continue;
-    const dimensions = instrumentDimensions(instrumentId, backup);
-    current += value;
-    addBreakdowns(currentBreakdown, dimensions, value);
-    valuedInstruments.add(instrumentId);
-    valuedPositions.add("instrument:" + instrumentId);
+  for (const [key, position] of capitalizedValue.entries()) {
+    if (position.value <= 0) continue;
+    activePositions.add(key);
+    if (valuedPositions.has(key)) continue;
+    const dimensions = instrumentDimensions(position.instrumentId, backup, position.accountId);
+    current += position.value;
+    addBreakdowns(currentBreakdown, dimensions, position.value);
+    valuedPositions.add(key);
   }
 
   for (const balance of backup.manualBalances.filter((item) => item.asOfDate <= date)) {
-    const positionKey = balance.instrumentId ? "instrument:" + balance.instrumentId : "balance:" + balance.id;
-    activePositions.add(positionKey);
-    if (balance.instrumentId && valuedInstruments.has(balance.instrumentId)) continue;
+    const key = balance.instrumentId ? positionKey(balance.accountId, balance.instrumentId) : "balance:" + balance.id;
+    activePositions.add(key);
+    if (valuedPositions.has(key)) continue;
     const value = tryConvertToBase(balance.value, balance.currency, backup, date);
     if (value === undefined) continue;
     current += value;
     addBreakdowns(currentBreakdown, balanceDimensions(balance, backup), value);
-    valuedPositions.add(positionKey);
+    valuedPositions.add(key);
   }
 
   const hasCompleteValuation = activePositions.size > 0 && valuedPositions.size === activePositions.size;
@@ -230,12 +231,12 @@ function transactionDimensions(tx: Transaction, backup: PortfolioBackup): Dimens
 
 function instrumentDimensions(instrumentId: string, backup: PortfolioBackup, accountId?: string): Dimensions {
   const instrument = backup.instruments.find((item) => item.id === instrumentId);
-  const account = accountId ? backup.accounts.find((item) => item.id === accountId) : backup.accounts.find((item) => item.type === instrument?.type);
+  const account = accountId ? backup.accounts.find((item) => item.id === accountId) : undefined;
   return {
     category: instrument?.category ?? "Others",
-    region: region(instrument, account, instrument?.currency),
-    assetKind: assetKind(instrument, account),
-    issuer: cleanDimension(instrument?.issuer) ?? cleanDimension(account?.institution) ?? "Unassigned"
+    region: regionDimension(instrument, account, instrument?.currency),
+    assetKind: assetKindDimension(instrument, account),
+    issuer: issuerOrPlatformDimension(instrument, account)
   };
 }
 
@@ -244,18 +245,18 @@ function balanceDimensions(balance: ManualBalance, backup: PortfolioBackup): Dim
   const account = backup.accounts.find((item) => item.id === balance.accountId);
   return {
     category: balance.category,
-    region: region(instrument, account, balance.currency),
-    assetKind: assetKind(instrument, account),
-    issuer: cleanDimension(instrument?.issuer) ?? cleanDimension(account?.institution) ?? cleanDimension(balance.source.provider) ?? "Manual"
+    region: regionDimension(instrument, account, balance.currency),
+    assetKind: assetKindDimension(instrument, account),
+    issuer: issuerOrPlatformDimension(instrument, account, balance.source.provider)
   };
 }
 
+type PositionQuantity = { accountId: string; instrumentId: string; quantity: number };
+type PositionValue = { accountId: string; instrumentId: string; value: number };
 type Dimensions = { category: AssetCategory | string; region: string; assetKind: string; issuer: string };
 
-function cleanDimension(value?: string): string | undefined {
-  const cleaned = value?.trim();
-  if (!cleaned || cleaned === "0" || cleaned === "-" || /^n\/?a$/i.test(cleaned)) return undefined;
-  return cleaned;
+function positionKey(accountId: string, instrumentId: string): string {
+  return accountId + "::" + instrumentId;
 }
 
 function emptyBreakdowns(): TimelineBreakdowns {
@@ -281,26 +282,6 @@ function topBreakdown(record: Record<string, number>, limit: number): Record<str
   return Object.fromEntries(Object.entries(record).sort((a, b) => b[1] - a[1]).slice(0, limit));
 }
 
-function assetKind(instrument?: Instrument, account?: Account): string {
-  const type = instrument?.type ?? account?.type;
-  if (type === "mutual_fund") return "Mutual Fund";
-  if (type === "indian_stock" || type === "us_stock") return "Direct Stock";
-  if (type === "cash") return "Cash";
-  if (type === "fd") return "Fixed Deposit";
-  if (type === "ppf") return "PPF";
-  if (type === "ssy") return "SSY";
-  if (type === "nps") return "NPS";
-  if (type === "epf") return "PF";
-  if (type === "gold") return "Gold";
-  if (type === "espp") return "ESPP";
-  return "Other";
-}
-
-function region(instrument?: Instrument, account?: Account, currency?: string): string {
-  if (instrument?.country === "US" || account?.currency === "USD" || currency === "USD") return "US";
-  if (instrument?.country === "IN" || account?.currency === "INR" || currency === "INR") return "India";
-  return "Other";
-}
 
 function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;

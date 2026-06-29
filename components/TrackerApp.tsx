@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, Camera, Database, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, ReceiptText, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Table2, Target, TrendingDown, TrendingUp, Upload } from "lucide-react";
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase, type HoldingInsight } from "@/src/domain/analytics";
 import { deleteImportRunFromBackup, deleteTransactionFromBackup } from "@/src/domain/deleteRecords";
 import { assetSubtypeDisplayLabel, assetSubtypeLabel } from "@/src/domain/assetSubtype";
@@ -10,6 +10,7 @@ import { calculateDashboardPerformance } from "@/src/domain/dashboardPerformance
 import { applyManualEntry, manualEntryActionsForAccount, type ManualEntryAction } from "@/src/domain/manualEntry";
 import { buildPortfolioTimeline, type PortfolioTimelinePoint } from "@/src/domain/performanceTimeline";
 import { buildGoal, calculateGoalProgress, calculateMappedGoalXirr, createGoalMapping, recalculateGoalTarget, summarizeGoalProgress, type GoalProgress, type GoalSummary } from "@/src/domain/goalAnalytics";
+import { goalExpensesForGoal, mergeGoalExpenses, parseGoalExpenseCsv, summarizeGoalExpenses } from "@/src/domain/goalExpenses";
 import { buildSnapshotHistory, createPortfolioSnapshot, snapshotAnalytics, type SnapshotAnalytics, type SnapshotTimelinePoint } from "@/src/domain/snapshots";
 import { calculatePortfolioTaxReport, getTaxProfile, updateTaxProfile, type TaxProfile } from "@/src/domain/tax";
 import { formatUsdEquivalent, getDisplayCurrencySettings, updateDisplayCurrencySettings, type DisplayCurrencySettings } from "@/src/domain/displayCurrency";
@@ -26,9 +27,11 @@ import { commitManualCsvImport, previewManualCsvImport, type ManualImportPreview
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
-import { createEmptyBackup, parseBackup, type AssetCategory, type Goal, type ManualBalance, type PortfolioBackup, type TaperMode, type Transaction } from "@/src/schema/backup";
+import { createEmptyBackup, parseBackup, type AssetCategory, type Goal, type GoalExpense, type ImportRun, type ManualBalance, type PortfolioBackup, type TaperMode, type Transaction } from "@/src/schema/backup";
 
 const sampleTemplate = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes\ncash-main,2026-06-22,Manual,cash,Cash Wallet,10000,INR,Cash,,,,liquid cash\nespp-contribution,2026-06-22,Employer,espp,ESPP Contribution,2000,USD,Equity,2000,USD,2026-06-22,total contribution only\nppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,300000,INR,Debt,250000,INR,2026-06-22,latest known balance`;
+
+const sampleGoalExpenseCsv = `expense,amount\nGrocery,50000\nVegetable,50000\nMilk,20000\nFuel,20000\nOthers,1559`;
 
 const categoryOrder: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
 const chartColors = ["#0e7490", "#2563eb", "#8b5cf6", "#d97706", "#059669", "#dc2626", "#64748b", "#0891b2"];
@@ -423,12 +426,97 @@ function installCollapsibleSections(root: HTMLElement, view: string, subScope: s
   }
 }
 
+function installInteractiveTables(root: HTMLElement): () => void {
+  const cleanups: Array<() => void> = [];
+  const tables = Array.from(root.querySelectorAll<HTMLTableElement>(".table-wrap table"));
+  for (const table of tables) {
+    const wrap = table.closest<HTMLElement>(".table-wrap");
+    if (!wrap || wrap.dataset.interactiveTable === "true") continue;
+    const body = table.tBodies.item(0);
+    const headerRow = table.tHead?.rows.item(0);
+    if (!body || !headerRow || body.rows.length < 2) continue;
+    wrap.dataset.interactiveTable = "true";
+    wrap.classList.add("interactive-table-wrap");
+    wrap.tabIndex = 0;
+    wrap.setAttribute("aria-label", "Scrollable sortable data table");
+    const hint = document.createElement("div");
+    hint.className = "table-interaction-hint";
+    hint.textContent = "Sort columns by selecting a header. Wide audit tables scroll inside this panel.";
+    wrap.parentElement?.insertBefore(hint, wrap);
+    cleanups.push(() => hint.remove());
+    Array.from(headerRow.cells).forEach((cell, columnIndex) => {
+      const text = cell.textContent?.trim() ?? "Column";
+      if (!text || cell.querySelector("button, input, select")) return;
+      cell.classList.add("sortable-column");
+      cell.tabIndex = 0;
+      cell.setAttribute("role", "button");
+      cell.setAttribute("aria-sort", "none");
+      cell.title = "Sort by " + text;
+      const sort = () => {
+        const nextDirection = cell.dataset.sortDirection === "asc" ? "desc" : "asc";
+        for (const other of Array.from(headerRow.cells)) {
+          other.classList.remove("sort-asc", "sort-desc");
+          other.setAttribute("aria-sort", "none");
+          delete (other as HTMLElement).dataset.sortDirection;
+        }
+        cell.dataset.sortDirection = nextDirection;
+        cell.classList.add(nextDirection === "asc" ? "sort-asc" : "sort-desc");
+        cell.setAttribute("aria-sort", nextDirection === "asc" ? "ascending" : "descending");
+        const rows = Array.from(body.rows).map((row, originalIndex) => ({ row, originalIndex }));
+        rows.sort((left, right) => compareTableCellText(left.row.cells.item(columnIndex)?.textContent ?? "", right.row.cells.item(columnIndex)?.textContent ?? "", left.originalIndex, right.originalIndex) * (nextDirection === "asc" ? 1 : -1));
+        for (const item of rows) body.appendChild(item.row);
+      };
+      const onClick = () => sort();
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        sort();
+      };
+      cell.addEventListener("click", onClick);
+      cell.addEventListener("keydown", onKeyDown);
+      cleanups.push(() => {
+        cell.removeEventListener("click", onClick);
+        cell.removeEventListener("keydown", onKeyDown);
+      });
+    });
+    cleanups.push(() => {
+      wrap.classList.remove("interactive-table-wrap");
+      delete wrap.dataset.interactiveTable;
+      wrap.removeAttribute("tabindex");
+      wrap.removeAttribute("aria-label");
+    });
+  }
+  return () => cleanups.forEach((cleanup) => cleanup());
+}
+
+function compareTableCellText(left: string, right: string, leftIndex: number, rightIndex: number): number {
+  const leftNumber = tableSortNumber(left);
+  const rightNumber = tableSortNumber(right);
+  if (leftNumber !== undefined && rightNumber !== undefined && leftNumber !== rightNumber) return leftNumber - rightNumber;
+  const compared = left.trim().localeCompare(right.trim(), undefined, { numeric: true, sensitivity: "base" });
+  return compared === 0 ? leftIndex - rightIndex : compared;
+}
+
+function tableSortNumber(value: string): number | undefined {
+  const normalized = value.replace(/,/g, "").trim();
+  const match = normalized.match(/[-+]?\d*\.?\d+/);
+  if (!match) return undefined;
+  const parsed = Number(match[0]);
+  if (!Number.isFinite(parsed)) return undefined;
+  if (/cr/i.test(normalized)) return parsed * 10000000;
+  if (/l|lakh/i.test(normalized)) return parsed * 100000;
+  if (/%/.test(normalized)) return parsed;
+  return parsed;
+}
+
+
 function GoalTermLabel({ children, help }: { children: string; help: string }) {
   return <span className="term-label" title={help} aria-label={children + ": " + help} tabIndex={0}>{children}</span>;
 }
 
 export function TrackerApp() {
   const [backup, setBackup] = useState<PortfolioBackup>(() => createEmptyBackup("INR"));
+  const [draftBackup, setDraftBackup] = useState<PortfolioBackup | null>(null);
   const [view, setView] = useState<View>("dashboard");
   const [csv, setCsv] = useState(sampleTemplate);
   const [manualImportPreview, setManualImportPreview] = useState<ManualImportPreview | null>(null);
@@ -446,6 +534,7 @@ export function TrackerApp() {
   const [stagedNps, setStagedNps] = useState<NpsCanonicalImport[] | null>(null);
   const [status, setStatus] = useState("Empty local portfolio. Import a manual CSV, CAS PDF, INDMoney XLSX, or restore a backup.");
   const [importLabel, setImportLabel] = useState("");
+  const [replaceImportId, setReplaceImportId] = useState("");
   const [fxRate, setFxRate] = useState("");
   const [fxDate, setFxDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [fxCsv, setFxCsv] = useState("date,rate\n2026-06-22,83.50");
@@ -486,7 +575,12 @@ export function TrackerApp() {
   const [snapshotName, setSnapshotName] = useState(() => "Snapshot " + new Date().toISOString().slice(0, 10));
   const [snapshotNotes, setSnapshotNotes] = useState("");
   const [selectedSnapshotId, setSelectedSnapshotId] = useState("");
+  const [goalExpenseCsv, setGoalExpenseCsv] = useState(sampleGoalExpenseCsv);
+  const [goalExpenseGoalId, setGoalExpenseGoalId] = useState("");
+  const [goalExpenseBaseDate, setGoalExpenseBaseDate] = useState(() => todayIso());
   const [selectedHoldingDetailId, setSelectedHoldingDetailId] = useState("");
+  const editSessionActive = draftBackup !== null;
+  const editBackup = draftBackup ?? backup;
 
   useEffect(() => {
     const root = document.querySelector<HTMLElement>(".main");
@@ -503,6 +597,25 @@ export function TrackerApp() {
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
       observer.disconnect();
+    };
+  }, [analyticsScope, analyticsTab, selectedGoalId, view]);
+
+  useEffect(() => {
+    const root = document.querySelector<HTMLElement>(".main");
+    if (!root) return;
+    const cleanups: Array<() => void> = [];
+    let frame = 0;
+    const run = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => cleanups.push(installInteractiveTables(root)));
+    };
+    run();
+    const observer = new MutationObserver(run);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      cleanups.forEach((cleanup) => cleanup());
     };
   }, [analyticsScope, analyticsTab, selectedGoalId, view]);
   const [taxFinancialYear, setTaxFinancialYear] = useState(() => currentIndianFinancialYear());
@@ -675,9 +788,17 @@ export function TrackerApp() {
   const assetKindTimelineKeys = topTimelineKeys(timeline.points, "assetKind", 6);
   const issuerTimelineKeys = topTimelineKeys(timeline.points, "issuer", 5);
 
+  function blockIfDraftEditing(action: string): boolean {
+    if (!editSessionActive) return false;
+    setErrors(["Finish or cancel draft editing before " + action + "."]);
+    setStatus("Draft editing active. Press Done Editing or Cancel before changing imports, refresh, restore, or settings.");
+    return true;
+  }
+
   function previewManualCsv() {
+    if (blockIfDraftEditing("previewing imports")) return;
     try {
-      const preview = previewManualCsvImport(backup, csv, { importId: `manual_preview_${Date.now()}`, fileName: "manual-template.csv", label: importLabel.trim() || "Manual balance CSV" });
+      const preview = previewManualCsvImport(backup, csv, { importId: `manual_preview_${Date.now()}`, fileName: "manual-template.csv", label: importLabel.trim() || "Manual balance CSV", replaceImportId: replaceImportId || undefined });
       setManualImportPreview(preview);
       setErrors(preview.errors.map((error) => `Row ${error.row}: ${error.message}`));
       setStatus(`Manual CSV preview: ${preview.effective.addedBalances} new holding(s), ${preview.effective.updatedBalances} updated holding(s), ${preview.effective.addedTransactions} transaction(s), net worth delta ${formatMoney(preview.deltas.netWorth, backup.baseCurrency)}. Nothing committed yet.`);
@@ -689,12 +810,14 @@ export function TrackerApp() {
   }
 
   async function importCsv() {
+    if (blockIfDraftEditing("committing imports")) return;
     const importId = `manual_${Date.now()}`;
-    const result = commitManualCsvImport(backup, csv, { importId, fileName: "manual-template.csv", label: importLabel.trim() || "Manual balance CSV" });
+    const result = commitManualCsvImport(backup, csv, { importId, fileName: "manual-template.csv", label: importLabel.trim() || "Manual balance CSV", replaceImportId: replaceImportId || undefined });
     setBackup(result.backup);
     setManualImportPreview(null);
     setErrors(result.errors.map((error) => `Row ${error.row}: ${error.message}`));
-    const message = `Manual CSV committed: ${result.addedBalances} holding(s), ${result.addedTransactions} transaction(s), ${result.addedPrices} price row(s); ${result.skippedDuplicates} duplicate(s) skipped.`;
+    const message = `${replaceImportId ? "Manual CSV replaced" : "Manual CSV committed"}: ${result.addedBalances} holding(s), ${result.addedTransactions} transaction(s), ${result.addedPrices} price row(s); ${result.skippedDuplicates} duplicate(s) skipped.`;
+    if (result.errors.length === 0) setReplaceImportId("");
     if (result.errors.length === 0 && shouldRefreshAfterImport(result.backup, result.addedTransactions)) {
       await refreshMarketDataFor(result.backup, message);
     } else {
@@ -725,6 +848,7 @@ export function TrackerApp() {
 
   async function restoreBackup(file: File | undefined) {
     if (!file) return;
+    if (blockIfDraftEditing("restoring a backup")) return;
     try {
       const parsed = parseBackup(JSON.parse(await file.text()));
       setBackup(parsed);
@@ -736,6 +860,7 @@ export function TrackerApp() {
   }
 
   async function inspectNativeFile(fileList: FileList | File[] | undefined) {
+    if (blockIfDraftEditing("staging native files")) return;
     const files = Array.from(fileList ?? []);
     const file = files[0];
     if (!file) return;
@@ -787,6 +912,7 @@ export function TrackerApp() {
   }
 
   async function parseManualNativeInBrowser() {
+    if (blockIfDraftEditing("parsing manual CSV files")) return;
     const nativeFile = nativeFiles[0];
     if (!nativeFile) {
       setErrors(["Select a manual CSV first."]);
@@ -803,9 +929,9 @@ export function TrackerApp() {
     try {
       const importId = "manual_" + Date.now();
       const text = await nativeFile.text();
-      const preview = previewManualCsvImport(backup, text, { importId: importId + "_preview", fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name });
+      const preview = previewManualCsvImport(backup, text, { importId: importId + "_preview", fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name, replaceImportId: replaceImportId || undefined });
       setManualImportPreview(preview);
-      const result = commitManualCsvImport(backup, text, { importId, fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name });
+      const result = commitManualCsvImport(backup, text, { importId, fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name, replaceImportId: replaceImportId || undefined });
       setBackup(result.backup);
       setErrors(result.errors.map((error) => "Row " + error.row + ": " + error.message));
       const message = "Manual CSV committed: " + result.addedBalances + " holding(s), " + result.addedTransactions + " transaction(s), " + result.addedPrices + " price row(s) added; " + result.skippedDuplicates + " duplicate(s) skipped.";
@@ -814,6 +940,7 @@ export function TrackerApp() {
       } else {
         setStatus(message);
       }
+      if (result.errors.length === 0) setReplaceImportId("");
     } catch (error) {
       setErrors([error instanceof Error ? error.message : "Unable to parse manual portfolio file"]);
       setStatus("Manual portfolio import failed.");
@@ -821,6 +948,7 @@ export function TrackerApp() {
   }
 
   async function parseCasPdfInBrowser() {
+    if (blockIfDraftEditing("parsing CAS PDFs")) return;
     const nativeFile = nativeFiles[0];
     if (!nativeFile) {
       setErrors(["Select a CAS PDF first."]);
@@ -852,6 +980,7 @@ export function TrackerApp() {
   }
 
   async function parseIndMoneyXlsxInBrowser() {
+    if (blockIfDraftEditing("parsing INDMoney files")) return;
     const nativeFile = nativeFiles[0];
     if (!nativeFile) {
       setErrors(["Select an INDMoney XLSX first."]);
@@ -881,6 +1010,7 @@ export function TrackerApp() {
   }
 
   async function parseEpfoPdfInBrowser() {
+    if (blockIfDraftEditing("parsing PF files")) return;
     const files = nativeFiles.filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
     if (files.length === 0) {
       setErrors(["Select one or more PF PDF files first."]);
@@ -916,6 +1046,7 @@ export function TrackerApp() {
   }
 
   async function parseNpsCsvInBrowser() {
+    if (blockIfDraftEditing("parsing NPS files")) return;
     const files = nativeFiles.filter((file) => file.type === "text/csv" || file.name.toLowerCase().endsWith(".csv"));
     if (files.length === 0) {
       setErrors(["Select one or more NPS CSV files first."]);
@@ -950,44 +1081,57 @@ export function TrackerApp() {
   }
 
   async function commitStagedCas() {
+    if (blockIfDraftEditing("committing CAS imports")) return;
     if (!stagedCas) return;
-    const next = applyCanonicalCasImport(backup, withImportLabel(stagedCas, importLabel.trim()));
+    const replaceId = replaceImportId || undefined;
+    const next = applyCanonicalCasImport(backup, withImportLabel(stagedCas, importLabel.trim()), { replaceImportId: replaceId });
     setBackup(next);
     setErrors([]);
     setStagedCas(null);
-    await refreshMarketDataFor(next, `CAS committed: ${stagedCas.transactions.length} transactions and ${stagedCas.manualBalances.length} balances added.`);
+    setReplaceImportId("");
+    await refreshMarketDataFor(next, (replaceId ? "CAS replaced" : "CAS committed") + ": " + stagedCas.transactions.length + " transactions and " + stagedCas.manualBalances.length + " balances added.");
   }
 
   async function commitStagedIndMoney() {
+    if (blockIfDraftEditing("committing INDMoney imports")) return;
     if (!stagedInd) return;
-    const next = applyCanonicalIndMoneyImport(backup, withImportLabel(stagedInd, importLabel.trim()));
+    const replaceId = replaceImportId || undefined;
+    const next = applyCanonicalIndMoneyImport(backup, withImportLabel(stagedInd, importLabel.trim()), { replaceImportId: replaceId });
     setBackup(next);
     setErrors([]);
     setStagedInd(null);
-    await refreshMarketDataFor(next, `INDMoney committed: ${stagedInd.transactions.length} transactions and ${stagedInd.manualBalances.length} balances added.`);
+    setReplaceImportId("");
+    await refreshMarketDataFor(next, (replaceId ? "INDMoney replaced" : "INDMoney committed") + ": " + stagedInd.transactions.length + " transactions and " + stagedInd.manualBalances.length + " balances added.");
   }
 
   function commitStagedEpfo() {
+    if (blockIfDraftEditing("committing PF imports")) return;
     if (!stagedEpfo || stagedEpfo.length === 0) return;
-    const next = stagedEpfo.reduce((current, imported) => applyCanonicalEpfoImport(current, withImportLabel(imported, importLabel.trim())), backup);
+    const replaceId = replaceImportId || undefined;
+    const next = stagedEpfo.reduce((current, imported, index) => applyCanonicalEpfoImport(current, withImportLabel(imported, importLabel.trim()), { replaceImportId: index === 0 ? replaceId : undefined }), backup);
     setBackup(next);
     setErrors([]);
     setStagedEpfo(null);
+    setReplaceImportId("");
     const transactionCount = stagedEpfo.reduce((sum, imported) => sum + imported.transactions.length, 0);
-    setStatus(`PF committed: ${stagedEpfo.length} file(s), ${transactionCount} transactions; latest closing balances retained.`);
+    setStatus((replaceId ? "PF replaced" : "PF committed") + ": " + stagedEpfo.length + " file(s), " + transactionCount + " transactions; latest closing balances retained.");
   }
 
   function commitStagedNps() {
+    if (blockIfDraftEditing("committing NPS imports")) return;
     if (!stagedNps || stagedNps.length === 0) return;
-    const next = stagedNps.reduce((current, imported) => applyCanonicalNpsImport(current, withImportLabel(imported, importLabel.trim())), backup);
+    const replaceId = replaceImportId || undefined;
+    const next = stagedNps.reduce((current, imported, index) => applyCanonicalNpsImport(current, withImportLabel(imported, importLabel.trim()), { replaceImportId: index === 0 ? replaceId : undefined }), backup);
     setBackup(next);
     setErrors([]);
     setStagedNps(null);
+    setReplaceImportId("");
     const transactionCount = stagedNps.reduce((sum, imported) => sum + imported.transactions.length, 0);
-    setStatus(`NPS committed: ${stagedNps.length} file(s), ${transactionCount} transactions; latest scheme balances retained.`);
+    setStatus((replaceId ? "NPS replaced" : "NPS committed") + ": " + stagedNps.length + " file(s), " + transactionCount + " transactions; latest scheme balances retained.");
   }
 
   async function refreshMarketData() {
+    if (blockIfDraftEditing("refreshing market data")) return;
     await refreshMarketDataFor(backup);
   }
 
@@ -1047,6 +1191,7 @@ export function TrackerApp() {
   }
 
   function applyManualFxRate() {
+    if (blockIfDraftEditing("adding manual FX rates")) return;
     try {
       const snapshot = buildUsdInrSnapshot(Number(fxRate), fxDate, "manual_fx");
       setBackup((current) => ({
@@ -1062,6 +1207,7 @@ export function TrackerApp() {
   }
 
   function importFxCsvText() {
+    if (blockIfDraftEditing("importing FX CSV rates")) return;
     const parsed = parseUsdInrFxCsv(fxCsv);
     if (parsed.snapshots.length > 0) {
       setBackup((current) => ({
@@ -1075,6 +1221,7 @@ export function TrackerApp() {
   }
 
   async function importFxCsvFile(file: File | undefined) {
+    if (blockIfDraftEditing("importing FX CSV rates")) return;
     if (!file) return;
     const parsed = parseUsdInrFxCsv(await file.text());
     if (parsed.snapshots.length > 0) {
@@ -1088,22 +1235,56 @@ export function TrackerApp() {
     setStatus(`Imported ${parsed.snapshots.length} USD/INR rate(s) from ${file.name}.`);
   }
 
+  function beginDraftEdit(mode: "holdings" | "transactions") {
+    setDraftBackup(JSON.parse(JSON.stringify(backup)) as PortfolioBackup);
+    setHoldingEditMode(mode === "holdings");
+    setTransactionEditMode(mode === "transactions");
+    setStatus("Draft editing active. Analytics, tax, goals, and charts will refresh after Done Editing.");
+  }
+
+  function commitDraftEdit() {
+    if (!draftBackup) return;
+    try {
+      const parsed = parseBackup({ ...draftBackup, exportedAt: new Date().toISOString() });
+      setBackup(parsed);
+      setDraftBackup(null);
+      setHoldingEditMode(false);
+      setTransactionEditMode(false);
+      setErrors([]);
+      setStatus("Draft edits committed locally. Analytics recalculated once from the saved draft.");
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : "Draft edit failed backup schema validation"]);
+      setStatus("Draft edit was not committed. Fix the invalid field or cancel editing.");
+    }
+  }
+
+  function cancelDraftEdit() {
+    setDraftBackup(null);
+    setHoldingEditMode(false);
+    setTransactionEditMode(false);
+    setStatus("Draft edits discarded. Portfolio data was not changed.");
+  }
+
   function updateTaxProfileFromForm(patch: Partial<TaxProfile>) {
+    if (blockIfDraftEditing("changing tax settings")) return;
     setBackup((current) => updateTaxProfile(current, patch));
     setStatus("Tax profile updated locally. Export JSON to preserve the tax settings.");
   }
 
   function updateDisplayCurrencyFromForm(patch: Partial<DisplayCurrencySettings>) {
+    if (blockIfDraftEditing("changing display settings")) return;
     setBackup((current) => updateDisplayCurrencySettings(current, patch));
     setStatus("Display currency settings updated locally. Export JSON to preserve the setting.");
   }
 
   function updatePlanningSettingsFromForm(patch: PlanningSettingsPatch) {
+    if (blockIfDraftEditing("changing planning settings")) return;
     setBackup((current) => updatePlanningSettings(current, patch));
     setStatus("Planning assumptions updated locally. Real portfolio valuations are unchanged; export JSON to preserve assumptions.");
   }
 
   function resetPortfolio() {
+    if (blockIfDraftEditing("resetting the portfolio")) return;
     setBackup(createEmptyBackup("INR"));
     setErrors([]);
     setStatus("Portfolio reset locally.");
@@ -1112,7 +1293,7 @@ export function TrackerApp() {
   function updateBalance(balanceId: string, patch: Partial<ManualBalance>) {
     const now = new Date().toISOString();
     const taperOnlyEdit = Object.keys(patch).every((key) => key === "taperMode" || key === "taperFactor");
-    setBackup((current) => {
+    const apply = (current: PortfolioBackup): PortfolioBackup => {
       const editedBalance = current.manualBalances.find((balance) => balance.id === balanceId);
       return {
         ...current,
@@ -1120,7 +1301,13 @@ export function TrackerApp() {
         manualBalances: current.manualBalances.map((balance) => balance.id === balanceId ? { ...balance, ...patch, userModified: taperOnlyEdit ? balance.userModified : true, updatedAt: now } : balance),
         instruments: current.instruments.map((instrument) => editedBalance?.instrumentId === instrument.id && patch.category ? { ...instrument, category: patch.category, updatedAt: now } : instrument)
       };
-    });
+    };
+    if (draftBackup) {
+      setDraftBackup((current) => current ? apply(current) : current);
+      setStatus("Draft holding edit captured. Press Done Editing to recalculate analytics.");
+      return;
+    }
+    setBackup(apply);
     setStatus("Holding edit saved locally. Export backup to preserve browser edits outside this device.");
   }
 
@@ -1143,26 +1330,40 @@ export function TrackerApp() {
   }
 
   function deleteImport(importId: string) {
+    if (blockIfDraftEditing("deleting imports")) return;
     setBackup((current) => deleteImportRunFromBackup(current, importId));
     setStatus("Import deleted locally. Export backup to preserve this deletion outside this device.");
   }
 
   function deleteTransaction(transactionId: string) {
-    setBackup((current) => deleteTransactionFromBackup(current, transactionId));
+    const apply = (current: PortfolioBackup): PortfolioBackup => deleteTransactionFromBackup(current, transactionId);
+    if (draftBackup) {
+      setDraftBackup((current) => current ? apply(current) : current);
+      setStatus("Draft transaction delete captured. Press Done Editing to recalculate analytics.");
+      return;
+    }
+    setBackup(apply);
     setStatus("Transaction deleted locally. Add Entry holdings are reconciled when applicable.");
   }
 
   function updateTransaction(transactionId: string, patch: Partial<Transaction>) {
     const now = new Date().toISOString();
-    setBackup((current) => ({
+    const apply = (current: PortfolioBackup): PortfolioBackup => ({
       ...current,
       exportedAt: now,
       transactions: current.transactions.map((tx) => tx.id === transactionId ? { ...tx, ...patch, userModified: true, updatedAt: now } : tx)
-    }));
+    });
+    if (draftBackup) {
+      setDraftBackup((current) => current ? apply(current) : current);
+      setStatus("Draft transaction edit captured. Press Done Editing to recalculate analytics.");
+      return;
+    }
+    setBackup(apply);
     setStatus("Transaction edit saved locally. Export backup to preserve browser edits outside this device.");
   }
 
   async function addManualEntryFromForm() {
+    if (blockIfDraftEditing("adding manual entries")) return;
     const balance = backup.manualBalances.find((item) => item.id === entryHoldingId) ?? backup.manualBalances[0];
     if (!balance) {
       setErrors(["Import or create a holding before adding an entry."]);
@@ -1210,6 +1411,7 @@ export function TrackerApp() {
   }
 
   function addGoalFromForm() {
+    if (blockIfDraftEditing("adding goals")) return;
     try {
       const now = new Date().toISOString();
       const goal = buildGoal({
@@ -1238,27 +1440,82 @@ export function TrackerApp() {
   }
 
   function updateGoalRecord(goalId: string, patch: Partial<Goal>) {
+    if (blockIfDraftEditing("editing goals")) return;
+    applyGoalRecordPatches([{ goalId, patch }]);
+    setStatus("Goal updated locally. Export JSON to preserve this plan outside the browser.");
+  }
+
+  function updateGoalSettingsFromForm(patches: Array<{ goalId: string; patch: Partial<Goal> }>) {
+    if (blockIfDraftEditing("changing goal settings")) return;
+    applyGoalRecordPatches(patches);
+    setStatus("Goal settings applied locally. Export JSON to preserve the assumptions.");
+  }
+
+  function applyGoalRecordPatches(patches: Array<{ goalId: string; patch: Partial<Goal> }>) {
     const now = new Date().toISOString();
+    const patchMap = new Map(patches.map((item) => [item.goalId, item.patch]));
     setBackup((current) => ({
       ...current,
       exportedAt: now,
       goals: current.goals.map((goal) => {
-        if (goal.id !== goalId) return goal;
+        const patch = patchMap.get(goal.id);
+        if (!patch) return goal;
         const next = { ...goal, ...patch, updatedAt: now };
         if (typeof next.name === "string" && next.name.trim().length === 0) next.name = "Goal";
-        return recalculateGoalTarget(next);
+        const expenseRows = goalExpensesForGoal(current, next.id);
+        return recalculateGoalTarget(next, expenseRows);
       })
     }));
-    setStatus("Goal updated locally. Export JSON to preserve this plan outside the browser.");
+  }
+
+  function importGoalExpensesFromText() {
+    if (blockIfDraftEditing("importing goal expenses")) return;
+    applyGoalExpensesCsv(goalExpenseCsv, goalExpenseGoalId || backup.goals[0]?.id, goalExpenseBaseDate);
+  }
+
+  async function importGoalExpensesFromFile(file: File | undefined) {
+    if (!file) return;
+    if (blockIfDraftEditing("importing goal expenses")) return;
+    const text = await file.text();
+    setGoalExpenseCsv(text);
+    applyGoalExpensesCsv(text, goalExpenseGoalId || backup.goals[0]?.id, goalExpenseBaseDate);
+  }
+
+  function applyGoalExpensesCsv(text: string, goalId: string | undefined, baseDate: string) {
+    if (backup.goals.length === 0) {
+      setErrors(["Create a goal before importing goal expenses."]);
+      return;
+    }
+    const parsed = parseGoalExpenseCsv(text, backup, { goalId, baseDate });
+    if (parsed.errors.length > 0) {
+      setErrors(parsed.errors);
+      setStatus("Goal expense import failed.");
+      return;
+    }
+    const now = new Date().toISOString();
+    setBackup((current) => {
+      const goalExpenses = mergeGoalExpenses(current.goalExpenses ?? [], parsed.rows, parsed.affectedGoalIds, now);
+      return {
+        ...current,
+        exportedAt: now,
+        goalExpenses,
+        goals: current.goals.map((goal) => recalculateGoalTarget(goal, goalExpenses.filter((row) => row.goalId === goal.id)))
+      };
+    });
+    setErrors([]);
+    const affectedNames = parsed.affectedGoalIds.map((id) => backup.goals.find((goal) => goal.id === id)?.name ?? id).join(", ");
+    setStatus("Imported " + parsed.rows.length + " goal expense row(s) for " + affectedNames + ". Export JSON to preserve them.");
   }
 
   function deleteGoalRecord(goalId: string) {
+    if (blockIfDraftEditing("deleting goals")) return;
     const now = new Date().toISOString();
     setBackup((current) => ({
       ...current,
       exportedAt: now,
       goals: current.goals.filter((goal) => goal.id !== goalId),
-      goalMappings: current.goalMappings.filter((mapping) => mapping.goalId !== goalId)
+      goalMappings: current.goalMappings.filter((mapping) => mapping.goalId !== goalId),
+      goalExpenses: (current.goalExpenses ?? []).filter((expense) => expense.goalId !== goalId)
     }));
     setSelectedGoalId((current) => current === goalId ? "" : current);
     setMappingGoalId((current) => current === goalId ? "" : current);
@@ -1266,6 +1523,7 @@ export function TrackerApp() {
   }
 
   function upsertGoalMappingFromForm() {
+    if (blockIfDraftEditing("editing goal mappings")) return;
     const goalId = mappingGoalId || selectedGoalId || backup.goals[0]?.id;
     const balanceId = mappingBalanceId || backup.manualBalances[0]?.id;
     if (!goalId || !balanceId) {
@@ -1289,6 +1547,7 @@ export function TrackerApp() {
   }
 
   function deleteGoalMapping(mappingId: string) {
+    if (blockIfDraftEditing("deleting goal mappings")) return;
     const now = new Date().toISOString();
     setBackup((current) => ({
       ...current,
@@ -1305,6 +1564,7 @@ export function TrackerApp() {
   }
 
   function takePortfolioSnapshot() {
+    if (blockIfDraftEditing("taking snapshots")) return;
     const snapshot = createPortfolioSnapshot(backup, { name: snapshotName, notes: snapshotNotes });
     setBackup((current) => ({
       ...current,
@@ -1319,6 +1579,7 @@ export function TrackerApp() {
   }
 
   function deletePortfolioSnapshot(snapshotId: string) {
+    if (blockIfDraftEditing("deleting snapshots")) return;
     setBackup((current) => ({
       ...current,
       exportedAt: new Date().toISOString(),
@@ -1355,13 +1616,15 @@ export function TrackerApp() {
             <p>{status}</p>
           </div>
           <div className="actions">
-            <button onClick={refreshMarketData} title="Refresh live and historical NAV, quotes, and FX"><RefreshCw size={16} /> Refresh</button>
-            <button onClick={exportBackup} title="Export canonical JSON backup"><Download size={16} /> Export</button>
-            <button onClick={resetPortfolio} title="Reset local portfolio"><RotateCcw size={16} /> Reset</button>
+            <button onClick={refreshMarketData} disabled={editSessionActive} title={editSessionActive ? "Finish or cancel draft editing before refreshing." : "Refresh live and historical NAV, quotes, and FX"}><RefreshCw size={16} /> Refresh</button>
+            <button onClick={exportBackup} disabled={editSessionActive} title={editSessionActive ? "Finish or cancel draft editing before exporting." : "Export canonical JSON backup"}><Download size={16} /> Export</button>
+            <button onClick={resetPortfolio} disabled={editSessionActive} title={editSessionActive ? "Finish or cancel draft editing before resetting." : "Reset local portfolio"}><RotateCcw size={16} /> Reset</button>
           </div>
         </header>
 
         {errors.length > 0 && <div className="error-list global-errors">{errors.map((error) => <div key={error}>{error}</div>)}</div>}
+
+        {editSessionActive && <div className="draft-edit-banner"><div><strong>Draft editing active</strong><span>Analytics, tax, goals, charts, refresh, export, and reset stay frozen until you finish editing.</span></div><div className="actions"><button className="primary" onClick={commitDraftEdit}>Done Editing</button><button onClick={cancelDraftEdit}>Cancel</button></div></div>}
 
         {view === "dashboard" && (
           <section className="analytics-command pro-analytics">
@@ -1439,7 +1702,7 @@ export function TrackerApp() {
                   <ChartCard title="Allocation Map"><DonutChart data={chartData.allocation} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="By Asset Type"><HorizontalBar data={chartData.assetType} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="By Region"><HorizontalBar data={chartData.region} currency={backup.baseCurrency} /></ChartCard>
-                  <ChartCard title="Top AMC / Issuer"><HorizontalBar data={chartData.issuer} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Top AMC / Platform"><HorizontalBar data={chartData.issuer} currency={backup.baseCurrency} /></ChartCard>
                   <ChartCard title="Data Source Mix"><HorizontalBar data={chartData.provider} currency={backup.baseCurrency} /></ChartCard>
                 </div>
                 <AssetClassesPanel insights={assetClassInsights} currency={backup.baseCurrency} scopeLabel={scopedAnalytics.label} />
@@ -1464,7 +1727,7 @@ export function TrackerApp() {
                       <ChartCard title="Asset Class Growth"><BreakdownGrowthChart points={timeline.points} field="category" keys={categoryTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
                       <ChartCard title="Region Growth"><BreakdownGrowthChart points={timeline.points} field="region" keys={regionTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
                       <ChartCard title="Asset Type Growth"><BreakdownGrowthChart points={timeline.points} field="assetKind" keys={assetKindTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                      <ChartCard title="Issuer / AMC Growth"><BreakdownGrowthChart points={timeline.points} field="issuer" keys={issuerTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                      <ChartCard title="AMC / Platform Growth"><BreakdownGrowthChart points={timeline.points} field="issuer" keys={issuerTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
                       <ChartCard title="Institution Accounts"><HorizontalBar data={chartData.institution} currency={backup.baseCurrency} /></ChartCard>
                     </div>
                   </>
@@ -1489,7 +1752,7 @@ export function TrackerApp() {
               <div className="section-head">
                 <div><h2>Holdings</h2><p>Search, sort, inspect cost/profit, and turn on edit mode to change every visible field inline.</p></div>
                 <div className="toolbar">
-                  <button className={holdingEditMode ? "primary" : ""} onClick={() => setHoldingEditMode(!holdingEditMode)}><Pencil size={15} /> {holdingEditMode ? "Done Editing" : "Edit Holdings"}</button>
+                  <button className={holdingEditMode ? "primary" : ""} onClick={() => holdingEditMode ? commitDraftEdit() : beginDraftEdit("holdings")} disabled={transactionEditMode}><Pencil size={15} /> {holdingEditMode ? "Done Editing" : "Edit Holdings"}</button>{holdingEditMode && <button onClick={cancelDraftEdit}>Cancel</button>}
                   <label className="search-box"><Search size={15} /><input value={holdingQuery} onChange={(event) => setHoldingQuery(event.target.value)} placeholder="Search holdings" /></label>
                   <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as AssetCategory | "All")}>
                     <option value="All">All categories</option>
@@ -1522,7 +1785,7 @@ export function TrackerApp() {
                   <div className="holding-list pro-holding-list">
                     {filteredHoldings.map((holding) => (
                       holdingEditMode ?
-                        <HoldingEditRow key={holding.id} balance={backup.manualBalances.find((balance) => balance.id === holding.id)!} updateBalance={updateBalance} /> :
+                        <HoldingEditRow key={holding.id} balance={editBackup.manualBalances.find((balance) => balance.id === holding.id)!} updateBalance={updateBalance} /> :
                         <div className="holding-detail-group" key={holding.id}>
                           <HoldingRow holding={holding} baseCurrency={backup.baseCurrency} returns={holdingReturns.get(holding.id)} usdSecondary={usdSecondary} expanded={selectedHoldingDetailId === holding.id} onDetails={() => setSelectedHoldingDetailId(selectedHoldingDetailId === holding.id ? "" : holding.id)} />
                           {selectedHoldingDetailId === holding.id && <HoldingDetailDrawer backup={backup} holding={holding} returns={holdingReturns.get(holding.id)} taxReport={taxReport} goalProgress={goalProgress} currency={backup.baseCurrency} close={() => setSelectedHoldingDetailId("")} usdSecondary={usdSecondary} />}
@@ -1541,14 +1804,14 @@ export function TrackerApp() {
               <div className="section-head">
                 <div><h2>Transactions</h2><p>Every imported transaction is searchable. Edit mode makes the latest matching rows directly editable.</p></div>
                 <div className="toolbar">
-                  <button className={transactionEditMode ? "primary" : ""} onClick={() => setTransactionEditMode(!transactionEditMode)}><Pencil size={15} /> {transactionEditMode ? "Done Editing" : "Edit Transactions"}</button>
+                  <button className={transactionEditMode ? "primary" : ""} onClick={() => transactionEditMode ? commitDraftEdit() : beginDraftEdit("transactions")} disabled={holdingEditMode}><Pencil size={15} /> {transactionEditMode ? "Done Editing" : "Edit Transactions"}</button>{transactionEditMode && <button onClick={cancelDraftEdit}>Cancel</button>}
                   <label className="search-box"><Search size={15} /><input value={transactionQuery} onChange={(event) => setTransactionQuery(event.target.value)} placeholder="Search transactions" /></label>
                 </div>
               </div>
               <div className="transaction-list">
                 {filteredTransactions.length === 0 ? <p className="message">No transactions match the current search.</p> : filteredTransactions.slice(0, 300).map((tx) => (
                   transactionEditMode ?
-                    <TransactionEditRow key={tx.id} tx={tx} updateTransaction={updateTransaction} deleteTransaction={deleteTransaction} /> :
+                    <TransactionEditRow key={tx.id} tx={editBackup.transactions.find((draftTx) => draftTx.id === tx.id) ?? tx} updateTransaction={updateTransaction} deleteTransaction={deleteTransaction} /> :
                     <TransactionRow key={tx.id} tx={tx} backup={backup} />
                 ))}
               </div>
@@ -1561,17 +1824,17 @@ export function TrackerApp() {
 
         {view === "tax" && <TaxView report={taxReport} currency={backup.baseCurrency} financialYears={taxFinancialYears} selectedFinancialYear={taxFinancialYear} setSelectedFinancialYear={setTaxFinancialYear} />}
 
-        {view === "planning" && <PlanningView backup={backup} settings={planningSettings} scenario={scenarioPlan} rebalancing={rebalancingPlan} goalRebalancing={goalRebalancingPlans} incomeProjection={incomeProjection} goalDrawdowns={goalDrawdowns} attribution={attribution} updatePlanningSettings={updatePlanningSettingsFromForm} updateGoalRecord={updateGoalRecord} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
+        {view === "planning" && <PlanningView backup={backup} settings={planningSettings} scenario={scenarioPlan} rebalancing={rebalancingPlan} goalRebalancing={goalRebalancingPlans} incomeProjection={incomeProjection} goalDrawdowns={goalDrawdowns} attribution={attribution} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
 
         {view === "snapshots" && <SnapshotsView {...{ backup, snapshotName, setSnapshotName, snapshotNotes, setSnapshotNotes, selectedSnapshotId, setSelectedSnapshotId, snapshotHistory, takePortfolioSnapshot, deletePortfolioSnapshot }} />}
 
         {view === "add-entry" && <AddEntryView {...{ backup, entryHoldingId, setEntryHoldingId, entryActionId, setEntryActionId, entryDate, setEntryDate, entryAmount, setEntryAmount, entryQuantity, setEntryQuantity, entryPrice, setEntryPrice, entryFees, setEntryFees, entryTaxes, setEntryTaxes, entryCurrentValue, setEntryCurrentValue, entryInvestedAmount, setEntryInvestedAmount, entryNotes, setEntryNotes, addManualEntryFromForm, goalName, setGoalName, goalType, setGoalType, goalMonthlyExpense, setGoalMonthlyExpense, goalInflation, setGoalInflation, goalTargetYear, setGoalTargetYear, goalMultiplier, setGoalMultiplier, goalEquityReturn, setGoalEquityReturn, goalDebtReturn, setGoalDebtReturn, goalGoldReturn, setGoalGoldReturn, goalCashReturn, setGoalCashReturn, goalOtherReturn, setGoalOtherReturn, addGoalFromForm, applyGoalPreset }} />}
 
-        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, manualImportPreview, previewManualCsv, importCsv, importLabel, setImportLabel, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText }} />}
+        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, manualImportPreview, previewManualCsv, importCsv, importLabel, setImportLabel, replaceImportId, setReplaceImportId, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText, editSessionActive }} />}
 
         {view === "data" && <DataAuditView report={reconciliationReport} currency={backup.baseCurrency} />}
 
-        {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} displaySettings={displayCurrencySettings} updateDisplaySettings={updateDisplayCurrencyFromForm} planningSettings={planningSettings} updatePlanningSettings={updatePlanningSettingsFromForm} />}
+        {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} displaySettings={displayCurrencySettings} updateDisplaySettings={updateDisplayCurrencyFromForm} planningSettings={planningSettings} updatePlanningSettings={updatePlanningSettingsFromForm} goals={backup.goals} goalExpenses={backup.goalExpenses ?? []} goalExpenseCsv={goalExpenseCsv} setGoalExpenseCsv={setGoalExpenseCsv} goalExpenseGoalId={goalExpenseGoalId} setGoalExpenseGoalId={setGoalExpenseGoalId} goalExpenseBaseDate={goalExpenseBaseDate} setGoalExpenseBaseDate={setGoalExpenseBaseDate} importGoalExpensesFromText={importGoalExpensesFromText} importGoalExpensesFromFile={importGoalExpensesFromFile} updateGoalSettings={updateGoalSettingsFromForm} currency={backup.baseCurrency} />}
 
         {view === "backup" && (
           <section className="grid two">
@@ -1586,7 +1849,7 @@ export function TrackerApp() {
 
 
 
-function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing, incomeProjection, goalDrawdowns, attribution, updatePlanningSettings, updateGoalRecord, currency, usdSecondary }: { backup: PortfolioBackup; settings: PlanningSettings; scenario: ScenarioPlan; rebalancing: RebalanceRow[]; goalRebalancing: GoalRebalancePlan[]; incomeProjection: IncomeProjection; goalDrawdowns: GoalDrawdownReport[]; attribution: PerformanceAttribution; updatePlanningSettings: (patch: PlanningSettingsPatch) => void; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing, incomeProjection, goalDrawdowns, attribution, currency, usdSecondary }: { backup: PortfolioBackup; settings: PlanningSettings; scenario: ScenarioPlan; rebalancing: RebalanceRow[]; goalRebalancing: GoalRebalancePlan[]; incomeProjection: IncomeProjection; goalDrawdowns: GoalDrawdownReport[]; attribution: PerformanceAttribution; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
   const largestRebalance = [...rebalancing].sort((a, b) => Math.abs(b.driftValue) - Math.abs(a.driftValue))[0];
   const drawdownRows = goalDrawdowns.map((row) => ({ name: row.goalName, value: row.surplusAtHorizon > 0 ? row.surplusAtHorizon : row.startingCorpus, tag: row.depletionYear ? "depletes " + row.depletionYear : "survives", category: "Others" as AssetCategory }));
   return (
@@ -1606,21 +1869,15 @@ function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing
       <div className="analytics-grid">
         <div className="card planning-card">
           <h2>Scenario Planning</h2>
-          <p className="chart-note compact-note">Hypothetical stress and one-year projection. Change assumptions below or in Settings; actual holdings stay unchanged.</p>
-          <div className="settings-grid compact-settings-grid">
-            <label><span>Equity return %</span><input type="number" step="0.1" value={settings.scenario.equityReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, equityReturn: Number(event.target.value) } })} /></label>
-            <label><span>Debt return %</span><input type="number" step="0.1" value={settings.scenario.debtReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, debtReturn: Number(event.target.value) } })} /></label>
-            <label><span>Scenario inflation %</span><input type="number" step="0.1" value={settings.scenario.inflationRate} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, inflationRate: Number(event.target.value) } })} /></label>
-            <label><span>Equity correction %</span><input type="number" step="1" value={settings.scenario.marketCorrectionPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, marketCorrectionPercent: Number(event.target.value) } })} /></label>
-            <label><span>USD/INR shock %</span><input type="number" step="1" value={settings.scenario.usdInrShockPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...settings.scenario, usdInrShockPercent: Number(event.target.value) } })} /></label>
-          </div>
+          <p className="chart-note compact-note">Hypothetical stress and one-year projection using Settings assumptions. Actual holdings stay unchanged.</p>
+          <p className="message">Edit return, inflation, correction, and FX shock assumptions in Settings.</p>
           <div className="table-wrap"><table><thead><tr><th>Class</th><th>Current</th><th>Stress</th><th>1Y projected</th><th>Return</th></tr></thead><tbody>{scenario.categoryRows.filter((row) => row.currentValue > 0).map((row) => <tr key={row.category}><td>{row.category}</td><td>{formatMoney(row.currentValue, currency)}</td><td>{formatMoney(row.stressedValue, currency)}</td><td>{formatMoney(row.oneYearProjectedValue, currency)}</td><td>{row.returnRate.toFixed(1)}%</td></tr>)}</tbody></table></div>
         </div>
 
         <div className="card planning-card">
           <h2>Rebalancing View</h2>
-          <p className="chart-note compact-note">Current allocation versus configured targets. Suggested add/reduce values are advisory and do not place trades.</p>
-          <div className="settings-grid compact-settings-grid target-grid">{categoryOrder.map((category) => <label key={category}><span>{category} target %</span><input type="number" step="1" value={settings.targetAllocation[category]} onChange={(event) => updatePlanningSettings({ targetAllocation: { ...settings.targetAllocation, [category]: Number(event.target.value) } })} /></label>)}</div>
+          <p className="chart-note compact-note">Current allocation versus Settings targets. Suggested add/reduce values are advisory and do not place trades.</p>
+          <p className="message">Edit portfolio and goal allocation targets in Settings.</p>
           <div className="table-wrap"><table><thead><tr><th>Class</th><th>Current</th><th>Current %</th><th>Target %</th><th>Drift</th><th>Add/reduce</th><th>Action</th></tr></thead><tbody>{rebalancing.map((row) => <tr key={row.category}><td>{row.category}</td><td>{formatMoney(row.currentValue, currency)}</td><td>{row.currentPercent.toFixed(1)}%</td><td>{row.targetPercent.toFixed(1)}%</td><td>{formatMoney(row.driftValue, currency)}</td><td>{row.action === "hold" ? "-" : formatMoney(row.actionAmount, currency)}</td><td><span className={"status-pill " + (row.action === "hold" ? "implemented" : row.action === "add" ? "partial" : "planned")}>{row.action}</span></td></tr>)}</tbody></table></div>
           <GoalRebalancingPanel plans={goalRebalancing} currency={currency} />
         </div>
@@ -1633,9 +1890,40 @@ function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing
       <div className="card wide-card goal-drawdown-card">
         <div className="section-head"><div><h2>Goal Drawdown Longevity</h2><p>Projects each goal from the goal date forward using mapped corpus, first-year spending, per-goal spend growth, corpus consumption years, withdrawal timing, and mapped asset return mix.</p></div></div>
         <p className="chart-note compact-note">Each goal can use different drawdown assumptions. Corpus consumption years controls how far the chart and table project after the goal year. Settings stores defaults used when a goal has not been customized.</p>
-        {goalDrawdowns.length === 0 ? <p className="message">Create goals and map assets to model drawdown longevity.</p> : <div className="drawdown-grid">{goalDrawdowns.map((row) => <GoalDrawdownCard key={row.goalId} report={row} updateGoalRecord={updateGoalRecord} currency={currency} usdSecondary={usdSecondary} />)}</div>}
+        {goalDrawdowns.length === 0 ? <p className="message">Create goals and map assets to model drawdown longevity.</p> : <div className="drawdown-grid">{goalDrawdowns.map((row) => <GoalDrawdownCard key={row.goalId} report={row} currency={currency} usdSecondary={usdSecondary} />)}</div>}
       </div>
     </section>
+  );
+}
+
+function PlanningSettingsDraftEditor({ settings, onApply, mode }: { settings: PlanningSettings; onApply: (patch: PlanningSettingsPatch) => void; mode: "scenario" | "targets" | "all" }) {
+  const [draft, setDraft] = useState<PlanningSettings>(settings);
+  useEffect(() => setDraft(settings), [settings]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
+  const updateScenario = (patch: Partial<PlanningSettings["scenario"]>) => setDraft((current) => ({ ...current, scenario: { ...current.scenario, ...patch } }));
+  const updateTarget = (category: AssetCategory, value: number) => setDraft((current) => ({ ...current, targetAllocation: { ...current.targetAllocation, [category]: value } }));
+  const apply = () => onApply({ scenario: draft.scenario, targetAllocation: draft.targetAllocation, drawdown: draft.drawdown });
+  const reset = () => setDraft(settings);
+  return (
+    <div className="planning-draft-editor">
+      {(mode === "scenario" || mode === "all") && (
+        <div className="settings-grid compact-settings-grid">
+          <label><span>Equity return %</span><input type="number" step="0.1" value={draft.scenario.equityReturn} onChange={(event) => updateScenario({ equityReturn: Number(event.target.value) })} /></label>
+          <label><span>Debt return %</span><input type="number" step="0.1" value={draft.scenario.debtReturn} onChange={(event) => updateScenario({ debtReturn: Number(event.target.value) })} /></label>
+          <label><span>Gold return %</span><input type="number" step="0.1" value={draft.scenario.goldReturn} onChange={(event) => updateScenario({ goldReturn: Number(event.target.value) })} /></label>
+          <label><span>Cash return %</span><input type="number" step="0.1" value={draft.scenario.cashReturn} onChange={(event) => updateScenario({ cashReturn: Number(event.target.value) })} /></label>
+          <label><span>Scenario inflation %</span><input type="number" step="0.1" value={draft.scenario.inflationRate} onChange={(event) => updateScenario({ inflationRate: Number(event.target.value) })} /></label>
+          <label><span>Equity correction %</span><input type="number" step="1" value={draft.scenario.marketCorrectionPercent} onChange={(event) => updateScenario({ marketCorrectionPercent: Number(event.target.value) })} /></label>
+          <label><span>USD/INR shock %</span><input type="number" step="1" value={draft.scenario.usdInrShockPercent} onChange={(event) => updateScenario({ usdInrShockPercent: Number(event.target.value) })} /></label>
+        </div>
+      )}
+      {(mode === "targets" || mode === "all") && (
+        <div className="settings-grid compact-settings-grid target-grid">
+          {categoryOrder.map((category) => <label key={category}><span>{category} target %</span><input type="number" step="1" value={draft.targetAllocation[category]} onChange={(event) => updateTarget(category, Number(event.target.value))} /></label>)}
+        </div>
+      )}
+      <div className="draft-actions"><button className="primary" disabled={!dirty} onClick={apply}>Apply assumptions</button><button disabled={!dirty} onClick={reset}>Reset draft</button><span>{dirty ? "Draft changes are not used by analytics until applied." : "Current assumptions are applied."}</span></div>
+    </div>
   );
 }
 
@@ -1686,20 +1974,22 @@ function AttributionBridge({ attribution, currency }: { attribution: Performance
         const max = Math.max(...attribution.rows.map((item) => Math.abs(item.value)), 1);
         const width = Math.max(4, Math.abs(row.value) / max * 100);
         const color = row.value >= 0 ? chartColors[index % chartColors.length] : "#dc2626";
-        return <div className="metric-bar-row" key={row.key} title={row.description} style={{ "--bar-color": color, "--bar-percent": width + "%" } as CSSProperties}><div className="metric-bar-label"><span>{index + 1}</span><strong>{row.label}</strong><em>{row.value >= 0 ? "adds" : "reduces"}</em></div><div className="metric-bar-track" aria-hidden="true"><span style={{ width: width + "%", background: color }} /></div><strong className="metric-bar-value">{formatMoney(row.value, currency)}</strong></div>;
+        return <div className="metric-bar-row" key={row.key} tabIndex={0} aria-label={row.label + ": " + formatMoney(row.value, currency) + ". " + row.description} title={row.description} style={{ "--bar-color": color, "--bar-percent": width + "%" } as CSSProperties}><div className="metric-bar-label"><span>{index + 1}</span><strong>{row.label}</strong><em>{row.value >= 0 ? "adds" : "reduces"}</em></div><div className="metric-bar-track" aria-hidden="true"><span style={{ width: width + "%", background: color }} /></div><strong className="metric-bar-value">{formatMoney(row.value, currency)}</strong></div>;
       })}</div>
     </div>
   );
 }
 
-function GoalDrawdownCard({ report, updateGoalRecord, currency, usdSecondary }: { report: GoalDrawdownReport; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+function GoalDrawdownCard({ report, currency, usdSecondary }: { report: GoalDrawdownReport; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
   return (
     <div className="goal-drawdown-item">
-      <div className="section-head drawdown-item-head"><div><h3>{report.goalName}</h3><p>{report.depletionYear ? "Projected depletion in " + report.depletionYear : "Projected to last full horizon"} · weighted return {report.weightedReturn.toFixed(1)}%</p></div></div>
-      <div className="settings-grid compact-settings-grid drawdown-goal-settings">
-        <label><span>Spend growth %</span><input type="number" step="0.1" value={report.annualSpendGrowth} onChange={(event) => updateGoalRecord(report.goalId, { drawdownSpendGrowth: Number(event.target.value) })} /></label>
-        <label><span>Corpus consumption years</span><input type="number" step="1" min="1" max="100" value={report.horizonYears} onChange={(event) => updateGoalRecord(report.goalId, { drawdownHorizonYears: Number(event.target.value) })} /></label>
-        <label><span>Withdrawal timing</span><select value={report.withdrawalTiming} onChange={(event) => updateGoalRecord(report.goalId, { drawdownWithdrawalTiming: event.target.value as Goal["drawdownWithdrawalTiming"] })}><option value="beginning">Beginning of year</option><option value="end">End of year</option></select></label>
+      <div className="section-head drawdown-item-head"><div><h3>{report.goalName}</h3><p>{report.depletionYear ? "Projected depletion in " + report.depletionYear : "Projected to last full horizon"} · start return {report.weightedReturn.toFixed(1)}% · average return {report.averageWeightedReturn.toFixed(1)}%</p></div></div>
+      <div className="glide-summary-grid">
+        <MiniInsight label="Spend growth %" value={report.annualSpendGrowth.toFixed(1) + "%"} detail="from Settings" />
+        <MiniInsight label="Corpus consumption years" value={String(report.horizonYears)} detail="projection length" />
+        <MiniInsight label="Withdrawal timing" value={report.withdrawalTiming === "end" ? "End of year" : "Beginning of year"} detail="cash-flow timing" />
+        <MiniInsight label="Glide rule" value={report.glideRule.shiftPercent <= 0 ? "No glide" : report.glideRule.shiftPercent + "% / " + report.glideRule.intervalYears + "y"} detail={report.glideRule.from + " to " + report.glideRule.to} />
+        <MiniInsight label="Final mix" value={allocationLabel(report.finalAllocation)} detail="last projected year" />
       </div>
       <div className="holding-command-strip compact-command-strip">
         <MiniInsight label="Start corpus" value={formatMoney(report.startingCorpus, currency)} secondary={usdSecondary(report.startingCorpus)} detail="at goal date" />
@@ -1708,14 +1998,22 @@ function GoalDrawdownCard({ report, updateGoalRecord, currency, usdSecondary }: 
         <MiniInsight label="Horizon surplus" value={formatMoney(report.surplusAtHorizon, currency)} secondary={usdSecondary(report.surplusAtHorizon)} detail="end of model" />
       </div>
       <GoalDrawdownChart report={report} currency={currency} />
-      <div className="table-wrap"><table><thead><tr><th>Year</th><th>Start corpus</th><th>Withdrawal</th><th>Growth</th><th>Ending corpus</th></tr></thead><tbody>{report.points.map((point) => <tr key={point.year}><td>{point.calendarYear}</td><td>{formatMoney(point.startingCorpus, currency)}</td><td>{formatMoney(point.withdrawal, currency)}</td><td>{formatMoney(point.growth, currency)}</td><td>{formatMoney(point.endingCorpus, currency)}</td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>Year</th><th>Start corpus</th><th>Withdrawal</th><th>Drawdown %</th><th>Allocation</th><th>Derived return</th><th>Growth</th><th>Ending corpus</th></tr></thead><tbody>{report.points.map((point) => <tr key={point.year}><td>{point.calendarYear}</td><td>{formatMoney(point.startingCorpus, currency)}</td><td>{formatMoney(point.withdrawal, currency)}</td><td>{point.drawdownPercent.toFixed(2)}%</td><td>{allocationLabel(point.allocation)}</td><td>{point.weightedReturn.toFixed(2)}%</td><td>{formatMoney(point.growth, currency)}</td><td>{formatMoney(point.endingCorpus, currency)}</td></tr>)}</tbody></table></div>
     </div>
   );
 }
 
 function GoalDrawdownChart({ report, currency }: { report: GoalDrawdownReport; currency: string }) {
-  const points = report.points.map((point) => ({ ts: Date.parse(String(point.calendarYear) + "-01-01T00:00:00.000Z"), date: String(point.calendarYear), value: point.endingCorpus }));
-  return <NativeLineChart currency={currency} emptyMessage="No drawdown points yet." note={"Planning line only: it uses configured assumptions and projects through " + report.horizonYears + " corpus consumption year(s). It does not change actual portfolio values."} series={[{ key: report.goalId, label: report.goalName, color: "#0e7490", points }]} />;
+  const first = report.points[0];
+  if (!first) return <p className="message">No drawdown points yet.</p>;
+  const depletionYear = report.depletionYear;
+  const chartRows = depletionYear ? report.points.filter((point) => point.calendarYear <= depletionYear + 1) : report.points;
+  const points = [
+    { ts: Date.parse(String(first.calendarYear) + "-01-01T00:00:00.000Z"), date: String(first.calendarYear) + " start", value: first.startingCorpus },
+    ...chartRows.map((point) => ({ ts: Date.parse(String(point.calendarYear) + "-12-31T00:00:00.000Z"), date: String(point.calendarYear) + " end", value: point.endingCorpus }))
+  ];
+  const focusNote = report.depletionYear ? " The chart focuses through the depletion year; the table keeps the full configured consumption schedule." : "";
+  return <NativeLineChart currency={currency} emptyMessage="No drawdown points yet." note={"Planning line only: it uses configured assumptions and projects through " + report.horizonYears + " corpus consumption year(s). It does not change actual portfolio values." + focusNote} series={[{ key: report.goalId, label: report.goalName, color: "#0e7490", points }]} />;
 }
 
 
@@ -1774,7 +2072,7 @@ function SnapshotsView(props: {
         <ChartCard title="Asset Class Timeline"><SnapshotBreakdownChart points={props.snapshotHistory} field="category" keys={categoryKeys} currency={props.backup.baseCurrency} /></ChartCard>
         <ChartCard title="Region Timeline"><SnapshotBreakdownChart points={props.snapshotHistory} field="region" keys={regionKeys} currency={props.backup.baseCurrency} /></ChartCard>
         <ChartCard title="Asset Type Timeline"><SnapshotBreakdownChart points={props.snapshotHistory} field="assetKind" keys={assetKindKeys} currency={props.backup.baseCurrency} /></ChartCard>
-        <ChartCard title="Issuer / AMC Timeline"><SnapshotBreakdownChart points={props.snapshotHistory} field="issuer" keys={issuerKeys} currency={props.backup.baseCurrency} /></ChartCard>
+        <ChartCard title="AMC / Platform Timeline"><SnapshotBreakdownChart points={props.snapshotHistory} field="issuer" keys={issuerKeys} currency={props.backup.baseCurrency} /></ChartCard>
         <ChartCard title="Goal Corpus Timeline"><SnapshotGoalHistoryChart points={props.snapshotHistory} currency={props.backup.baseCurrency} /></ChartCard>
       </div>
 
@@ -2013,7 +2311,7 @@ function GoalCard({ progress, currency, usdSecondary, selected, setSelectedGoalI
   return (
     <div className={"goal-card" + (selected ? " selected" : "")} onClick={() => setSelectedGoalId(goal.id)}>
       <div className="goal-card-head">
-        <div><input value={goal.name} onChange={(event) => updateGoalRecord(goal.id, { name: event.target.value })} onClick={(event) => event.stopPropagation()} /><span>{goal.type === "retirement" ? "Retirement" : "Custom"} · {targetYear} · {progress.yearsToGoal.toFixed(1)} years</span></div>
+        <div><h3>{goal.name}</h3><span>{goal.type === "retirement" ? "Retirement" : "Custom"} · {targetYear} · {progress.yearsToGoal.toFixed(1)} years</span></div>
         <div className="goal-card-actions"><label className="goal-include-toggle" title="When off, this goal remains visible individually but is excluded from Combined Goals totals."><input type="checkbox" checked={goal.includeInCombinedGoals !== false} onClick={(event) => event.stopPropagation()} onChange={(event) => updateGoalRecord(goal.id, { includeInCombinedGoals: event.target.checked })} /><span>Combined</span></label><button className="danger-button" onClick={(event) => { event.stopPropagation(); deleteGoalRecord(goal.id); }}>Delete</button></div>
       </div>
       <div className="goal-card-metrics">
@@ -2024,13 +2322,24 @@ function GoalCard({ progress, currency, usdSecondary, selected, setSelectedGoalI
         <MiniInsight label="Invested" value={formatMoney(progress.mappedInvested, currency)} secondary={usdSecondary(progress.mappedInvested)} detail="mapped cost basis" />
         <MiniInsight label="P/L" value={formatMoney(progress.mappedProfit, currency)} secondary={usdSecondary(progress.mappedProfit)} detail={progress.mappedReturnPercent === undefined ? "cost basis unavailable" : progress.mappedReturnPercent.toFixed(1) + "% simple"} />
       </div>
-      <div className="goal-edit-grid" onClick={(event) => event.stopPropagation()}>
-        <label><span>Monthly expense</span><input type="number" value={goal.currentMonthlyExpense} onChange={(event) => updateGoalRecord(goal.id, { currentMonthlyExpense: Number(event.target.value) })} /></label>
-        <label><span>Inflation %</span><input type="number" step="0.1" value={goal.inflationRate} onChange={(event) => updateGoalRecord(goal.id, { inflationRate: Number(event.target.value) })} /></label>
-        <label><span>Target year</span><input type="number" value={targetYear} onChange={(event) => updateGoalRecord(goal.id, { targetDate: normalizeGoalYearInput(event.target.value) + "-01-01" })} /></label>
-        <label><span>Multiple</span><input type="number" step="0.1" value={goal.corpusMultiple} onChange={(event) => updateGoalRecord(goal.id, { corpusMultiple: Number(event.target.value) })} /></label>
-      </div>
+      <p className="message compact-note">Goal assumptions, returns, accumulation targets, consumption targets, and glidepath are edited in Settings. This page focuses on readiness and asset mapping.</p>
       <GoalCategoryStack progressLike={progress} currency={currency} />
+    </div>
+  );
+}
+
+function GoalPhaseAllocationEditor({ goal, phase, title, detail, updateGoalRecord }: { goal: Goal; phase: "accumulation" | "consumption"; title: string; detail: string; updateGoalRecord: (goalId: string, patch: Partial<Goal>) => void }) {
+  const key = phase === "accumulation" ? "accumulationTargetAllocation" : "consumptionTargetAllocation";
+  const current = goal[key] ?? {};
+  function update(category: AssetCategory, value: number) {
+    updateGoalRecord(goal.id, { [key]: { ...current, [category]: Math.max(0, Number.isFinite(value) ? value : 0) } } as Partial<Goal>);
+  }
+  return (
+    <div className="goal-phase-allocation" onClick={(event) => event.stopPropagation()}>
+      <div className="goal-phase-head"><strong>{title}</strong><span>{detail}</span></div>
+      <div className="goal-phase-grid">
+        {categoryOrder.map((category) => <label key={phase + category}><span>{category}</span><input type="number" min="0" max="100" step="1" value={current[category] ?? ""} placeholder="global" onChange={(event) => update(category, Number(event.target.value))} /></label>)}
+      </div>
     </div>
   );
 }
@@ -2192,6 +2501,8 @@ function ImportsView(props: {
   importCsv: () => void;
   importLabel: string;
   setImportLabel: (value: string) => void;
+  replaceImportId: string;
+  setReplaceImportId: (value: string) => void;
   deleteImport: (importId: string) => void;
   nativeDetection: ImportDetection | null;
   inspectNativeFile: (files: FileList | File[] | undefined) => void;
@@ -2225,6 +2536,7 @@ function ImportsView(props: {
   fxCsv: string;
   setFxCsv: (value: string) => void;
   importFxCsvText: () => void;
+  editSessionActive: boolean;
 }) {
   const epfoParses = props.epfoParse ?? [];
   const npsParses = props.npsParse ?? [];
@@ -2239,11 +2551,13 @@ function ImportsView(props: {
   const npsHasErrors = npsParses.some((parsed) => parsed.errors.length > 0);
   const stagedPreview = nativeStagedPreviewRows(props.backup, props.stagedCas ? [props.stagedCas] : [], props.stagedInd ? [props.stagedInd] : [], props.stagedEpfo ?? [], props.stagedNps ?? []);
   return (
-    <section className="grid">
+    <section className="grid imports-workspace">
+      {props.editSessionActive && <div className="notice">Finish or cancel draft editing before importing, restoring, or refreshing files.</div>}
       <div className="grid two">
         <div className="card">
           <h2>Native File Intake</h2>
           <input placeholder="Import name" value={props.importLabel} onChange={(event) => props.setImportLabel(event.target.value)} />
+          <label className="import-replace-field"><span>Replace existing import</span><select value={props.replaceImportId} onChange={(event) => props.setReplaceImportId(event.target.value)}><option value="">New import</option>{props.backup.imports.filter((run) => run.status === "committed").map((run) => <option key={run.id} value={run.id}>{importRunLabel(run)}</option>)}</select>{props.replaceImportId && <button type="button" onClick={() => props.setReplaceImportId("")}>Clear replacement</button>}</label>
           <input type="file" multiple accept=".json,.csv,.pdf,.html,.xlsx,application/json,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => props.inspectNativeFile(event.target.files ?? undefined)} />
           {props.nativeDetection && <div className="detection"><div><span>Provider</span><strong>{props.nativeDetection.label}</strong></div><div><span>Files</span><strong>{props.nativeFileCount}</strong></div><div><span>Status</span><strong>{props.nativeDetection.status}</strong></div><div><span>Type</span><strong>{props.nativeDetection.nativeInputType}</strong></div><div><span>Confidence</span><strong>{props.nativeDetection.confidence}</strong></div><p>{props.nativeDetection.reason}</p></div>}
           {props.nativeDetection?.providerId === "canonical_json" && <div className="native-actions"><button className="primary" onClick={props.restoreNativeBackup}>Restore JSON Backup</button></div>}
@@ -2263,8 +2577,8 @@ function ImportsView(props: {
       </div>
       <div className="grid two">
         <div className="card"><h2>USD/INR FX Rates</h2><div className="native-actions"><input type="number" step="0.0001" placeholder="USD/INR rate" value={props.fxRate} onChange={(event) => props.setFxRate(event.target.value)} /><input type="date" value={props.fxDate} onChange={(event) => props.setFxDate(event.target.value)} /><button className="primary" onClick={props.applyManualFxRate}>Add Rate</button></div><p className="message">Use a real USD/INR rate. Current holdings use the latest rate; transaction analytics use rates on or before each transaction date.</p><input type="file" accept=".csv,text/csv" onChange={(event) => props.importFxCsvFile(event.target.files?.[0])} /><textarea value={props.fxCsv} onChange={(event) => props.setFxCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importFxCsvText}>Import FX CSV</button></div></div>
-        <div className="card"><h2>Manual CSV Preview and Commit</h2><p className="message">Use the committed templates for normal uploads. Preview shows the before/after impact without mutating the portfolio; commit then writes the same canonical records.</p><textarea value={props.csv} onChange={(event) => props.setCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button onClick={props.previewManualCsv}>Preview Manual CSV</button><button className="primary" onClick={props.importCsv}>Stage and Commit</button></div><ImportPreviewPanel preview={props.manualImportPreview} currency={props.backup.baseCurrency} /></div>
-        <div className="card"><h2>Import History</h2>{props.backup.imports.length === 0 ? <p className="message">No imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Name</th><th>Provider</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>{props.backup.imports.map((run) => <tr key={run.id}><td>{run.label ?? run.fileName ?? run.id}</td><td>{run.provider}</td><td>{run.status}</td><td>{new Date(run.createdAt).toLocaleString()}</td><td><button className="danger-button" onClick={() => props.deleteImport(run.id)}>Delete</button></td></tr>)}</tbody></table></div>}</div>
+        <div className="card"><h2>Manual CSV Preview and Commit</h2><p className="message">Use the committed templates for normal uploads. Preview shows the before/after impact without mutating the portfolio; commit then writes the same canonical records. Choose an old manual import only when replacing the same file family and preserving matching user edits.</p><p className="message">Replacement target is selected in Native File Intake or from Import History. Manual CSV uses the same replace engine and preserves matching user edits.</p><textarea value={props.csv} onChange={(event) => props.setCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button onClick={props.previewManualCsv}>Preview Manual CSV</button><button className="primary" onClick={props.importCsv}>{props.replaceImportId ? "Replace and Commit" : "Stage and Commit"}</button></div><ImportPreviewPanel preview={props.manualImportPreview} currency={props.backup.baseCurrency} /></div>
+        <div className="card"><h2>Import History</h2>{props.backup.imports.length === 0 ? <p className="message">No imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Name</th><th>Provider</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{props.backup.imports.map((run) => <tr key={run.id}><td>{run.label ?? run.fileName ?? run.id}</td><td>{run.provider}</td><td>{run.status}</td><td>{new Date(run.createdAt).toLocaleString()}</td><td><div className="table-actions"><button onClick={() => props.setReplaceImportId(run.id)} disabled={run.status !== "committed"}>Replace</button><button className="danger-button" onClick={() => props.deleteImport(run.id)}>Delete</button></div></td></tr>)}</tbody></table></div>}</div>
       </div>
     </section>
   );
@@ -2367,7 +2681,7 @@ function DataAuditView({ report, currency }: { report: ReturnType<typeof buildRe
   );
 }
 
-function SettingsView({ profile, updateTaxProfile, displaySettings, updateDisplaySettings, planningSettings, updatePlanningSettings }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void; displaySettings: DisplayCurrencySettings; updateDisplaySettings: (patch: Partial<DisplayCurrencySettings>) => void; planningSettings: PlanningSettings; updatePlanningSettings: (patch: PlanningSettingsPatch) => void }) {
+function SettingsView({ profile, updateTaxProfile, displaySettings, updateDisplaySettings, planningSettings, updatePlanningSettings, goals, goalExpenses, goalExpenseCsv, setGoalExpenseCsv, goalExpenseGoalId, setGoalExpenseGoalId, goalExpenseBaseDate, setGoalExpenseBaseDate, importGoalExpensesFromText, importGoalExpensesFromFile, updateGoalSettings, currency }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void; displaySettings: DisplayCurrencySettings; updateDisplaySettings: (patch: Partial<DisplayCurrencySettings>) => void; planningSettings: PlanningSettings; updatePlanningSettings: (patch: PlanningSettingsPatch) => void; goals: Goal[]; goalExpenses: GoalExpense[]; goalExpenseCsv: string; setGoalExpenseCsv: (value: string) => void; goalExpenseGoalId: string; setGoalExpenseGoalId: (value: string) => void; goalExpenseBaseDate: string; setGoalExpenseBaseDate: (value: string) => void; importGoalExpensesFromText: () => void; importGoalExpensesFromFile: (file: File | undefined) => void; updateGoalSettings: (patches: Array<{ goalId: string; patch: Partial<Goal> }>) => void; currency: string }) {
   return (
     <section className="grid settings-workspace">
       <div className="card wide-card">
@@ -2385,14 +2699,10 @@ function SettingsView({ profile, updateTaxProfile, displaySettings, updateDispla
         </div>
         <div className="settings-panel planning-settings-panel">
           <h3>Planning Assumptions</h3>
-          <p className="message">These global values feed Scenario Planning and Rebalancing. Goal drawdown spend growth, horizon, and withdrawal timing are edited per goal in Planning because each goal can behave differently. All assumptions are hypothetical; actual portfolio values and tax lots remain unchanged.</p>
-          <div className="settings-grid">
-            <label><span>Scenario equity return %</span><input type="number" step="0.1" value={planningSettings.scenario.equityReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, equityReturn: Number(event.target.value) } })} /></label>
-            <label><span>Scenario debt return %</span><input type="number" step="0.1" value={planningSettings.scenario.debtReturn} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, debtReturn: Number(event.target.value) } })} /></label>
-            <label><span>Scenario inflation %</span><input type="number" step="0.1" value={planningSettings.scenario.inflationRate} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, inflationRate: Number(event.target.value) } })} /></label>
-            <label><span>Stress correction %</span><input type="number" step="1" value={planningSettings.scenario.marketCorrectionPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, marketCorrectionPercent: Number(event.target.value) } })} /></label>
-            <label><span>USD/INR shock %</span><input type="number" step="1" value={planningSettings.scenario.usdInrShockPercent} onChange={(event) => updatePlanningSettings({ scenario: { ...planningSettings.scenario, usdInrShockPercent: Number(event.target.value) } })} /></label>
-          </div>
+          <p className="message">These global values feed Scenario Planning and portfolio-level rebalancing. Goal-specific assumptions and expense rows are applied as drafts, so charts do not recalculate on every keystroke.</p>
+          <PlanningSettingsDraftEditor settings={planningSettings} onApply={updatePlanningSettings} mode="all" />
+          <GoalExpenseImportEditor goals={goals} goalExpenses={goalExpenses} csv={goalExpenseCsv} setCsv={setGoalExpenseCsv} selectedGoalId={goalExpenseGoalId || goals[0]?.id || ""} setSelectedGoalId={setGoalExpenseGoalId} baseDate={goalExpenseBaseDate} setBaseDate={setGoalExpenseBaseDate} importFromText={importGoalExpensesFromText} importFromFile={importGoalExpensesFromFile} currency={currency} />
+          <GoalSettingsDraftEditor goals={goals} goalExpenses={goalExpenses} updateGoalSettings={updateGoalSettings} currency={currency} />
         </div>
         <p className="message">The Tax section intentionally estimates portfolio tax only. Salary, deductions, Form 16, full ITR schedules, and ESPP payroll/perquisite treatment stay outside this tracker unless explicitly added later.</p>
       </div>
@@ -2400,9 +2710,95 @@ function SettingsView({ profile, updateTaxProfile, displaySettings, updateDispla
   );
 }
 
+function GoalExpenseImportEditor({ goals, goalExpenses, csv, setCsv, selectedGoalId, setSelectedGoalId, baseDate, setBaseDate, importFromText, importFromFile, currency }: { goals: Goal[]; goalExpenses: GoalExpense[]; csv: string; setCsv: (value: string) => void; selectedGoalId: string; setSelectedGoalId: (value: string) => void; baseDate: string; setBaseDate: (value: string) => void; importFromText: () => void; importFromFile: (file: File | undefined) => void; currency: string }) {
+  const summaries = goals.map((goal) => ({ goal, summary: summarizeGoalExpenses(goal, goalExpenses.filter((row) => row.goalId === goal.id)) }));
+  return (
+    <div className="goal-expense-editor">
+      <div className="goal-settings-header"><div><h3>Goal Expense Inputs</h3><p>Optional monthly expense lines per goal. When present, the goal monthly expense, first-year withdrawal, target corpus, and longevity model are derived from these rows.</p></div></div>
+      <div className="goal-expense-import-grid">
+        <label><span>Goal for 2-column CSV</span><select value={selectedGoalId} onChange={(event) => setSelectedGoalId(event.target.value)}>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</select></label>
+        <label><span>Expense base date</span><input type="date" value={baseDate} onChange={(event) => setBaseDate(event.target.value)} /></label>
+        <label className="file-input-label"><span>Upload expense CSV</span><input type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" onChange={(event) => importFromFile(event.target.files?.[0])} /></label>
+      </div>
+      <textarea className="goal-expense-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} spellCheck={false} />
+      <div className="actions"><button className="primary" onClick={importFromText} disabled={goals.length === 0}>Import Goal Expenses</button></div>
+      <p className="message">For one goal use columns <code>expense,amount</code>. For one file covering multiple goals use <code>goal,base_date,expense,amount</code>. Amounts are monthly values at the base date.</p>
+      {summaries.length === 0 ? <p className="message">Create goals before importing expense rows.</p> : <div className="table-wrap"><table><thead><tr><th>Goal</th><th>Rows</th><th>Base monthly</th><th>Current monthly</th><th>First goal-year spend</th><th>Source</th></tr></thead><tbody>{summaries.map(({ goal, summary }) => <tr key={goal.id}><td>{goal.name}</td><td>{summary.rows.length}</td><td>{formatMoney(summary.baseMonthlyExpense, currency)}</td><td>{formatMoney(summary.currentMonthlyExpense, currency)}</td><td>{formatMoney(summary.firstYearExpense, currency)}</td><td>{summary.source === "expenses" ? "expense CSV" : "manual"}</td></tr>)}</tbody></table></div>}
+    </div>
+  );
+}
+
+function GoalSettingsDraftEditor({ goals, goalExpenses, updateGoalSettings, currency }: { goals: Goal[]; goalExpenses: GoalExpense[]; updateGoalSettings: (patches: Array<{ goalId: string; patch: Partial<Goal> }>) => void; currency: string }) {
+  const [draftGoals, setDraftGoals] = useState<Goal[]>(goals);
+  useEffect(() => setDraftGoals(goals), [goals]);
+  const dirty = JSON.stringify(draftGoals) !== JSON.stringify(goals);
+  const updateDraftGoal = (goalId: string, patch: Partial<Goal>) => setDraftGoals((current) => current.map((goal) => goal.id === goalId ? { ...goal, ...patch } : goal));
+  const apply = () => {
+    updateGoalSettings(draftGoals.map((goal) => ({ goalId: goal.id, patch: goal })));
+  };
+  const reset = () => setDraftGoals(goals);
+  return (
+    <div className="goal-settings-draft-editor">
+      <div className="goal-settings-header"><div><h3>Goal Assumptions</h3><p>Central place for goal inputs, phase allocations, drawdown, and consumption glidepath. Goal and Planning pages read these values.</p></div><div className="draft-actions compact-draft-actions"><button className="primary" disabled={!dirty} onClick={apply}>Done editing goals</button><button disabled={!dirty} onClick={reset}>Reset draft</button></div></div>
+      {draftGoals.length === 0 ? <p className="message">No goals yet. Add a goal from Add Entry, then configure assumptions here.</p> : <div className="goal-settings-list">{draftGoals.map((goal) => <GoalSettingsDraftCard key={goal.id} goal={goal} goalExpenses={goalExpenses.filter((row) => row.goalId === goal.id)} updateDraftGoal={updateDraftGoal} currency={currency} />)}</div>}
+    </div>
+  );
+}
+
+function GoalSettingsDraftCard({ goal, goalExpenses, updateDraftGoal, currency }: { goal: Goal; goalExpenses: GoalExpense[]; updateDraftGoal: (goalId: string, patch: Partial<Goal>) => void; currency: string }) {
+  const targetYear = goal.targetDate.slice(0, 4);
+  const expenseSummary = summarizeGoalExpenses(goal, goalExpenses);
+  const expenseDerived = expenseSummary.source === "expenses";
+  const updateAllocation = (phase: "accumulation" | "consumption", category: AssetCategory, value: number) => {
+    const key = phase === "accumulation" ? "accumulationTargetAllocation" : "consumptionTargetAllocation";
+    const current = goal[key] ?? {};
+    updateDraftGoal(goal.id, { [key]: { ...current, [category]: Math.max(0, Number.isFinite(value) ? value : 0) } } as Partial<Goal>);
+  };
+  return (
+    <div className="goal-settings-card">
+      <div className="goal-settings-card-head"><div><strong>{goal.name}</strong><span>{goal.type === "retirement" ? "Retirement" : "Custom"} · target {targetYear}</span></div><label className="goal-include-toggle" title="Excluded goals remain visible individually but are not counted in Combined Goals totals."><input type="checkbox" checked={goal.includeInCombinedGoals !== false} onChange={(event) => updateDraftGoal(goal.id, { includeInCombinedGoals: event.target.checked })} /><span>Combined</span></label></div>
+      <div className="settings-grid compact-settings-grid goal-settings-fields">
+        <label><span>Goal name</span><input value={goal.name} onChange={(event) => updateDraftGoal(goal.id, { name: event.target.value })} /></label>
+        <label><span>Type</span><select value={goal.type} onChange={(event) => updateDraftGoal(goal.id, { type: event.target.value as Goal["type"] })}><option value="retirement">Retirement</option><option value="custom">Custom</option></select></label>
+        <label title={expenseDerived ? "Derived from goal expense rows. Edit the expense CSV above to change this value." : "Manual monthly expense used when no expense rows exist."}><span>{expenseDerived ? "Monthly expense (derived)" : "Monthly expense"}</span><input type="number" value={expenseDerived ? expenseSummary.currentMonthlyExpense : goal.currentMonthlyExpense} disabled={expenseDerived} onChange={(event) => updateDraftGoal(goal.id, { currentMonthlyExpense: Number(event.target.value) })} /><small>{expenseDerived ? String(expenseSummary.rows.length) + " rows · base " + formatMoney(expenseSummary.baseMonthlyExpense, currency) : "manual fallback"}</small></label>
+        <label><span>Pre-goal inflation %</span><input type="number" step="0.1" value={goal.inflationRate} onChange={(event) => updateDraftGoal(goal.id, { inflationRate: Number(event.target.value) })} /></label>
+        <label><span>Target year</span><input type="number" value={targetYear} onChange={(event) => updateDraftGoal(goal.id, { targetDate: normalizeGoalYearInput(event.target.value) + "-01-01" })} /></label>
+        <label><span>Corpus multiple</span><input type="number" step="0.1" value={goal.corpusMultiple} onChange={(event) => updateDraftGoal(goal.id, { corpusMultiple: Number(event.target.value) })} /></label>
+        <label><span>Equity return %</span><input type="number" step="0.1" value={goal.equityReturn} onChange={(event) => updateDraftGoal(goal.id, { equityReturn: Number(event.target.value) })} /></label>
+        <label><span>Debt return %</span><input type="number" step="0.1" value={goal.debtReturn} onChange={(event) => updateDraftGoal(goal.id, { debtReturn: Number(event.target.value) })} /></label>
+        <label><span>Gold return %</span><input type="number" step="0.1" value={goal.goldReturn} onChange={(event) => updateDraftGoal(goal.id, { goldReturn: Number(event.target.value) })} /></label>
+        <label><span>Cash return %</span><input type="number" step="0.1" value={goal.cashReturn} onChange={(event) => updateDraftGoal(goal.id, { cashReturn: Number(event.target.value) })} /></label>
+        <label><span>Spend growth %</span><input type="number" step="0.1" value={goal.drawdownSpendGrowth ?? 6} onChange={(event) => updateDraftGoal(goal.id, { drawdownSpendGrowth: Number(event.target.value) })} /></label>
+        <label><span>Corpus consumption years</span><input type="number" min="1" max="100" value={goal.drawdownHorizonYears ?? 45} onChange={(event) => updateDraftGoal(goal.id, { drawdownHorizonYears: Number(event.target.value) })} /></label>
+        <label><span>Withdrawal timing</span><select value={goal.drawdownWithdrawalTiming ?? "beginning"} onChange={(event) => updateDraftGoal(goal.id, { drawdownWithdrawalTiming: event.target.value as Goal["drawdownWithdrawalTiming"] })}><option value="beginning">Beginning of year</option><option value="end">End of year</option></select></label>
+        <label><span>Glide every years</span><input type="number" min="1" max="50" value={goal.consumptionGlideIntervalYears ?? 5} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideIntervalYears: Number(event.target.value) })} /></label>
+        <label><span>Glide shift %</span><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideShiftPercent ?? 0} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideShiftPercent: Number(event.target.value) })} /></label>
+        <label><span>Shift from</span><select value={goal.consumptionGlideFrom ?? "Equity"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFrom: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+        <label><span>Shift to</span><select value={goal.consumptionGlideTo ?? "Debt"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideTo: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+        <label><span>From-floor %</span><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideFloorPercent ?? 20} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFloorPercent: Number(event.target.value) })} /></label>
+      </div>
+      <div className="goal-settings-phase-grid">
+        <GoalSettingsAllocationBlock title="Accumulation target" detail="Used for goal rebalance before the goal year." goal={goal} phase="accumulation" updateAllocation={updateAllocation} />
+        <GoalSettingsAllocationBlock title="Consumption start target" detail="Starting mix for drawdown; glidepath changes this over time." goal={goal} phase="consumption" updateAllocation={updateAllocation} />
+      </div>
+    </div>
+  );
+}
+
+function GoalSettingsAllocationBlock({ title, detail, goal, phase, updateAllocation }: { title: string; detail: string; goal: Goal; phase: "accumulation" | "consumption"; updateAllocation: (phase: "accumulation" | "consumption", category: AssetCategory, value: number) => void }) {
+  const current = phase === "accumulation" ? goal.accumulationTargetAllocation ?? {} : goal.consumptionTargetAllocation ?? {};
+  return <div className="goal-settings-allocation"><strong>{title}</strong><span>{detail}</span><div className="goal-phase-grid">{categoryOrder.map((category) => <label key={phase + category}><span>{category}</span><input type="number" min="0" max="100" step="1" value={current[category] ?? ""} placeholder="auto" onChange={(event) => updateAllocation(phase, category, Number(event.target.value))} /></label>)}</div></div>;
+}
+
+function allocationLabel(allocation: Record<AssetCategory, number>): string {
+  return categoryOrder.filter((category) => allocation[category] > 0).map((category) => category[0] + " " + allocation[category].toFixed(0) + "%").join(" · ") || "-";
+}
+
 function ImportPreviewPanel({ preview, currency }: { preview: ManualImportPreview | null; currency: string }) {
   if (!preview) return <p className="message">Preview before committing to see new rows, updates, duplicates, and net-worth impact.</p>;
   const hasErrors = preview.errors.length > 0;
+  const preservedRows = preview.rows.filter((row) => row.action === "preserve").length;
+  const removedRows = preview.rows.filter((row) => row.action === "remove").length;
   return (
     <div className="import-preview-panel">
       <h3>Import Preview</h3>
@@ -2411,6 +2807,8 @@ function ImportPreviewPanel({ preview, currency }: { preview: ManualImportPrevie
         <MiniInsight label="Net worth delta" value={formatMoney(preview.deltas.netWorth, currency)} detail="after minus before, not committed" />
         <MiniInsight label="Holdings delta" value={String(preview.deltas.holdings)} detail={preview.after.holdings + " after preview"} />
         <MiniInsight label="Duplicates" value={String(preview.effective.skippedDuplicates)} detail="rows skipped on commit" />
+        <MiniInsight label="Preserved" value={String(preservedRows)} detail="matching user edits retained" />
+        <MiniInsight label="Removed" value={String(removedRows)} detail="stale rows in replace mode" />
       </div>
       {hasErrors && <div className="error-list">{preview.errors.map((error) => <div key={error.row + error.message}>Row {error.row}: {error.message}</div>)}</div>}
       <div className="table-wrap"><table><thead><tr><th>Action</th><th>Kind</th><th>Record</th><th>Detail</th></tr></thead><tbody>{preview.rows.slice(0, 60).map((row, index) => <tr key={row.kind + row.label + row.action + index}><td>{row.action}</td><td>{row.kind}</td><td>{row.label}</td><td>{row.detail}</td></tr>)}</tbody></table></div>
@@ -2539,19 +2937,19 @@ function RiskPanel({ scopedAnalytics, holdingReturns, currency, timelineCoverage
       <div className="panel-intro-card">
         <span className="eyebrow">Risk and trust cockpit</span>
         <h2>{scopedAnalytics.label}</h2>
-        <p>Concentration, issuer/currency exposure, valuation coverage, and data warnings for the selected scope. This is a portfolio-risk view; parser trust details stay in the Data section.</p>
+        <p>Concentration, AMC/platform and currency exposure, valuation coverage, and data warnings for the selected scope. This is a portfolio-risk view; parser trust details stay in the Data section.</p>
       </div>
       <div className="holding-command-strip">
         <MiniInsight label="Top 1" value={current <= 0 ? "0.0%" : ((topOne / current) * 100).toFixed(1) + "%"} detail={holdings[0] ? displayHoldingName(holdings[0].label) : "no holdings"} />
         <MiniInsight label="Top 3" value={current <= 0 ? "0.0%" : ((topThree / current) * 100).toFixed(1) + "%"} detail="largest three holdings" />
         <MiniInsight label="Top 5" value={current <= 0 ? "0.0%" : ((topFive / current) * 100).toFixed(1) + "%"} detail="largest five holdings" />
-        <MiniInsight label="Largest Issuer" value={issuerTop ? chartLabel(issuerTop.name) : "-"} detail={issuerTop && current > 0 ? ((issuerTop.value / current) * 100).toFixed(1) + "% of scope" : "no issuer exposure"} />
+        <MiniInsight label="Largest AMC / Platform" value={issuerTop ? chartLabel(issuerTop.name) : "-"} detail={issuerTop && current > 0 ? ((issuerTop.value / current) * 100).toFixed(1) + "% of scope" : "no issuer exposure"} />
       </div>
       <div className="analytics-grid">
         <ChartCard title="Asset Class Exposure"><DonutChart data={scopedAnalytics.chartData.allocation} currency={currency} /></ChartCard>
         <ChartCard title="Region Exposure"><HorizontalBar data={scopedAnalytics.chartData.region} currency={currency} /></ChartCard>
         <ChartCard title="Currency Exposure"><HorizontalBar data={currencyRows} currency={currency} /></ChartCard>
-        <ChartCard title="Issuer Concentration"><HorizontalBar data={scopedAnalytics.chartData.issuer} currency={currency} /></ChartCard>
+        <ChartCard title="AMC / Platform Concentration"><HorizontalBar data={scopedAnalytics.chartData.issuer} currency={currency} /></ChartCard>
       </div>
       <div className="risk-grid">
         <div className="card"><h2>Data Warnings In Scope</h2><div className="signal-list">
@@ -2647,7 +3045,7 @@ function AnalyticsScopeSelector({ scope, setScope, goals, combinedGoalCount }: {
 function AnalyticsTabs({ active, setActive }: { active: AnalyticsTab; setActive: (tab: AnalyticsTab) => void }) {
   const tabs: Array<{ id: AnalyticsTab; label: string; detail: string }> = [
     { id: "overview", label: "Overview", detail: "current value and signals" },
-    { id: "allocation", label: "Allocation", detail: "class, region, issuer" },
+    { id: "allocation", label: "Allocation", detail: "class, region, platform" },
     { id: "returns", label: "Returns", detail: "profit, loss, XIRR" },
     { id: "risk", label: "Risk", detail: "concentration and gaps" },
     { id: "history", label: "History", detail: "market-data dependent" }
@@ -2674,13 +3072,15 @@ type NativeLineHover = { x: number; y: number; date: string; rows: Array<{ label
 
 function NativeLineChart({ series, currency, note, emptyMessage }: { series: NativeLineSeries[]; currency: string; note?: string; emptyMessage: string }) {
   const [hover, setHover] = useState<NativeLineHover | null>(null);
-  const visibleSeries = series.map((item) => ({ ...item, points: item.points.filter((point) => point.value !== null && Number.isFinite(point.value)) })).filter((item) => item.points.length > 0);
+  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(() => new Set());
+  const normalizedSeries = series.map((item) => ({ ...item, points: item.points.filter((point) => point.value !== null && Number.isFinite(point.value)) })).filter((item) => item.points.length > 0);
+  const visibleSeries = normalizedSeries.filter((item) => !hiddenKeys.has(item.key));
   const allPoints = visibleSeries.flatMap((item) => item.points.map((point) => ({ ...point, value: point.value ?? 0 })));
-  if (allPoints.length === 0) return <p className="message">{emptyMessage}</p>;
+  if (normalizedSeries.length === 0 || allPoints.length === 0) return <p className="message">{emptyMessage}</p>;
 
   const width = 780;
   const height = 320;
-  const pad = { left: 76, right: 22, top: 30, bottom: 68 };
+  const pad = { left: 76, right: 24, top: 30, bottom: 58 };
   const xs = allPoints.map((point) => point.ts);
   const values = allPoints.map((point) => point.value);
   const minX = Math.min(...xs);
@@ -2693,35 +3093,63 @@ function NativeLineChart({ series, currency, note, emptyMessage }: { series: Nat
   const xFor = (ts: number) => maxX === minX ? pad.left + plotWidth / 2 : pad.left + ((ts - minX) / (maxX - minX)) * plotWidth;
   const yFor = (value: number) => pad.top + plotHeight - ((value - minY) / (maxY - minY)) * plotHeight;
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => minY + (maxY - minY) * ratio);
-  const xTicks = nativeTimelineTicks(allPoints);
+  const xTicks = nativeTimelineTicks(allPoints, 4);
   const tooltipHeight = hover ? Math.min(230, Math.max(96, 34 + hover.rows.length * 24)) : 112;
+  const activeCount = visibleSeries.length;
+  const toggleSeries = (key: string) => {
+    setHover(null);
+    setHiddenKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else if (activeCount > 1) {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+  const updateHoverFromPointer = (event: PointerEvent<SVGSVGElement>) => {
+    const svg = event.currentTarget;
+    const box = svg.getBoundingClientRect();
+    const x = ((event.clientX - box.left) / Math.max(1, box.width)) * width;
+    setHover(nativeLineHoverForNearestX(x, visibleSeries, xFor, yFor));
+  };
 
   return (
     <div className="native-line-chart-block">
-      <div className="native-line-legend">
-        {visibleSeries.map((item) => <span key={item.key}><i style={{ background: item.color }} />{item.label}</span>)}
+      <div className="native-line-legend" role="toolbar" aria-label="Chart series visibility">
+        {normalizedSeries.map((item) => {
+          const hidden = hiddenKeys.has(item.key);
+          return <button type="button" className="native-line-legend-item" key={item.key} aria-pressed={!hidden} onClick={() => toggleSeries(item.key)} title={(hidden ? "Show " : "Hide ") + item.label}><i style={{ background: item.color }} />{item.label}</button>;
+        })}
       </div>
-      <svg className="native-line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Time series chart" onMouseLeave={() => setHover(null)} onPointerLeave={() => setHover(null)}>
+      <svg className="native-line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Interactive time series chart" onPointerMove={updateHoverFromPointer} onPointerLeave={() => setHover(null)} onMouseLeave={() => setHover(null)}>
         <rect className="native-line-bg" x={pad.left} y={pad.top} width={plotWidth} height={plotHeight} rx="10" />
         {yTicks.map((tick) => {
           const y = yFor(tick);
           return <g key={tick.toFixed(2)}><line className="native-line-grid" x1={pad.left} x2={width - pad.right} y1={y} y2={y} /><text className="native-line-axis" x={pad.left - 10} y={y + 4} textAnchor="end">{compactMoney(tick)}</text></g>;
         })}
-        {xTicks.map((tick) => <text className="native-line-axis native-line-x-axis" key={tick.ts} x={xFor(tick.ts)} y={height - 24} textAnchor="end" transform={"rotate(-35 " + xFor(tick.ts) + " " + (height - 24) + ")"}>{tick.label}</text>)}
+        {xTicks.map((tick) => <text className="native-line-axis native-line-x-axis" key={tick.ts} x={xFor(tick.ts)} y={height - 26} textAnchor="middle">{tick.label}</text>)}
+        {hover && <line className="native-line-crosshair" x1={hover.x} x2={hover.x} y1={pad.top} y2={pad.top + plotHeight} />}
         {visibleSeries.map((item) => {
-          const path = linePath(item.points, xFor, yFor);
+          const sortedPoints = [...item.points].sort((a, b) => a.ts - b.ts);
+          const path = linePath(sortedPoints, xFor, yFor);
+          const markerIndexes = markerIndexesForSeries(sortedPoints.length);
           return (
             <g key={item.key}>
-              {path && <path className="native-line-path" d={path} fill="none" stroke={item.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" strokeDasharray={item.dashed ? "7 6" : undefined}><title>{item.label}: {item.points.length === 1 ? "single snapshot point" : item.points.length + " points"}</title></path>}
-              {item.points.map((point) => {
+              {path && sortedPoints.length > 1 && <path className="native-line-path native-line-underlay" d={path} fill="none" stroke={item.color} strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" opacity="0.12" />}
+              {path && <path className="native-line-path" d={path} fill="none" stroke={item.color} strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray={item.dashed ? "10 8" : undefined}><title>{item.label}: {item.points.length === 1 ? "single snapshot point" : item.points.length + " connected points"}</title></path>}
+              {sortedPoints.map((point, index) => {
                 const value = point.value ?? 0;
-                return <circle className="native-line-dot" key={item.key + point.ts + value} cx={xFor(point.ts)} cy={yFor(value)} r="5.4" fill={item.color} tabIndex={0} onPointerEnter={() => setHover(nativeLineHoverForPoint(point.ts, visibleSeries, xFor, yFor))} onPointerOver={() => setHover(nativeLineHoverForPoint(point.ts, visibleSeries, xFor, yFor))} onMouseEnter={() => setHover(nativeLineHoverForPoint(point.ts, visibleSeries, xFor, yFor))} onMouseOver={() => setHover(nativeLineHoverForPoint(point.ts, visibleSeries, xFor, yFor))} onFocus={() => setHover(nativeLineHoverForPoint(point.ts, visibleSeries, xFor, yFor))}><title>{item.label}: {formatMoney(value, currency)} on {point.date}</title></circle>;
+                const emphasized = markerIndexes.has(index) || sortedPoints.length <= 12;
+                const hoverForPoint = () => setHover(nativeLineHoverForPoint(point.ts, visibleSeries, xFor, yFor));
+                return <g className="native-line-point-target" key={item.key + point.ts + value} tabIndex={0} onPointerEnter={hoverForPoint} onPointerDown={hoverForPoint} onMouseEnter={hoverForPoint} onMouseOver={hoverForPoint} onFocus={hoverForPoint}><circle className="native-line-hit" cx={xFor(point.ts)} cy={yFor(value)} r="12" fill="transparent" /><circle className={"native-line-dot" + (emphasized ? " emphasized" : " subtle")} cx={xFor(point.ts)} cy={yFor(value)} r={emphasized ? 5.4 : 3.2} fill={item.color}><title>{item.label}: {formatMoney(value, currency)} on {point.date}</title></circle></g>;
               })}
             </g>
           );
         })}
         {hover && (
-          <foreignObject className="native-line-tooltip-wrap" x={Math.min(width - 248, Math.max(pad.left + 4, hover.x + 12))} y={Math.min(height - tooltipHeight - 8, Math.max(8, hover.y - 54))} width="236" height={tooltipHeight}>
+          <foreignObject className="native-line-tooltip-wrap" x={Math.min(width - 260, Math.max(pad.left + 4, hover.x + 12))} y={Math.min(height - tooltipHeight - 8, Math.max(8, hover.y - 54))} width="248" height={tooltipHeight}>
             <div className="native-line-tooltip">
               <strong>{hover.date}</strong>
               {hover.rows.map((row) => <span key={row.label}><i style={{ background: row.color }} />{row.label}<b>{formatMoney(row.value, currency)}</b></span>)}
@@ -2729,7 +3157,7 @@ function NativeLineChart({ series, currency, note, emptyMessage }: { series: Nat
           </foreignObject>
         )}
       </svg>
-      <p className="chart-note">{note ? note + " " : ""}Dots indicate dated valuation points; a series becomes a line when at least two dated points exist. Hover or focus a dot to inspect all series values for that date.</p>
+      <p className="chart-note">{note ? note + " " : ""}Lines connect dated valuation points. Use the legend to show or hide series; hover, tap, or focus the chart to inspect values for a date.</p>
     </div>
   );
 }
@@ -2746,6 +3174,20 @@ function nativeLineHoverForPoint(ts: number, series: Array<NativeLineSeries & { 
   return { x: xFor(ts), y: yFor(firstPoint.value), date: firstPoint.date, rows };
 }
 
+function nativeLineHoverForNearestX(x: number, series: Array<NativeLineSeries & { points: NativeLinePoint[] }>, xFor: (ts: number) => number, yFor: (value: number) => number): NativeLineHover | null {
+  let nearest: NativeLinePoint | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (const point of series.flatMap((item) => item.points)) {
+    if (point.value === null) continue;
+    const distance = Math.abs(xFor(point.ts) - x);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearest = point;
+    }
+  }
+  return nearest ? nativeLineHoverForPoint(nearest.ts, series, xFor, yFor) : null;
+}
+
 function linePath(points: NativeLinePoint[], xFor: (ts: number) => number, yFor: (value: number) => number): string {
   return points.map((point, index) => {
     const value = point.value ?? 0;
@@ -2753,7 +3195,17 @@ function linePath(points: NativeLinePoint[], xFor: (ts: number) => number, yFor:
   }).join(" ");
 }
 
-function nativeTimelineTicks(points: Array<{ ts: number; date: string }>): Array<{ ts: number; label: string }> {
+function markerIndexesForSeries(length: number): Set<number> {
+  if (length <= 12) return new Set(Array.from({ length }, (_, index) => index));
+  const markers = new Set<number>([0, length - 1]);
+  const targetCount = Math.min(10, Math.max(5, Math.round(Math.sqrt(length))));
+  for (let index = 1; index < targetCount - 1; index += 1) {
+    markers.add(Math.round((index / (targetCount - 1)) * (length - 1)));
+  }
+  return markers;
+}
+
+function nativeTimelineTicks(points: Array<{ ts: number; date: string }>, maxTicks = 5): Array<{ ts: number; label: string }> {
   if (points.length === 0) return [];
   const sorted = [...points].sort((a, b) => a.ts - b.ts);
   const unique: Array<{ ts: number; label: string }> = [];
@@ -2764,10 +3216,11 @@ function nativeTimelineTicks(points: Array<{ ts: number; date: string }>): Array
     seen.add(label);
     unique.push({ ts: point.ts, label });
   }
-  if (unique.length <= 5) return unique;
+  if (unique.length <= maxTicks) return unique;
   const lastIndex = unique.length - 1;
+  const tickCount = Math.max(2, maxTicks);
   const indexes = new Set<number>();
-  for (let index = 0; index < 5; index += 1) indexes.add(Math.round((index / 4) * lastIndex));
+  for (let index = 0; index < tickCount; index += 1) indexes.add(Math.round((index / (tickCount - 1)) * lastIndex));
   return [...indexes].sort((a, b) => a - b).map((index) => unique[index]);
 }
 
@@ -2841,7 +3294,7 @@ function CurrentAllocationExplorer({ datasets, currency }: { datasets: { allocat
     { id: "category", label: "Class" },
     { id: "assetType", label: "Asset" },
     { id: "region", label: "Region" },
-    { id: "issuer", label: "Issuer" },
+    { id: "issuer", label: "AMC / Platform" },
     { id: "provider", label: "Source" }
   ];
   const rows = view === "category" ? datasets.allocation : datasets[view];
@@ -2979,7 +3432,7 @@ function HorizontalBar({ data, currency }: { data: Array<{ name: string; value: 
         const color = chartColors[index % chartColors.length];
         const visualWidth = Math.max(4, percent);
         return (
-          <div className="metric-bar-row" key={item.fullName} title={item.fullName + " · " + formatMoney(item.value, currency)} style={{ "--bar-color": color, "--bar-percent": visualWidth + "%" } as CSSProperties}>
+          <div className="metric-bar-row" key={item.fullName} tabIndex={0} aria-label={item.fullName + ": " + formatMoney(item.value, currency)} title={item.fullName + " · " + formatMoney(item.value, currency)} style={{ "--bar-color": color, "--bar-percent": visualWidth + "%" } as CSSProperties}>
             <div className="metric-bar-label"><span>{index + 1}</span><strong>{item.shortName}</strong><em>{percent.toFixed(1)}%</em></div>
             <div className="metric-bar-track" aria-hidden="true"><span style={{ width: visualWidth + "%", background: color }} /></div>
             <strong className="metric-bar-value">{formatMoney(item.value, currency)}</strong>
@@ -3010,7 +3463,7 @@ function RankingBar({ data, formatValue, emptyMessage, tone = "value" }: Ranking
         const share = total <= 0 ? 0 : (item.value / total) * 100;
         const color = chartColors[index % chartColors.length];
         return (
-          <div className="ranking-row" key={item.fullName} role="listitem" title={item.fullName + " · " + formatValue(item.value)} style={{ "--bar-color": color, "--bar-percent": width + "%" } as CSSProperties}>
+          <div className="ranking-row" key={item.fullName} role="listitem" tabIndex={0} aria-label={item.fullName + ": " + formatValue(item.value)} title={item.fullName + " · " + formatValue(item.value)} style={{ "--bar-color": color, "--bar-percent": width + "%" } as CSSProperties}>
             <div className="ranking-label"><span>{index + 1}</span><strong>{item.shortName}</strong>{item.tag && <em className="ranking-tag">{item.tag}</em>}</div>
             <div className="ranking-track" aria-hidden="true"><div className="ranking-fill" style={{ width: width + "%", background: color }} /></div>
             <div className="ranking-value-block"><strong className="ranking-value">{formatValue(item.value)}</strong><span>{share.toFixed(1)}%</span></div>
@@ -3223,6 +3676,11 @@ function dateLabel(value: number): string {
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+function importRunLabel(run: ImportRun): string {
+  const created = new Date(run.committedAt ?? run.createdAt).toLocaleDateString();
+  return (run.label ?? run.fileName ?? run.id) + " · " + run.provider + " · " + created;
 }
 
 function latestAsOfDate(dates: string[]): string {

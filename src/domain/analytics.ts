@@ -1,6 +1,7 @@
 import type { Account, AssetCategory, Instrument, ManualBalance, PortfolioBackup, TaperMode, Transaction } from "@/src/schema/backup";
 import { calculateXirr } from "@/src/domain/xirr";
 import { calculateTrackedLocalValue } from "@/src/domain/tapering";
+import { assetKindDimension, cleanDimension, issuerOrPlatformDimension, regionDimension } from "@/src/domain/dimensions";
 
 const categories: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
 
@@ -192,10 +193,10 @@ function buildHoldingInsight(balance: ManualBalance, backup: PortfolioBackup, mi
     id: balance.id,
     label: balance.label,
     category: balance.category,
-    assetKind: assetKind(instrument, account),
+    assetKind: assetKindDimension(instrument, account),
     accountType: account?.type,
     instrumentType: instrument?.type,
-    region: region(instrument, account, balance.currency),
+    region: regionDimension(instrument, account, balance.currency),
     currency: balance.currency,
     value: balance.value,
     valueInBase: valueInBase === undefined ? undefined : roundMoney(valueInBase),
@@ -212,15 +213,10 @@ function buildHoldingInsight(balance: ManualBalance, backup: PortfolioBackup, mi
     asOfDate: balance.asOfDate,
     provider: cleanDimension(balance.source.provider) ?? balance.source.type,
     institution: cleanDimension(account?.institution) ?? cleanDimension(balance.source.provider) ?? "Manual",
-    issuer: cleanDimension(instrument?.issuer) ?? cleanDimension(account?.institution) ?? cleanDimension(balance.source.provider) ?? "Manual"
+    issuer: issuerOrPlatformDimension(instrument, account, balance.source.provider)
   };
 }
 
-function cleanDimension(value?: string): string | undefined {
-  const cleaned = value?.trim();
-  if (!cleaned || cleaned === "0" || cleaned === "-" || /^n\/?a$/i.test(cleaned)) return undefined;
-  return cleaned;
-}
 
 function groupHoldings(holdings: HoldingInsight[], key: "provider" | "institution" | "issuer" | "assetKind" | "region"): Array<{ name: string; value: number }> {
   const totals = new Map<string, number>();
@@ -414,26 +410,6 @@ function isCashTransaction(tx: Transaction, backup: PortfolioBackup): boolean {
   return account?.type === "cash" || instrument?.type === "cash";
 }
 
-function assetKind(instrument?: Instrument, account?: Account): string {
-  const type = instrument?.type ?? account?.type;
-  if (type === "mutual_fund") return "Mutual Fund";
-  if (type === "indian_stock" || type === "us_stock") return "Direct Stock";
-  if (type === "cash") return "Cash";
-  if (type === "fd") return "Fixed Deposit";
-  if (type === "ppf") return "PPF";
-  if (type === "ssy") return "SSY";
-  if (type === "nps") return "NPS";
-  if (type === "epf") return "PF";
-  if (type === "gold") return "Gold";
-  if (type === "espp") return "ESPP";
-  return "Other";
-}
-
-function region(instrument?: Instrument, account?: Account, currency?: string): string {
-  if (instrument?.country === "US" || account?.currency === "USD" || currency === "USD") return "US";
-  if (instrument?.country === "IN" || account?.currency === "INR" || currency === "INR") return "India";
-  return "Other";
-}
 
 function add(record: Record<string, number>, key: string, value: number) {
   record[key] = (record[key] ?? 0) + value;

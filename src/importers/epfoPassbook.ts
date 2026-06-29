@@ -1,4 +1,5 @@
 import { stableHash, slugId } from "@/src/domain/hash";
+import { applyImportedRecordSet } from "@/src/importers/importReplace";
 import type { Account, ImportRun, Instrument, ManualBalance, PortfolioBackup, SourceDocument, Transaction } from "@/src/schema/backup";
 
 export type EpfoBalanceBucket = {
@@ -175,18 +176,8 @@ export function buildCanonicalEpfoImport(parsed: EpfoPassbookParseResult, option
   return { accounts: [account], instruments, transactions, manualBalances, importRun, sourceDocument };
 }
 
-export function applyCanonicalEpfoImport(base: PortfolioBackup, imported: EpfoCanonicalImport): PortfolioBackup {
-  const now = new Date().toISOString();
-  return {
-    ...base,
-    exportedAt: now,
-    accounts: mergeById(base.accounts, imported.accounts),
-    instruments: mergeById(base.instruments, imported.instruments),
-    transactions: mergeById(base.transactions, imported.transactions),
-    manualBalances: mergeLatestManualBalances(base.manualBalances, imported.manualBalances),
-    imports: mergeById(base.imports, [{ ...imported.importRun, status: "committed", committedAt: now }]),
-    sourceDocuments: imported.sourceDocument ? mergeById(base.sourceDocuments, [imported.sourceDocument]) : base.sourceDocuments
-  };
+export function applyCanonicalEpfoImport(base: PortfolioBackup, imported: EpfoCanonicalImport, options: { replaceImportId?: string } = {}): PortfolioBackup {
+  return applyImportedRecordSet(base, imported, { now: new Date().toISOString(), replaceImportId: options.replaceImportId, latestManualBalances: true });
 }
 
 function toBuckets(values: number[], date?: string): EpfoContributionBucket[] {

@@ -84,9 +84,18 @@ describe("NPS statement importer", () => {
     const newer = buildCanonicalNpsImport(parseNpsCsv(npsCsv), { importId: "nps_newer", fileName: "nps-newer.csv", now: "2026-06-22T00:00:00.000Z" });
     const older = buildCanonicalNpsImport(parseNpsCsv(olderCsv), { importId: "nps_older", fileName: "nps-older.csv", now: "2026-06-22T00:00:00.000Z" });
 
-    const backup = applyCanonicalNpsImport(applyCanonicalNpsImport(createEmptyBackup("INR"), newer), older);
+    const first = applyCanonicalNpsImport(createEmptyBackup("INR"), newer);
+    const scheme = first.manualBalances.find((balance) => balance.label === "SBI PENSION FUND SCHEME E - TIER I POP")!;
+    const edited = {
+      ...first,
+      manualBalances: first.manualBalances.map((balance) => balance.id === scheme.id ? { ...balance, taperMode: "light" as const, taperFactor: 0.02 } : balance),
+      goalMappings: [{ id: "map_nps", goalId: "goal_1", manualBalanceId: scheme.id, percent: 100, createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" }]
+    };
 
-    expect(backup.manualBalances.find((balance) => balance.label === "SBI PENSION FUND SCHEME E - TIER I POP")).toMatchObject({ value: 100000.5, asOfDate: "2026-06-20" });
+    const backup = applyCanonicalNpsImport(edited, older);
+
+    expect(backup.manualBalances.find((balance) => balance.label === "SBI PENSION FUND SCHEME E - TIER I POP")).toMatchObject({ id: scheme.id, value: 100000.5, asOfDate: "2026-06-20", taperMode: "light", taperFactor: 0.02 });
+    expect(backup.goalMappings).toEqual([{ id: "map_nps", goalId: "goal_1", manualBalanceId: scheme.id, percent: 100, createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" }]);
     expect(backup.transactions.length).toBeGreaterThan(newer.transactions.length);
     expect(backup.imports).toHaveLength(2);
   });

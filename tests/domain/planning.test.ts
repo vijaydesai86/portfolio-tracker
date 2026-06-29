@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createEmptyBackup, type PortfolioBackup } from "@/src/schema/backup";
 import { buildGoal, calculateGoalProgress, createGoalMapping } from "@/src/domain/goalAnalytics";
+import { parseGoalExpenseCsv, mergeGoalExpenses } from "@/src/domain/goalExpenses";
 import {
   calculateGoalDrawdowns,
   calculateGoalRebalancingPlans,
@@ -114,6 +115,24 @@ describe("planning analytics", () => {
     expect(report[0].points.length).toBeGreaterThan(5);
     expect(report[0].startingCorpus).toBe(progress[0].projectedValue);
     expect(report[0].firstYearWithdrawal).toBe(progress[0].firstYearExpense);
+    expect(report[0].points[0].drawdownPercent).toBeCloseTo((report[0].points[0].withdrawal / report[0].points[0].startingCorpus) * 100, 1);
+  });
+
+
+  it("uses goal expense rows as drawdown first withdrawal input", () => {
+    const backup = backupFixture();
+    backup.goals[0] = { ...backup.goals[0], currentMonthlyExpense: 1, inflationRate: 0, corpusMultiple: 10 };
+    const parsed = parseGoalExpenseCsv(`expense,amount\nGrocery,50000\nVegetable,50000\nMilk,20000\nFuel,20000\nOthers,1559`, backup, { goalId: backup.goals[0].id, baseDate: "2026-06-28", now: "2026-06-28T00:00:00.000Z" });
+    backup.goalExpenses = mergeGoalExpenses([], parsed.rows, parsed.affectedGoalIds, "2026-06-28T00:00:00.000Z");
+
+    const progress = calculateGoalProgress(backup)[0];
+    const report = calculateGoalDrawdowns([progress], getPlanningSettings(backup))[0];
+
+    expect(parsed.errors).toEqual([]);
+    expect(progress.expenseSource).toBe("expenses");
+    expect(progress.firstYearExpense).toBe(1698708);
+    expect(report.firstYearWithdrawal).toBe(1698708);
+    expect(report.points[0].withdrawal).toBe(1698708);
   });
 
   it("uses per-goal drawdown assumptions instead of one global assumption", () => {
@@ -136,6 +155,37 @@ describe("planning analytics", () => {
     expect(education?.withdrawalTiming).toBe("end");
   });
 
+  it("derives yearly drawdown returns from the consumption glidepath allocation", () => {
+    const backup = backupFixture();
+    backup.goals[0] = {
+      ...backup.goals[0],
+      equityReturn: 10,
+      debtReturn: 5,
+      cashReturn: 3,
+      consumptionTargetAllocation: { Equity: 60, Debt: 35, Gold: 0, Others: 0, Cash: 5 },
+      consumptionGlideIntervalYears: 2,
+      consumptionGlideShiftPercent: 10,
+      consumptionGlideFrom: "Equity",
+      consumptionGlideTo: "Debt",
+      consumptionGlideFloorPercent: 40,
+      drawdownHorizonYears: 6
+    };
+
+    const report = calculateGoalDrawdowns(calculateGoalProgress(backup), getPlanningSettings(backup))[0];
+
+    expect(report.points[0].allocation.Equity).toBe(60);
+    expect(report.points[0].allocation.Debt).toBe(35);
+    expect(report.points[0].weightedReturn).toBeCloseTo(7.9, 5);
+    expect(report.points[2].allocation.Equity).toBe(50);
+    expect(report.points[2].allocation.Debt).toBe(45);
+    expect(report.points[2].weightedReturn).toBeCloseTo(7.4, 5);
+    expect(report.points[4].allocation.Equity).toBe(40);
+    expect(report.points[4].allocation.Debt).toBe(55);
+    expect(report.points[4].weightedReturn).toBeCloseTo(6.9, 5);
+    expect(report.points[5].allocation.Equity).toBe(40);
+    expect(report.finalAllocation.Equity).toBe(40);
+  });
+
   it("uses corpus consumption years as the exact drawdown projection length", () => {
     const backup = backupFixture();
     backup.goals[0] = { ...backup.goals[0], drawdownHorizonYears: 8, drawdownSpendGrowth: 5, drawdownWithdrawalTiming: "beginning" };
@@ -147,6 +197,25 @@ describe("planning analytics", () => {
     expect(report.points[0].calendarYear).toBe(Number.parseInt(report.targetYear.toString(), 10));
     expect(report.points.at(-1)?.calendarYear).toBe(report.targetYear + 7);
   });
+
+
+  it("uses per-goal accumulation and consumption target allocations", () => {
+    const backup = backupFixture();
+    backup.goals[0] = {
+      ...backup.goals[0],
+      accumulationTargetAllocation: { Equity: 20, Debt: 70, Gold: 0, Others: 0, Cash: 10 },
+      consumptionTargetAllocation: { Equity: 0, Debt: 100, Gold: 0, Others: 0, Cash: 0 }
+    };
+
+    const progress = calculateGoalProgress(backup);
+    const rebalancing = calculateGoalRebalancingPlans(progress, getPlanningSettings(backup))[0];
+    const drawdown = calculateGoalDrawdowns(progress, getPlanningSettings(backup))[0];
+
+    expect(rebalancing.rows.find((row) => row.category === "Equity")?.targetPercent).toBe(20);
+    expect(rebalancing.rows.find((row) => row.category === "Debt")?.targetPercent).toBe(70);
+    expect(drawdown.weightedReturn).toBe(backup.goals[0].debtReturn);
+  });
+
 
   it("compares frozen snapshots without market refresh", () => {
     const first = createPortfolioSnapshot(backupFixture(), { name: "First", now: "2026-06-28T00:00:00.000Z" });

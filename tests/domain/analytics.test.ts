@@ -235,6 +235,28 @@ describe("portfolio analytics", () => {
     expect(insights.transactionStats.investedBase).toBe(80000);
     expect(insights.xirrBase).toBeCloseTo(27.52, 1);
   });
+
+  it("uses account institution, not stock issuer, for current stock issuer/platform charts", () => {
+    const backup = createEmptyBackup("INR");
+    backup.accounts.push(
+      { id: "acct_ind", name: "INDMoney US", institution: "INDMoney", type: "us_stock", currency: "USD", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "acct_fid", name: "Fidelity US", institution: "Fidelity", type: "us_stock", currency: "USD", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    );
+    backup.instruments.push({ id: "inst_arm", name: "Arm Holdings PLC ADR", type: "us_stock", symbol: "ARM", currency: "USD", country: "US", category: "Equity", issuer: "ARM", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.manualBalances.push(
+      { id: "bal_ind", accountId: "acct_ind", instrumentId: "inst_arm", label: "ARM", category: "Equity", currency: "USD", value: 200, quantity: 10, price: 20, asOfDate: "2026-06-22", source: { type: "import", provider: "indmoney_export" }, userModified: false, createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" },
+      { id: "bal_fid", accountId: "acct_fid", instrumentId: "inst_arm", label: "ARM", category: "Equity", currency: "USD", value: 100, quantity: 5, price: 20, asOfDate: "2026-06-22", source: { type: "import", provider: "manual_positions" }, userModified: false, createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" }
+    );
+    backup.priceSnapshots.push({ id: "fx", instrumentId: "USDINR", price: 80, currency: "INR", asOfDate: "2026-06-22", source: "test", createdAt: "2026-06-22T00:00:00.000Z" });
+
+    const insights = calculatePortfolioInsights(backup);
+
+    expect(insights.totalsByIssuer).toEqual([
+      { name: "INDMoney", value: 16000 },
+      { name: "Fidelity", value: 8000 }
+    ]);
+  });
+
 });
 
 describe("INR-first multi-currency analytics", () => {

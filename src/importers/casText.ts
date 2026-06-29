@@ -10,6 +10,7 @@ import type {
   Transaction
 } from "@/src/schema/backup";
 import { slugId, stableHash } from "@/src/domain/hash";
+import { applyImportedRecordSet } from "@/src/importers/importReplace";
 
 export type CasTransactionType =
   | "purchase"
@@ -379,17 +380,8 @@ export function buildCanonicalCasImport(
   return { accounts, instruments, transactions, manualBalances, priceSnapshots, importRun, sourceDocument };
 }
 
-export function applyCanonicalCasImport(base: PortfolioBackup, imported: CasCanonicalImport): PortfolioBackup {
-  return {
-    ...base,
-    accounts: mergeById(base.accounts, imported.accounts),
-    instruments: mergeById(base.instruments, imported.instruments),
-    transactions: mergeById(base.transactions, imported.transactions),
-    manualBalances: mergeById(base.manualBalances, imported.manualBalances),
-    priceSnapshots: mergeById(base.priceSnapshots, imported.priceSnapshots),
-    imports: mergeById(base.imports, [imported.importRun]),
-    sourceDocuments: imported.sourceDocument ? mergeById(base.sourceDocuments, [imported.sourceDocument]) : base.sourceDocuments
-  };
+export function applyCanonicalCasImport(base: PortfolioBackup, imported: CasCanonicalImport, options: { replaceImportId?: string } = {}): PortfolioBackup {
+  return applyImportedRecordSet(base, imported, { now: new Date().toISOString(), replaceImportId: options.replaceImportId });
 }
 
 function mergeById<T extends { id: string }>(existing: T[], incoming: T[]): T[] {

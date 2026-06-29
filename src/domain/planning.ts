@@ -3,7 +3,7 @@ import { calculateDashboardPerformance } from "@/src/domain/dashboardPerformance
 import type { GoalProgress } from "@/src/domain/goalAnalytics";
 import { calculateHoldingReturns } from "@/src/domain/holdingReturns";
 import { snapshotAnalytics } from "@/src/domain/snapshots";
-import type { AssetCategory, PortfolioBackup } from "@/src/schema/backup";
+import type { AssetCategory, Goal, PortfolioBackup } from "@/src/schema/backup";
 
 const categories: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
 
@@ -96,6 +96,9 @@ export type GoalDrawdownPoint = {
   calendarYear: number;
   startingCorpus: number;
   withdrawal: number;
+  drawdownPercent: number;
+  allocation: TargetAllocationSettings;
+  weightedReturn: number;
   growth: number;
   endingCorpus: number;
 };
@@ -107,12 +110,22 @@ export type GoalDrawdownReport = {
   startingCorpus: number;
   firstYearWithdrawal: number;
   weightedReturn: number;
+  averageWeightedReturn: number;
   annualSpendGrowth: number;
   horizonYears: number;
   withdrawalTiming: DrawdownSettings["withdrawalTiming"];
   depletionYear: number | null;
   lastsYears: number;
   surplusAtHorizon: number;
+  initialAllocation: TargetAllocationSettings;
+  finalAllocation: TargetAllocationSettings;
+  glideRule: {
+    intervalYears: number;
+    shiftPercent: number;
+    from: AssetCategory;
+    to: AssetCategory;
+    floorPercent: number;
+  };
   points: GoalDrawdownPoint[];
 };
 
@@ -280,8 +293,8 @@ export function calculateRebalancingPlan(backup: PortfolioBackup, settings = get
 }
 
 export function calculateGoalRebalancingPlans(goals: GoalProgress[], settings: PlanningSettings): GoalRebalancePlan[] {
-  const targets = normalizeTargetAllocation(settings.targetAllocation);
   return goals.map((goal) => {
+    const targets = targetAllocationForGoal(goal.goal, settings.targetAllocation, "accumulation") ?? normalizeTargetAllocation(settings.targetAllocation);
     const total = goal.mappedCurrentValue;
     const rows = categories.map((category) => {
       const currentValue = goal.categoryValues[category] ?? 0;
@@ -331,16 +344,18 @@ export function calculateIncomeProjection(backup: PortfolioBackup): IncomeProjec
 
 export function calculateGoalDrawdowns(goals: GoalProgress[], settings: PlanningSettings): GoalDrawdownReport[] {
   return goals.map((goal) => {
-    const weightedReturn = weightedGoalReturn(goal);
     const targetYear = Number.parseInt(goal.goal.targetDate.slice(0, 4), 10);
     const drawdown = drawdownSettingsForGoal(goal, settings);
     const horizonYears = drawdown.horizonYears;
+    const baseAllocation = baseConsumptionAllocation(goal);
     const points: GoalDrawdownPoint[] = [];
     let corpus = goal.projectedValue;
     let withdrawal = goal.firstYearExpense;
     let depletionYear: number | null = null;
 
     for (let year = 1; year <= horizonYears; year += 1) {
+      const allocation = allocationForDrawdownYear(goal.goal, baseAllocation, year);
+      const weightedReturn = weightedReturnForAllocation(goal, allocation);
       const startingCorpus = corpus;
       let growth = 0;
       if (drawdown.withdrawalTiming === "beginning") {
@@ -357,6 +372,9 @@ export function calculateGoalDrawdowns(goals: GoalProgress[], settings: Planning
         calendarYear: targetYear + year - 1,
         startingCorpus: roundMoney(startingCorpus),
         withdrawal: roundMoney(withdrawal),
+        drawdownPercent: startingCorpus <= 0 ? 0 : roundPercent((withdrawal / startingCorpus) * 100),
+        allocation,
+        weightedReturn: roundPercent(weightedReturn),
         growth: roundMoney(growth),
         endingCorpus: roundMoney(corpus)
       });
@@ -364,19 +382,26 @@ export function calculateGoalDrawdowns(goals: GoalProgress[], settings: Planning
       withdrawal *= 1 + drawdown.annualSpendGrowth / 100;
     }
 
+    const firstAllocation = points[0]?.allocation ?? baseAllocation;
+    const finalAllocation = points.at(-1)?.allocation ?? baseAllocation;
+    const averageWeightedReturn = points.length > 0 ? points.reduce((sum, point) => sum + point.weightedReturn, 0) / points.length : weightedReturnForAllocation(goal, baseAllocation);
     return {
       goalId: goal.goal.id,
       goalName: goal.goal.name,
       targetYear,
       startingCorpus: roundMoney(goal.projectedValue),
       firstYearWithdrawal: roundMoney(goal.firstYearExpense),
-      weightedReturn: roundPercent(weightedReturn),
+      weightedReturn: roundPercent(points[0]?.weightedReturn ?? weightedReturnForAllocation(goal, baseAllocation)),
+      averageWeightedReturn: roundPercent(averageWeightedReturn),
       annualSpendGrowth: drawdown.annualSpendGrowth,
       horizonYears,
       withdrawalTiming: drawdown.withdrawalTiming,
       depletionYear,
       lastsYears: depletionYear === null ? horizonYears : Math.max(0, depletionYear - targetYear + 1),
       surplusAtHorizon: roundMoney(points.at(-1)?.endingCorpus ?? 0),
+      initialAllocation: firstAllocation,
+      finalAllocation,
+      glideRule: drawdownGlideRule(goal.goal),
       points
     };
   });
@@ -447,13 +472,50 @@ function drawdownSettingsForGoal(goal: GoalProgress, settings: PlanningSettings)
   };
 }
 
-function weightedGoalReturn(goal: GoalProgress): number {
-  if (goal.projectedValue <= 0) return 0;
-  return categories.reduce((sum, category) => {
-    const projectedValue = goal.projectedCategoryValues[category] ?? 0;
-    const rate = categoryReturnFromGoal(goal, category);
-    return sum + (projectedValue / goal.projectedValue) * rate;
-  }, 0);
+function baseConsumptionAllocation(goal: GoalProgress): TargetAllocationSettings {
+  const consumptionTarget = targetAllocationForGoal(goal.goal, undefined, "consumption");
+  if (consumptionTarget) return consumptionTarget;
+  if (goal.projectedValue > 0) return allocationFromValues(goal.projectedCategoryValues, goal.projectedValue);
+  if (goal.mappedCurrentValue > 0) return allocationFromValues(goal.categoryValues, goal.mappedCurrentValue);
+  return normalizeTargetAllocation({ Equity: 65, Debt: 30, Gold: 0, Others: 0, Cash: 5 });
+}
+
+function allocationForDrawdownYear(goal: Goal, baseAllocation: TargetAllocationSettings, year: number): TargetAllocationSettings {
+  const rule = drawdownGlideRule(goal);
+  if (rule.shiftPercent <= 0 || rule.from === rule.to) return normalizeTargetAllocation(baseAllocation);
+  const steps = Math.floor((Math.max(1, year) - 1) / rule.intervalYears);
+  const requestedShift = steps * rule.shiftPercent;
+  if (requestedShift <= 0) return normalizeTargetAllocation(baseAllocation);
+  const fromStart = baseAllocation[rule.from] ?? 0;
+  const fromFloor = Math.min(rule.floorPercent, fromStart);
+  const shifted = Math.min(requestedShift, Math.max(0, fromStart - fromFloor));
+  const next = { ...baseAllocation };
+  next[rule.from] = fromStart - shifted;
+  next[rule.to] = (next[rule.to] ?? 0) + shifted;
+  return normalizeTargetAllocation(next);
+}
+
+function drawdownGlideRule(goal: Goal): GoalDrawdownReport["glideRule"] {
+  const rawFrom = goal.consumptionGlideFrom;
+  const rawTo = goal.consumptionGlideTo;
+  const from: AssetCategory = rawFrom && categories.includes(rawFrom as AssetCategory) ? rawFrom as AssetCategory : "Equity";
+  const to: AssetCategory = rawTo && categories.includes(rawTo as AssetCategory) ? rawTo as AssetCategory : "Debt";
+  return {
+    intervalYears: Math.max(1, Math.min(50, Math.round(numberSetting(goal.consumptionGlideIntervalYears, 5)))),
+    shiftPercent: Math.max(0, Math.min(100, numberSetting(goal.consumptionGlideShiftPercent, 0))),
+    from,
+    to,
+    floorPercent: Math.max(0, Math.min(100, numberSetting(goal.consumptionGlideFloorPercent, 20)))
+  };
+}
+
+function allocationFromValues(values: Record<AssetCategory, number>, total: number): TargetAllocationSettings {
+  if (total <= 0) return normalizeTargetAllocation({ Equity: 65, Debt: 30, Gold: 0, Others: 0, Cash: 5 });
+  return normalizeTargetAllocation(Object.fromEntries(categories.map((category) => [category, (values[category] / total) * 100])) as TargetAllocationSettings);
+}
+
+function weightedReturnForAllocation(goal: GoalProgress, allocation: TargetAllocationSettings): number {
+  return categories.reduce((sum, category) => sum + (allocation[category] / 100) * categoryReturnFromGoal(goal, category), 0);
 }
 
 function categoryReturnFromGoal(goal: GoalProgress, category: AssetCategory): number {
@@ -462,6 +524,15 @@ function categoryReturnFromGoal(goal: GoalProgress, category: AssetCategory): nu
   if (category === "Gold") return goal.goal.goldReturn ?? 6;
   if (category === "Cash") return goal.goal.cashReturn ?? 6;
   return goal.goal.otherReturn ?? 6;
+}
+
+function targetAllocationForGoal(goal: Goal, fallback: TargetAllocationSettings | undefined, phase: "accumulation" | "consumption"): TargetAllocationSettings | undefined {
+  const raw = phase === "accumulation" ? goal.accumulationTargetAllocation : goal.consumptionTargetAllocation;
+  const total = raw ? categories.reduce((sum, category) => sum + (Number(raw[category]) || 0), 0) : 0;
+  if (total > 0) {
+    return normalizeTargetAllocation(Object.fromEntries(categories.map((category) => [category, Number(raw?.[category]) || 0])) as TargetAllocationSettings);
+  }
+  return fallback ? normalizeTargetAllocation(fallback) : undefined;
 }
 
 function returnRateForCategory(settings: ScenarioSettings, category: AssetCategory): number {
