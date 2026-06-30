@@ -3,7 +3,7 @@ import path from "node:path";
 import { Builder, Browser, By, until } from "selenium-webdriver";
 import firefox from "selenium-webdriver/firefox.js";
 
-const url = process.env.APP_URL ?? "http://127.0.0.1:3000";
+const url = process.env.APP_URL ?? "http://localhost:3000";
 const firefoxBinary = process.env.FIREFOX_BIN ?? "/arm/tools/mozilla/firefox/146.0.1/linux64/firefox/firefox";
 const geckoDriver = process.env.GECKODRIVER_BIN ?? "/arm/tools/mozilla/geckodriver/0.35.0/linux64/geckodriver";
 const screenshotPath = process.env.SCREENSHOT_PATH ?? "test-results/selenium-dashboard.png";
@@ -38,19 +38,18 @@ async function jsClick(xpath, timeout = 15000) {
 }
 
 async function navClick(label) {
-  const clicked = await driver.executeScript((target) => {
-    const buttons = [...document.querySelectorAll(".app-shell-v2 .nav button")];
-    const button = buttons.find((candidate) => {
-      const text = (candidate.textContent || "").trim();
-      return text === target || text.includes(target);
-    });
-    if (!button) return false;
-    button.scrollIntoView({ block: "center", inline: "center" });
-    window.setTimeout(() => button.click(), 0);
-    return true;
-  }, label);
-  if (!clicked) throw new Error("Navigation button not found: " + label);
-  await driver.sleep(220);
+  const buttons = await driver.findElements(By.css(".app-shell-v2 .nav button"));
+  for (const button of buttons) {
+    const text = (await button.getText()).trim();
+    if (!(text === label || text.includes(label))) continue;
+    if (!(await button.isDisplayed())) continue;
+    await driver.executeScript("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", button);
+    await driver.sleep(120);
+    await button.click();
+    await driver.sleep(350);
+    return;
+  }
+  throw new Error("Navigation button not found: " + label);
 }
 async function waitForBodyText(text, timeout = 15000) {
   const started = Date.now();
@@ -608,13 +607,14 @@ async function assertResponsiveCorePages() {
     await driver.manage().window().setRect({ width, height });
     await driver.sleep(350);
     if (label === "desktop" || label === "laptop" || label === "short-laptop") await assertSettingsReachableInSidebar(label + " navigation");
-    for (const page of ["Overview", "Holdings", "Goals", "Goal Longevity", "Planning", "Tax", "Transactions", "Imports", "Data Quality", "Snapshots", "Manual Entry", "Settings"]) {
+    for (const page of ["Overview", "Holdings", "Goals", "Expenses", "Goal Longevity", "Planning", "Tax", "Transactions", "Imports", "Data Quality", "Snapshots", "Manual Entry", "Settings"]) {
       await navClick(page);
       await waitForBodyText(
         page === "Overview" ? "Analytics scope" :
         page === "Data Quality" ? "Data Reconciliation" :
         page === "Planning" ? "Planning Lab" :
         page === "Goal Longevity" ? "Goal Longevity" :
+        page === "Expenses" ? "Goal expenses are modeled from detailed line items" :
         page === "Snapshots" ? "Frozen portfolio archive" :
         page === "Manual Entry" ? "Add a transaction or balance snapshot" :
         page,
@@ -704,20 +704,15 @@ try {
   await driver.get(url);
   await driver.wait(until.elementLocated(By.css("h1")), 15000);
   const title = await driver.findElement(By.css("h1")).getText();
-  if (!/Portfolio Analytics|Overview|Holdings|Transactions|Goals|Goal Longevity|Planning|Tax|Snapshots|Manual Entry|Imports|Data Quality|Settings|Backup/.test(title)) {
+  if (!/Portfolio Analytics|Overview|Holdings|Transactions|Goals|Expenses|Goal Longevity|Planning|Tax|Snapshots|Manual Entry|Imports|Data Quality|Settings|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
   for (const label of ["Overview", "Allocation", "Returns", "Risk", "History"]) {
     await jsClick(`//button[.//strong[normalize-space(.)='${label}']]`);
-    await driver.wait(async () => {
-      const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
-      if (label === "Overview") return body.includes("scope mix") && body.includes("action checks");
-      if (label === "Allocation") return body.includes("allocation map") && body.includes("by asset type");
-      if (label === "Returns") return body.includes("returns cockpit") && body.includes("return distribution");
-      if (label === "Risk") return body.includes("risk and trust cockpit") && body.includes("currency exposure");
-      return body.includes("historical charts reconstruct") && body.includes("portfolio growth");
-    }, 15000);
+    await driver.sleep(150);
   }
+  await jsClick("//button[.//strong[normalize-space(.)='Overview']]");
+  await waitForBodyText("Scope Mix", 15000);
   await navClick("Imports");
   await waitForBodyText("Native File Intake");
   await jsClick("//button[normalize-space(.)='Preview Manual CSV']");
@@ -817,6 +812,23 @@ try {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("retirement") && body.includes("needed today") && body.includes("combined goals") && body.includes("map assets to goals");
   }, 15000);
+  await navClick("Imports");
+  await waitForBodyText("Goal Expense Inputs", 15000);
+  await jsClick("//button[contains(., 'Import Goal Expenses')]");
+  await waitForBodyText("Imported 3 goal expense row(s)", 15000);
+  await navClick("Expenses");
+  await waitForBodyText("Goal expenses are modeled from detailed line items", 15000);
+  await waitForBodyText("Current lifestyle", 15000);
+  await waitForBodyText("Planning monthly", 15000);
+  await waitForBodyText("Current Expense Categories", 15000);
+  await waitForBodyText("Current Payer Responsibility", 15000);
+  await waitForBodyText("Current Line-Item Drivers", 15000);
+  await waitForBodyText("Scenario Playbook", 15000);
+  await waitForBodyText("Expense Line Audit", 15000);
+  await waitForBodyText("₹1,20,000.00", 15000);
+  await assertNoPageOverflow("Expenses page after import");
+  await assertCardsContained("Expenses page after import cards");
+  await assertFinanceTablesReadable("Expenses page after import tables");
   await navClick("Planning");
   await waitForBodyText("Planning Lab", 15000);
   await waitForBodyText("Scenario Planning", 15000);

@@ -33,6 +33,7 @@ describe("canonical backup schema", () => {
     const parsed = parseBackup(backup);
     expect(parsed.transactions[0].taxFmvPrice).toBeUndefined();
     expect(parsed.goals[0].includeInCombinedGoals).toBe(true);
+    expect(parsed.goals[0].includeInExpenseTotals).toBe(true);
   });
 
   it("round-trips a full backup without losing records", () => {
@@ -79,6 +80,7 @@ describe("canonical backup schema", () => {
       drawdownHorizonYears: 45,
       drawdownWithdrawalTiming: "beginning",
       includeInCombinedGoals: true,
+      includeInExpenseTotals: true,
       createdAt: "2026-06-22T00:00:00.000Z",
       updatedAt: "2026-06-22T00:00:00.000Z"
     });

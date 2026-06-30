@@ -1,7 +1,7 @@
 "use client";
 
-import { AlertTriangle, Camera, Database, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, ReceiptText, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Table2, Target, TrendingDown, TrendingUp, Upload } from "lucide-react";
-import { type CSSProperties, type PointerEvent, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Camera, Database, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, ReceiptText, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Table2, Target, TrendingDown, TrendingUp, Upload, WalletCards } from "lucide-react";
+import { type CSSProperties, Fragment, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase, type HoldingInsight } from "@/src/domain/analytics";
 import { deleteImportRunFromBackup, deleteTransactionFromBackup } from "@/src/domain/deleteRecords";
 import { assetSubtypeDisplayLabel, assetSubtypeLabel } from "@/src/domain/assetSubtype";
@@ -31,7 +31,7 @@ import { createEmptyBackup, parseBackup, type AssetCategory, type Goal, type Goa
 
 const sampleTemplate = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes\ncash-main,2026-06-22,Manual,cash,Cash Wallet,10000,INR,Cash,,,,liquid cash\nespp-contribution,2026-06-22,Employer,espp,ESPP Contribution,2000,USD,Equity,2000,USD,2026-06-22,total contribution only\nppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,300000,INR,Debt,250000,INR,2026-06-22,latest known balance`;
 
-const sampleGoalExpenseCsv = `expense,amount\nGrocery,50000\nVegetable,50000\nMilk,20000\nFuel,20000\nOthers,1559`;
+const sampleGoalExpenseCsv = `as_of_date,scenario,category,sub_category,item,amount,frequency,payer,quantity,unit_amount,active_scenario,notes\n2026-01-01,Current,Food,Grocery,Grocery,50000,monthly,Vijay,,,yes,detail-first row\n2026-01-01,Current,Food,Vegetable,Vegetable,50000,monthly,Archana,,,,detail-first row\n2026-01-01,Current,Food,Milk,Milk,20000,monthly,Archana,,,,detail-first row`;
 
 const categoryOrder: AssetCategory[] = ["Equity", "Debt", "Gold", "Others", "Cash"];
 const chartColors = ["#0e7490", "#2563eb", "#8b5cf6", "#d97706", "#059669", "#dc2626", "#64748b", "#0891b2"];
@@ -45,7 +45,7 @@ const assetClassCards = [
 
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
-type View = "dashboard" | "holdings" | "goals" | "goal-longevity" | "planning" | "tax" | "transactions" | "imports" | "data" | "snapshots" | "add-entry" | "settings" | "backup";
+type View = "dashboard" | "holdings" | "goals" | "expenses" | "goal-longevity" | "planning" | "tax" | "transactions" | "imports" | "data" | "snapshots" | "add-entry" | "settings" | "backup";
 type AnalyticsTab = "overview" | "allocation" | "returns" | "risk" | "history";
 type AnalyticsScope = "portfolio" | "goals-combined" | `goal:${string}`;
 type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
@@ -1175,6 +1175,8 @@ export function TrackerApp() {
     if (symbols.length > 0) params.set("symbols", [...new Set(symbols)].join(","));
     if (indianSymbols.length > 0) params.set("indianSymbols", [...new Set(indianSymbols)].join(","));
     const today = new Date().toISOString().slice(0, 10);
+    const mfInstruments = portfolio.instruments.filter((instrument) => instrument.isin);
+    const hasExistingNavHistory = mfInstruments.length > 0 && mfInstruments.every((instrument) => portfolio.priceSnapshots.some((snapshot) => snapshot.instrumentId === instrument.id && snapshot.currency === "INR" && snapshot.asOfDate < today));
     if (fxDates.length > 0) {
       params.set("fxStart", fxDates[0]);
       params.set("fxEnd", today);
@@ -1182,6 +1184,7 @@ export function TrackerApp() {
     if (historyDates.length > 0 && (isins.length > 0 || symbols.length > 0 || indianSymbols.length > 0)) {
       params.set("historyStart", historyDates[0]);
       params.set("historyEnd", today);
+      if (isins.length > 0 && hasExistingNavHistory) params.set("navHistory", "0");
     }
 
     try {
@@ -1510,7 +1513,10 @@ export function TrackerApp() {
         ...current,
         exportedAt: now,
         goalExpenses,
-        goals: current.goals.map((goal) => recalculateGoalTarget(goal, goalExpenses.filter((row) => row.goalId === goal.id)))
+        goals: current.goals.map((goal) => {
+          const expenseScenario = parsed.activeScenarios[goal.id] ?? goal.expenseScenario;
+          return recalculateGoalTarget({ ...goal, expenseScenario, updatedAt: expenseScenario !== goal.expenseScenario ? now : goal.updatedAt }, goalExpenses.filter((row) => row.goalId === goal.id));
+        })
       };
     });
     setErrors([]);
@@ -1608,6 +1614,7 @@ export function TrackerApp() {
           <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}><LayoutDashboard size={18} /> Overview</button>
           <button className={view === "holdings" ? "active" : ""} onClick={() => setView("holdings")}><Table2 size={18} /> Holdings</button>
           <button className={view === "goals" ? "active" : ""} onClick={() => setView("goals")}><Target size={18} /> Goals</button>
+          <button className={view === "expenses" ? "active" : ""} onClick={() => setView("expenses")}><WalletCards size={18} /> Expenses</button>
           <button className={view === "goal-longevity" ? "active" : ""} onClick={() => setView("goal-longevity")}><TrendingDown size={18} /> Goal Longevity</button>
           <button className={view === "planning" ? "active" : ""} onClick={() => setView("planning")}><TrendingUp size={18} /> Planning</button>
           <button className={view === "tax" ? "active" : ""} onClick={() => setView("tax")}><ReceiptText size={18} /> Tax</button>
@@ -1822,6 +1829,8 @@ export function TrackerApp() {
 
         {view === "goals" && <GoalsView {...{ backup, goalProgress, goalSummary, selectedGoalId, setSelectedGoalId, mappingGoalId, setMappingGoalId, mappingBalanceId, setMappingBalanceId, mappingPercent, setMappingPercent, updateGoalRecord, deleteGoalRecord, upsertGoalMappingFromForm, deleteGoalMapping, usdSecondary }} />}
 
+        {view === "expenses" && <ExpensesView goals={backup.goals} goalExpenses={backup.goalExpenses ?? []} currency={backup.baseCurrency} />}
+
         {view === "tax" && <TaxView report={taxReport} currency={backup.baseCurrency} financialYears={taxFinancialYears} selectedFinancialYear={taxFinancialYear} setSelectedFinancialYear={setTaxFinancialYear} />}
 
         {view === "goal-longevity" && <GoalLongevityView goalDrawdowns={goalDrawdowns} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
@@ -1832,11 +1841,11 @@ export function TrackerApp() {
 
         {view === "add-entry" && <AddEntryView {...{ backup, entryHoldingId, setEntryHoldingId, entryActionId, setEntryActionId, entryDate, setEntryDate, entryAmount, setEntryAmount, entryQuantity, setEntryQuantity, entryPrice, setEntryPrice, entryFees, setEntryFees, entryTaxes, setEntryTaxes, entryCurrentValue, setEntryCurrentValue, entryInvestedAmount, setEntryInvestedAmount, entryNotes, setEntryNotes, addManualEntryFromForm, goalName, setGoalName, goalType, setGoalType, goalMonthlyExpense, setGoalMonthlyExpense, goalInflation, setGoalInflation, goalTargetYear, setGoalTargetYear, goalMultiplier, setGoalMultiplier, goalEquityReturn, setGoalEquityReturn, goalDebtReturn, setGoalDebtReturn, goalGoldReturn, setGoalGoldReturn, goalCashReturn, setGoalCashReturn, goalOtherReturn, setGoalOtherReturn, addGoalFromForm, applyGoalPreset }} />}
 
-        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, manualImportPreview, previewManualCsv, importCsv, importLabel, setImportLabel, replaceImportId, setReplaceImportId, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText, editSessionActive }} />}
+        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, manualImportPreview, previewManualCsv, importCsv, importLabel, setImportLabel, replaceImportId, setReplaceImportId, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText, goalExpenseCsv, setGoalExpenseCsv, goalExpenseGoalId: goalExpenseGoalId || backup.goals[0]?.id || "", setGoalExpenseGoalId, goalExpenseBaseDate, setGoalExpenseBaseDate, importGoalExpensesFromText, importGoalExpensesFromFile, editSessionActive }} />}
 
         {view === "data" && <DataAuditView report={reconciliationReport} currency={backup.baseCurrency} />}
 
-        {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} displaySettings={displayCurrencySettings} updateDisplaySettings={updateDisplayCurrencyFromForm} planningSettings={planningSettings} updatePlanningSettings={updatePlanningSettingsFromForm} goals={backup.goals} goalExpenses={backup.goalExpenses ?? []} goalExpenseCsv={goalExpenseCsv} setGoalExpenseCsv={setGoalExpenseCsv} goalExpenseGoalId={goalExpenseGoalId} setGoalExpenseGoalId={setGoalExpenseGoalId} goalExpenseBaseDate={goalExpenseBaseDate} setGoalExpenseBaseDate={setGoalExpenseBaseDate} importGoalExpensesFromText={importGoalExpensesFromText} importGoalExpensesFromFile={importGoalExpensesFromFile} updateGoalSettings={updateGoalSettingsFromForm} currency={backup.baseCurrency} />}
+        {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} displaySettings={displayCurrencySettings} updateDisplaySettings={updateDisplayCurrencyFromForm} planningSettings={planningSettings} updatePlanningSettings={updatePlanningSettingsFromForm} goals={backup.goals} goalExpenses={backup.goalExpenses ?? []} updateGoalSettings={updateGoalSettingsFromForm} currency={backup.baseCurrency} />}
 
         {view === "backup" && (
           <section className="grid two">
@@ -2567,6 +2576,14 @@ function ImportsView(props: {
   fxCsv: string;
   setFxCsv: (value: string) => void;
   importFxCsvText: () => void;
+  goalExpenseCsv: string;
+  setGoalExpenseCsv: (value: string) => void;
+  goalExpenseGoalId: string;
+  setGoalExpenseGoalId: (value: string) => void;
+  goalExpenseBaseDate: string;
+  setGoalExpenseBaseDate: (value: string) => void;
+  importGoalExpensesFromText: () => void;
+  importGoalExpensesFromFile: (file: File | undefined) => void;
   editSessionActive: boolean;
 }) {
   const epfoParses = props.epfoParse ?? [];
@@ -2609,6 +2626,7 @@ function ImportsView(props: {
       <div className="grid two">
         <div className="card"><h2>USD/INR FX Rates</h2><div className="native-actions"><input type="number" step="0.0001" placeholder="USD/INR rate" value={props.fxRate} onChange={(event) => props.setFxRate(event.target.value)} /><input type="date" value={props.fxDate} onChange={(event) => props.setFxDate(event.target.value)} /><button className="primary" onClick={props.applyManualFxRate}>Add Rate</button></div><p className="message">Use a real USD/INR rate. Current holdings use the latest rate; transaction analytics use rates on or before each transaction date.</p><input type="file" accept=".csv,text/csv" onChange={(event) => props.importFxCsvFile(event.target.files?.[0])} /><textarea value={props.fxCsv} onChange={(event) => props.setFxCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importFxCsvText}>Import FX CSV</button></div></div>
         <div className="card"><h2>Manual CSV Preview and Commit</h2><p className="message">Use the committed templates for normal uploads. Preview shows the before/after impact without mutating the portfolio; commit then writes the same canonical records. Choose an old manual import only when replacing the same file family and preserving matching user edits.</p><p className="message">Replacement target is selected in Native File Intake or from Import History. Manual CSV uses the same replace engine and preserves matching user edits.</p><textarea value={props.csv} onChange={(event) => props.setCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button onClick={props.previewManualCsv}>Preview Manual CSV</button><button className="primary" onClick={props.importCsv}>{props.replaceImportId ? "Replace and Commit" : "Stage and Commit"}</button></div><ImportPreviewPanel preview={props.manualImportPreview} currency={props.backup.baseCurrency} /></div>
+        <div className="card"><h2>Goal Expense CSV</h2><GoalExpenseImportEditor goals={props.backup.goals} goalExpenses={props.backup.goalExpenses ?? []} csv={props.goalExpenseCsv} setCsv={props.setGoalExpenseCsv} selectedGoalId={props.goalExpenseGoalId || props.backup.goals[0]?.id || ""} setSelectedGoalId={props.setGoalExpenseGoalId} baseDate={props.goalExpenseBaseDate} setBaseDate={props.setGoalExpenseBaseDate} importFromText={props.importGoalExpensesFromText} importFromFile={props.importGoalExpensesFromFile} currency={props.backup.baseCurrency} /></div>
         <div className="card"><h2>Import History</h2>{props.backup.imports.length === 0 ? <p className="message">No imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Name</th><th>Provider</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{props.backup.imports.map((run) => <tr key={run.id}><td>{run.label ?? run.fileName ?? run.id}</td><td>{run.provider}</td><td>{run.status}</td><td>{new Date(run.createdAt).toLocaleString()}</td><td><div className="table-actions"><button onClick={() => props.setReplaceImportId(run.id)} disabled={run.status !== "committed"}>Replace</button><button className="danger-button" onClick={() => props.deleteImport(run.id)}>Delete</button></div></td></tr>)}</tbody></table></div>}</div>
       </div>
     </section>
@@ -2712,7 +2730,280 @@ function DataAuditView({ report, currency }: { report: ReturnType<typeof buildRe
   );
 }
 
-function SettingsView({ profile, updateTaxProfile, displaySettings, updateDisplaySettings, planningSettings, updatePlanningSettings, goals, goalExpenses, goalExpenseCsv, setGoalExpenseCsv, goalExpenseGoalId, setGoalExpenseGoalId, goalExpenseBaseDate, setGoalExpenseBaseDate, importGoalExpensesFromText, importGoalExpensesFromFile, updateGoalSettings, currency }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void; displaySettings: DisplayCurrencySettings; updateDisplaySettings: (patch: Partial<DisplayCurrencySettings>) => void; planningSettings: PlanningSettings; updatePlanningSettings: (patch: PlanningSettingsPatch) => void; goals: Goal[]; goalExpenses: GoalExpense[]; goalExpenseCsv: string; setGoalExpenseCsv: (value: string) => void; goalExpenseGoalId: string; setGoalExpenseGoalId: (value: string) => void; goalExpenseBaseDate: string; setGoalExpenseBaseDate: (value: string) => void; importGoalExpensesFromText: () => void; importGoalExpensesFromFile: (file: File | undefined) => void; updateGoalSettings: (patches: Array<{ goalId: string; patch: Partial<Goal> }>) => void; currency: string }) {
+function ExpensesView({ goals, goalExpenses, currency }: { goals: Goal[]; goalExpenses: GoalExpense[]; currency: string }) {
+  const [expandedExpenseCategory, setExpandedExpenseCategory] = useState<string | null>(null);
+  const [expandedExpensePayer, setExpandedExpensePayer] = useState<string | null>(null);
+  const summaries = goals.map((goal) => ({ goal, expenseRows: goalExpenses.filter((row) => row.goalId === goal.id), summary: summarizeGoalExpenses(goal, goalExpenses.filter((row) => row.goalId === goal.id)) }));
+  const expenseIncluded = summaries.filter(({ goal }) => goal.includeInExpenseTotals !== false);
+  const importedSummaries = expenseIncluded.filter(({ summary }) => summary.source === "expenses");
+  const activeRows = importedSummaries.flatMap(({ goal, summary }) => summary.rows.map((row) => ({ goal, row })));
+  const currentScenarioRows = expenseIncluded.flatMap(({ goal, expenseRows, summary }) => {
+    const currentRows = expenseRows.filter((row) => (row.scenario || "Current") === "Current");
+    return (currentRows.length > 0 ? currentRows : summary.rows).map((row) => ({ goal, row }));
+  });
+  const currentLifestyleMonthly = currentScenarioRows.reduce((sum, { row }) => sum + row.amount, 0);
+  const planningMonthly = importedSummaries.reduce((sum, { summary }) => sum + summary.baseMonthlyExpense, 0);
+  const totalCurrentMonthly = importedSummaries.reduce((sum, { summary }) => sum + summary.currentMonthlyExpense, 0);
+  const totalFirstYear = importedSummaries.reduce((sum, { summary }) => sum + summary.firstYearExpense, 0);
+  const planningDeltaFromCurrent = planningMonthly - currentLifestyleMonthly;
+  const planningDeltaPercent = currentLifestyleMonthly > 0 ? (planningDeltaFromCurrent / currentLifestyleMonthly) * 100 : 0;
+  const excludedExpenseGoals = summaries.filter(({ goal, summary }) => goal.includeInExpenseTotals === false && summary.source === "expenses").length;
+  const goalImpactRows = expenseIncluded.map(({ goal, expenseRows, summary }) => {
+    const currentRows = expenseRows.filter((row) => (row.scenario || "Current") === "Current");
+    const currentMonthly = currentRows.length > 0 ? currentRows.reduce((sum, row) => sum + row.amount, 0) : summary.baseMonthlyExpense;
+    return {
+      goal,
+      summary,
+      included: goal.includeInExpenseTotals !== false,
+      currentMonthly,
+      planningDelta: summary.baseMonthlyExpense - currentMonthly,
+      targetImpact: summary.source === "expenses" ? summary.firstYearExpense * (goal.corpusMultiple ?? 1) : 0
+    };
+  });
+
+  const planningCategoryTotals = totalsFromExpenseRows(activeRows, ({ row }) => semanticExpenseGroup(row));
+  const currentCategoryTotals = totalsFromExpenseRows(currentScenarioRows, ({ row }) => semanticExpenseGroup(row));
+  const currentExpenseLineRows = currentScenarioRows.slice().sort((a, b) => b.row.amount - a.row.amount || semanticExpenseGroup(a.row).localeCompare(semanticExpenseGroup(b.row)) || expenseLineItemLabel(a.row).localeCompare(expenseLineItemLabel(b.row)));
+
+  const categoryPlanRows = buildExpenseCategoryPlanRows(currentCategoryTotals, planningCategoryTotals);
+  const categoryPlanDetailRows = [...currentScenarioRows.map((entry) => ({ ...entry, mode: "Current" as const })), ...activeRows.map((entry) => ({ ...entry, mode: "Planning" as const }))];
+
+  const payerSourceRows = expenseIncluded.flatMap(({ goal, expenseRows, summary }) => {
+    const currentWithPayer = expenseRows.filter((row) => (row.scenario || "Current") === "Current" && Boolean(row.payer));
+    const activeWithPayer = summary.rows.filter((row) => Boolean(row.payer));
+    const rows = currentWithPayer.length > 0 ? currentWithPayer : activeWithPayer;
+    return rows.map((row) => ({ goal, row }));
+  });
+  const payerTotals = totalsFromExpenseRows(payerSourceRows, ({ row }) => row.payer || "Unassigned");
+
+  const payerCoverageRows = expenseIncluded.flatMap(({ expenseRows, summary }) => {
+    const currentRows = expenseRows.filter((row) => (row.scenario || "Current") === "Current");
+    return currentRows.length > 0 ? currentRows : summary.rows;
+  });
+  const payerCovered = payerCoverageRows.filter((row) => Boolean(row.payer)).length;
+  const payerCoverage = payerCoverageRows.length === 0 ? 0 : (payerCovered / payerCoverageRows.length) * 100;
+  const scenarioRows = expenseIncluded.flatMap(({ goal, expenseRows, summary }) => {
+    const currentMonthly = expenseRows.filter((row) => (row.scenario || "Current") === "Current").reduce((sum, row) => sum + row.amount, 0) || summary.baseMonthlyExpense;
+    return summary.scenarioTotals.map((row) => {
+      const firstMonthAtGoal = futureScenarioMonthly(expenseRows, row.scenario, goal.inflationRate, goal.targetDate);
+      const annualAtGoal = firstMonthAtGoal * 12;
+      const corpus = annualAtGoal * (goal.corpusMultiple ?? 1);
+      return {
+        goal,
+        scenario: row.scenario,
+        rows: row.rows,
+        monthly: row.baseMonthlyExpense,
+        deltaVsActive: row.baseMonthlyExpense - summary.baseMonthlyExpense,
+        deltaVsCurrent: row.baseMonthlyExpense - currentMonthly,
+        annualAtGoal,
+        corpus,
+        active: row.scenario === summary.selectedScenario,
+        included: goal.includeInExpenseTotals !== false
+      };
+    });
+  });
+  const auditRows = activeRows.slice().sort((a, b) => a.goal.name.localeCompare(b.goal.name) || (a.row.category ?? "").localeCompare(b.row.category ?? "") || a.row.expense.localeCompare(b.row.expense));
+
+  return (
+    <section className="grid expenses-workspace expense-dashboard-v2">
+      <div className="card wide-card expense-hero-card">
+        <div className="section-head">
+          <div><h2>Expenses</h2><p>Goal expenses are modeled from detailed line items. The selected scenario feeds goal math; current payer rows explain who pays today.</p></div>
+        </div>
+        <div className="expense-summary-strip">
+          <MiniInsight label="Current monthly" value={formatMoney(currentLifestyleMonthly, currency)} detail="Current scenario baseline" />
+          <MiniInsight label="Goal-base monthly" value={formatMoney(totalCurrentMonthly, currency)} detail="selected scenario inflated to today" />
+          <MiniInsight label="Goal-year annual" value={formatMoney(totalFirstYear, currency)} detail="first withdrawal year" />
+          <MiniInsight label="Expense corpus" value={formatMoney(goalImpactRows.reduce((sum, row) => sum + row.targetImpact, 0), currency)} detail="annual spend x goal multiple" />
+        </div>
+        <p className="expense-hero-note">Current is the Current scenario. Goal-base and corpus use the selected scenario for each included goal; per-goal contribution is shown in Goal Spend Plan below.</p>
+      </div>
+
+      <div className="card wide-card expense-section-card">
+        <div className="section-head compact-section-head"><div><h2>Goal Spend Plan</h2><p>Included goals only: active scenario and monthly-to-corpus impact by goal.</p></div></div>
+        <div className="expense-goal-card-grid">
+          {goalImpactRows.map(({ goal, summary, currentMonthly, planningDelta, targetImpact }) => <div className="expense-goal-card" key={goal.id}>
+            <div><strong>{goal.name}</strong><span>Included in expense totals</span></div>
+            <em>{summary.selectedScenario || "Manual"}</em>
+            <dl>
+              <div><dt>Current monthly</dt><dd>{formatMoney(currentMonthly, currency)}</dd></div>
+              <div><dt>Planning monthly</dt><dd>{formatMoney(summary.baseMonthlyExpense, currency)}</dd></div>
+              <div><dt>Vs current</dt><dd>{formatMoney(planningDelta, currency)}</dd></div>
+              <div><dt>Today planning</dt><dd>{formatMoney(summary.currentMonthlyExpense, currency)}</dd></div>
+              <div><dt>Goal-year annual</dt><dd>{formatMoney(summary.firstYearExpense, currency)}</dd></div>
+              <div><dt>Target impact</dt><dd>{targetImpact > 0 ? formatMoney(targetImpact, currency) : "-"}</dd></div>
+            </dl>
+          </div>)}
+        </div>
+      </div>
+
+      <ExpenseCategoryPlanTable rows={categoryPlanRows} detailRows={categoryPlanDetailRows} currency={currency} expandedCategory={expandedExpenseCategory} setExpandedCategory={setExpandedExpenseCategory} />
+      <ExpensePayerTable rows={payerTotals} detailRows={payerSourceRows} currency={currency} expandedPayer={expandedExpensePayer} setExpandedPayer={setExpandedExpensePayer} />
+      <ExpenseCurrentLinesTable rows={currentExpenseLineRows} currency={currency} />
+
+      <div className="card wide-card"><h2>Scenario Playbook</h2><p className="chart-note compact-note">Expense-to-goal link: each scenario shows monthly spend today, change from Current, first goal-year spend, and corpus implied by the goal multiple.</p>{scenarioRows.length === 0 ? <p className="message">No expense scenarios imported yet.</p> : <div className="table-wrap expense-compact-table"><table><thead><tr><th>Goal</th><th>Scenario</th><th>Rows</th><th>Monthly</th><th>Vs current</th><th>Goal-year annual</th><th>Corpus implied</th><th>Status</th></tr></thead><tbody>{scenarioRows.map((row) => <tr key={row.goal.id + row.scenario}><td>{row.goal.name}</td><td>{row.scenario}</td><td>{row.rows}</td><td>{formatMoney(row.monthly, currency)}</td><td>{row.scenario === "Current" ? "-" : formatMoney(row.deltaVsCurrent, currency)}</td><td>{formatMoney(row.annualAtGoal, currency)}</td><td>{formatMoney(row.corpus, currency)}</td><td><span className={"status-pill " + (row.active ? "implemented" : "partial")}>{row.active ? "active" : "compare"}</span></td></tr>)}</tbody></table></div>}</div>
+
+      <div className="card expense-data-quality-card"><h2>Expense Data Quality</h2><div className="signal-list"><div className="signal-item good"><ShieldCheck size={18} /><div><span>Imported coverage</span><strong>{importedSummaries.length}/{expenseIncluded.length} included goal(s)</strong><small>{excludedExpenseGoals > 0 ? excludedExpenseGoals + " goal(s) excluded from expense totals" : "All included goals are counted in expense rollups."}</small></div></div><div className={"signal-item " + (payerCoverage >= 90 ? "good" : payerCoverage > 0 ? "warn" : "bad")}><ShieldCheck size={18} /><div><span>Payer coverage</span><strong>{payerCoverage.toFixed(0)}%</strong><small>{payerCovered}/{payerCoverageRows.length} current/planning rows have payer ownership.</small></div></div></div></div>
+
+      <div className="card wide-card"><h2>Goal Expense Summary</h2><p className="chart-note compact-note">Compact audit of included goals only. Goals with Expense totals off remain available for their own goal math but are excluded from this page.</p><div className="table-wrap expense-compact-table"><table className="expense-summary-table"><thead><tr><th>Goal</th><th>Active scenario</th><th>Rows</th><th>Planning monthly</th><th>Today planning</th><th>Goal-year spend</th><th>Available scenarios</th></tr></thead><tbody>{expenseIncluded.map(({ goal, summary }) => <tr key={goal.id}><td><strong>{goal.name}</strong><small>Included</small></td><td><span className="status-pill implemented">{summary.selectedScenario || "Manual"}</span></td><td>{summary.rows.length}</td><td>{formatMoney(summary.baseMonthlyExpense, currency)}</td><td>{formatMoney(summary.currentMonthlyExpense, currency)}</td><td>{formatMoney(summary.firstYearExpense, currency)}</td><td><div className="scenario-chip-list">{summary.scenarioTotals.length === 0 ? <span className="muted">-</span> : summary.scenarioTotals.map((row) => <span className={"scenario-chip " + (row.scenario === summary.selectedScenario ? "is-active" : "")} key={row.scenario}><strong>{row.scenario}</strong><em>{formatMoney(row.baseMonthlyExpense, currency)}</em></span>)}</div></td></tr>)}</tbody></table></div></div>
+      <div className="card wide-card expense-audit-card compact-audit-card"><h2>Expense Line Audit</h2><p className="chart-note compact-note">Verification drilldown only. Re-uploading an expense CSV replaces the affected goal ledger, and JSON export keeps all rows.</p><div className="table-wrap expense-audit-table"><table><thead><tr><th>Goal</th><th>Scenario</th><th>Category</th><th>Item</th><th>Frequency</th><th>Qty</th><th>Unit</th><th>Monthly</th><th>Payer</th><th>Notes</th></tr></thead><tbody>{auditRows.slice(0, 120).map(({ goal, row }) => <tr key={row.id}><td>{goal.name}</td><td>{row.scenario}</td><td>{row.category || "-"}</td><td>{row.subCategory ? row.subCategory + " · " + row.expense : row.expense}</td><td>{row.frequency}</td><td>{row.quantity ?? "-"}</td><td>{row.unitAmount != null ? formatMoney(row.unitAmount, row.currency) : "-"}</td><td>{formatMoney(row.amount, row.currency)}</td><td>{row.payer || "-"}</td><td>{row.notes || "-"}</td></tr>)}</tbody></table></div>{auditRows.length > 120 && <p className="helper">Showing first 120 active-scenario rows; export JSON keeps the full detail ledger.</p>}</div>
+    </section>
+  );
+}
+
+function semanticExpenseGroup(row: GoalExpense): string {
+  const text = [row.category, row.subCategory, row.expense].filter(Boolean).join(" ").toLowerCase();
+  if (/bhoomi|class|school|study|education|graduation|teacher|tuition|nidhi|shweta|anitha|heeral|hamshi/.test(text)) return "Education";
+  if (/grocery|grossary|veg|fruit|milk|curd|food/.test(text)) return "Food";
+  if (/eatout|meal|zomato|breakfast|lunch|dinner|snacks|drinks/.test(text)) return "Dining";
+  if (/utility|electricity|water|internet|gas|ott|communication|jio|airtel|netflix|amazon|hotstar|sony|zee/.test(text)) return "Utilities";
+  if (/travel|transport|auto|cab|petrol|fuel|metro|driver|car service|car insurance/.test(text)) return "Transport";
+  if (/maid|cook|house help|maintenance|maintainance|housing|house cleaning|renovation|repair|pest|water purifier|house tax/.test(text)) return "Housing";
+  if (/insurance|medical|health|check-up|healthcare/.test(text)) return "Healthcare";
+  if (/support|family|home support/.test(text)) return "Family Support";
+  if (/shopping|lifestyle|cult|vacation|dharwad/.test(text)) return "Lifestyle";
+  if (/adhoc|yearly|annual|tax filing|others|misc/.test(text) || row.frequency === "yearly" || row.frequency === "one_time") return "Annual / Irregular";
+  if (/emi|debt/.test(text)) return "Debt Service";
+  return row.category || row.subCategory || "Other";
+}
+
+function expenseLineItemLabel(row: GoalExpense): string {
+  const item = String(row.expense || "").trim();
+  const subCategory = String(row.subCategory || "").trim();
+  const category = String(row.category || "").trim();
+  if (item && subCategory && item.toLowerCase() !== subCategory.toLowerCase()) return item;
+  if (item) return item;
+  if (subCategory) return subCategory;
+  if (category) return category;
+  return "Unlabelled expense";
+}
+
+function expenseLineSubcategory(row: GoalExpense): string {
+  const subCategory = String(row.subCategory || "").trim();
+  const item = String(row.expense || "").trim();
+  if (!subCategory || subCategory.toLowerCase() === item.toLowerCase()) return "-";
+  return subCategory;
+}
+
+function futureScenarioMonthly(rows: GoalExpense[], scenario: string, inflationRate: number, targetDate: string): number {
+  return rows.filter((row) => (row.scenario || "Current") === scenario).reduce((sum, row) => sum + futureExpenseForExpenseView(row.amount, inflationRate, row.baseDate, targetDate), 0);
+}
+
+function futureExpenseForExpenseView(amount: number, inflationRate: number, fromDate: string, toDate: string): number {
+  const from = new Date(fromDate + "T00:00:00.000Z").getTime();
+  const to = new Date(toDate + "T00:00:00.000Z").getTime();
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return amount;
+  const years = (to - from) / (365.25 * 24 * 60 * 60 * 1000);
+  return amount * Math.pow(1 + (inflationRate || 0) / 100, years);
+}
+
+function buildExpenseCategoryPlanRows(currentRows: Array<{ label: string; value: number; rows: number }>, planningRows: Array<{ label: string; value: number; rows: number }>): Array<{ label: string; current: number; planning: number; delta: number; share: number; rows: number }> {
+  const labels = new Set([...currentRows.map((row) => row.label), ...planningRows.map((row) => row.label)]);
+  const planningTotal = planningRows.reduce((sum, row) => sum + row.value, 0);
+  const currentTotal = currentRows.reduce((sum, row) => sum + row.value, 0);
+  const denominator = planningTotal > 0 ? planningTotal : currentTotal;
+  return [...labels].map((label) => {
+    const current = currentRows.find((row) => row.label === label);
+    const planning = planningRows.find((row) => row.label === label);
+    const planningValue = planning?.value ?? 0;
+    const currentValue = current?.value ?? 0;
+    return {
+      label,
+      current: currentValue,
+      planning: planningValue,
+      delta: Math.round((planningValue - currentValue + Number.EPSILON) * 100) / 100,
+      share: denominator > 0 ? ((planningValue > 0 ? planningValue : currentValue) / denominator) * 100 : 0,
+      rows: (current?.rows ?? 0) + (planning?.rows ?? 0)
+    };
+  }).sort((a, b) => Math.max(b.planning, b.current) - Math.max(a.planning, a.current) || Math.abs(b.delta) - Math.abs(a.delta) || a.label.localeCompare(b.label));
+}
+
+type ExpenseModeEntry = { goal: Goal; row: GoalExpense; mode: "Current" | "Planning" };
+
+type ExpenseSourceEntry = { goal: Goal; row: GoalExpense };
+
+function ExpenseCurrentLinesTable({ rows, currency }: { rows: ExpenseSourceEntry[]; currency: string }) {
+  return (
+    <div className="card wide-card expense-analysis-table-card">
+      <div className="section-head compact-section-head"><div><h2>Current Expense Lines</h2><p>Actual Current scenario rows sorted by monthly amount. These are source line items, not generated chart labels.</p></div></div>
+      {rows.length === 0 ? <p className="message">No Current scenario expense rows available for included goals.</p> : <div className="table-wrap expense-current-lines-table-wrap"><table className="expense-analysis-table expense-current-lines-table"><thead><tr><th>Category</th><th>Subcategory</th><th>Item</th><th>Monthly</th><th>Payer</th><th>Frequency</th><th>Notes</th></tr></thead><tbody>{rows.map(({ row }) => <tr key={row.id}><td><strong>{semanticExpenseGroup(row)}</strong></td><td>{expenseLineSubcategory(row)}</td><td>{expenseLineItemLabel(row)}</td><td>{formatMoney(row.amount, row.currency || currency)}</td><td>{row.payer || "-"}</td><td>{row.frequency}</td><td>{row.notes || "-"}</td></tr>)}</tbody></table></div>}
+    </div>
+  );
+}
+
+function ExpenseCategoryPlanTable({ rows, detailRows, currency, expandedCategory, setExpandedCategory }: { rows: Array<{ label: string; current: number; planning: number; delta: number; share: number; rows: number }>; detailRows: ExpenseModeEntry[]; currency: string; expandedCategory: string | null; setExpandedCategory: (value: string | null) => void }) {
+  return (
+    <div className="card wide-card expense-analysis-table-card">
+      <div className="section-head compact-section-head"><div><h2>Current Expense Categories</h2><p>Current is the household spend baseline. Planning shows only the selected scenario used for goal math, so the delta explains what changes when the goal starts.</p></div></div>
+      {rows.length === 0 ? <p className="message">No expense categories available for included goals.</p> : <div className="table-wrap expense-compact-table"><table className="expense-analysis-table"><thead><tr><th>Category</th><th>Current monthly</th><th>Planning monthly</th><th>Change</th><th>Planning share</th><th>Rows</th><th>Details</th></tr></thead><tbody>{rows.map((row) => {
+        const isOpen = expandedCategory === row.label;
+        const details = detailRows.filter((entry) => semanticExpenseGroup(entry.row) === row.label).sort((a, b) => a.mode.localeCompare(b.mode) || a.goal.name.localeCompare(b.goal.name) || (a.row.category ?? "").localeCompare(b.row.category ?? "") || a.row.expense.localeCompare(b.row.expense));
+        return (
+          <Fragment key={row.label}>
+            <tr>
+              <td><strong>{row.label}</strong></td>
+              <td>{formatMoney(row.current, currency)}</td>
+              <td>{formatMoney(row.planning, currency)}</td>
+              <td className={row.delta > 0 ? "negative" : row.delta < 0 ? "positive" : ""}>{formatMoney(row.delta, currency)}</td>
+              <td>{row.share.toFixed(1)}%</td>
+              <td>{row.rows}</td>
+              <td><button className="ghost detail-toggle-button" onClick={() => setExpandedCategory(isOpen ? null : row.label)}>{isOpen ? "Hide" : "Details"}</button></td>
+            </tr>
+            {isOpen && <tr className="expense-detail-row" key={row.label + "-details"}><td colSpan={7}><ExpenseDetailRows rows={details} currency={currency} /></td></tr>}
+          </Fragment>
+        );
+      })}</tbody></table></div>}
+    </div>
+  );
+}
+
+function ExpensePayerTable({ rows, detailRows, currency, expandedPayer, setExpandedPayer }: { rows: Array<{ label: string; value: number; rows: number }>; detailRows: ExpenseSourceEntry[]; currency: string; expandedPayer: string | null; setExpandedPayer: (value: string | null) => void }) {
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  return (
+    <div className="card wide-card expense-analysis-table-card">
+      <div className="section-head compact-section-head"><div><h2>Current Payer Responsibility</h2><p>Who pays today. Uses Current rows with payer data, with active scenario payer rows only as fallback when Current has no payer split.</p></div></div>
+      {rows.length === 0 ? <p className="message">No payer split available for included goals.</p> : <div className="table-wrap expense-compact-table"><table className="expense-analysis-table"><thead><tr><th>Payer</th><th>Monthly</th><th>Share</th><th>Rows</th><th>Details</th></tr></thead><tbody>{rows.map((row) => {
+        const isOpen = expandedPayer === row.label;
+        const details = detailRows.filter((entry) => (entry.row.payer || "Unassigned") === row.label).sort((a, b) => a.goal.name.localeCompare(b.goal.name) || semanticExpenseGroup(a.row).localeCompare(semanticExpenseGroup(b.row)) || a.row.expense.localeCompare(b.row.expense));
+        return (
+          <Fragment key={row.label}>
+            <tr>
+              <td><strong>{row.label}</strong></td>
+              <td>{formatMoney(row.value, currency)}</td>
+              <td>{total > 0 ? ((row.value / total) * 100).toFixed(1) : "0.0"}%</td>
+              <td>{row.rows}</td>
+              <td><button className="ghost detail-toggle-button" onClick={() => setExpandedPayer(isOpen ? null : row.label)}>{isOpen ? "Hide" : "Details"}</button></td>
+            </tr>
+            {isOpen && <tr className="expense-detail-row" key={row.label + "-details"}><td colSpan={5}><ExpenseDetailRows rows={details.map((entry) => ({ ...entry, mode: "Current" as const }))} currency={currency} /></td></tr>}
+          </Fragment>
+        );
+      })}</tbody></table></div>}
+    </div>
+  );
+}
+
+function ExpenseDetailRows({ rows, currency }: { rows: ExpenseModeEntry[]; currency: string }) {
+  if (rows.length === 0) return <p className="message">No source rows for this selection.</p>;
+  return (
+    <div className="expense-detail-panel">
+      <div className="table-wrap expense-detail-table-wrap"><table className="expense-detail-table"><thead><tr><th>Mode</th><th>Goal</th><th>Scenario</th><th>Category</th><th>Item</th><th>Payer</th><th>Monthly</th><th>Notes</th></tr></thead><tbody>{rows.map(({ goal, row, mode }) => <tr key={mode + row.id}><td><span className="status-pill partial">{mode}</span></td><td>{goal.name}</td><td>{row.scenario || "Current"}</td><td>{semanticExpenseGroup(row)}</td><td>{row.subCategory ? row.subCategory + " · " + row.expense : row.expense}</td><td>{row.payer || "-"}</td><td>{formatMoney(row.amount, row.currency || currency)}</td><td>{row.notes || "-"}</td></tr>)}</tbody></table></div>
+    </div>
+  );
+}
+
+function totalsFromExpenseRows<T extends { row: GoalExpense }>(rows: T[], keyFn: (entry: T) => string): Array<{ label: string; value: number; rows: number }> {
+  const totals = new Map<string, { label: string; value: number; rows: number }>();
+  for (const entry of rows) {
+    const key = keyFn(entry) || "Other";
+    const existing = totals.get(key) ?? { label: key, value: 0, rows: 0 };
+    existing.value += entry.row.amount;
+    existing.rows += 1;
+    totals.set(key, existing);
+  }
+  return [...totals.values()].map((row) => ({ ...row, value: Math.round((row.value + Number.EPSILON) * 100) / 100 })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+}
+
+function SettingsView({ profile, updateTaxProfile, displaySettings, updateDisplaySettings, planningSettings, updatePlanningSettings, goals, goalExpenses, updateGoalSettings, currency }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void; displaySettings: DisplayCurrencySettings; updateDisplaySettings: (patch: Partial<DisplayCurrencySettings>) => void; planningSettings: PlanningSettings; updatePlanningSettings: (patch: PlanningSettingsPatch) => void; goals: Goal[]; goalExpenses: GoalExpense[]; updateGoalSettings: (patches: Array<{ goalId: string; patch: Partial<Goal> }>) => void; currency: string }) {
   return (
     <section className="grid settings-workspace">
       <div className="card wide-card">
@@ -2732,7 +3023,6 @@ function SettingsView({ profile, updateTaxProfile, displaySettings, updateDispla
           <h3>Planning Assumptions</h3>
           <p className="message">These global values feed Scenario Planning and portfolio-level rebalancing. Goal-specific assumptions and expense rows are applied as drafts, so charts do not recalculate on every keystroke.</p>
           <PlanningSettingsDraftEditor settings={planningSettings} onApply={updatePlanningSettings} mode="all" />
-          <GoalExpenseImportEditor goals={goals} goalExpenses={goalExpenses} csv={goalExpenseCsv} setCsv={setGoalExpenseCsv} selectedGoalId={goalExpenseGoalId || goals[0]?.id || ""} setSelectedGoalId={setGoalExpenseGoalId} baseDate={goalExpenseBaseDate} setBaseDate={setGoalExpenseBaseDate} importFromText={importGoalExpensesFromText} importFromFile={importGoalExpensesFromFile} currency={currency} />
           <GoalSettingsDraftEditor goals={goals} goalExpenses={goalExpenses} updateGoalSettings={updateGoalSettings} currency={currency} />
         </div>
         <p className="message">The Tax section intentionally estimates portfolio tax only. Salary, deductions, Form 16, full ITR schedules, and ESPP payroll/perquisite treatment stay outside this tracker unless explicitly added later.</p>
@@ -2743,18 +3033,19 @@ function SettingsView({ profile, updateTaxProfile, displaySettings, updateDispla
 
 function GoalExpenseImportEditor({ goals, goalExpenses, csv, setCsv, selectedGoalId, setSelectedGoalId, baseDate, setBaseDate, importFromText, importFromFile, currency }: { goals: Goal[]; goalExpenses: GoalExpense[]; csv: string; setCsv: (value: string) => void; selectedGoalId: string; setSelectedGoalId: (value: string) => void; baseDate: string; setBaseDate: (value: string) => void; importFromText: () => void; importFromFile: (file: File | undefined) => void; currency: string }) {
   const summaries = goals.map((goal) => ({ goal, summary: summarizeGoalExpenses(goal, goalExpenses.filter((row) => row.goalId === goal.id)) }));
+  const includedSummaries = summaries.filter(({ goal }) => goal.includeInExpenseTotals !== false);
   return (
     <div className="goal-expense-editor">
-      <div className="goal-settings-header"><div><h3>Goal Expense Inputs</h3><p>Optional monthly expense lines per goal. When present, the goal monthly expense, first-year withdrawal, target corpus, and longevity model are derived from these rows.</p></div></div>
+      <div className="goal-settings-header"><div><h3>Goal Expense Inputs</h3><p>Detail-first expense lines per goal. Re-importing a CSV replaces the affected goal expense ledger, and the selected scenario drives goal monthly expense, target corpus, and longevity.</p></div></div>
       <div className="goal-expense-import-grid">
-        <label><span>Goal for 2-column CSV</span><select value={selectedGoalId} onChange={(event) => setSelectedGoalId(event.target.value)}>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</select></label>
+        <label><span>Fallback goal</span><select value={selectedGoalId} onChange={(event) => setSelectedGoalId(event.target.value)}>{goals.map((goal) => <option key={goal.id} value={goal.id}>{goal.name}</option>)}</select><small>Used only when CSV has no goal column.</small></label>
         <label><span>Expense base date</span><input type="date" value={baseDate} onChange={(event) => setBaseDate(event.target.value)} /></label>
         <label className="file-input-label"><span>Upload expense CSV</span><input type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" onChange={(event) => importFromFile(event.target.files?.[0])} /></label>
       </div>
       <textarea className="goal-expense-textarea" value={csv} onChange={(event) => setCsv(event.target.value)} spellCheck={false} />
       <div className="actions"><button className="primary" onClick={importFromText} disabled={goals.length === 0}>Import Goal Expenses</button></div>
-      <p className="message">For one goal use columns <code>expense,amount</code>. For one file covering multiple goals use <code>goal,base_date,expense,amount</code>. Amounts are monthly values at the base date.</p>
-      {summaries.length === 0 ? <p className="message">Create goals before importing expense rows.</p> : <div className="table-wrap"><table><thead><tr><th>Goal</th><th>Rows</th><th>Base monthly</th><th>Current monthly</th><th>First goal-year spend</th><th>Source</th></tr></thead><tbody>{summaries.map(({ goal, summary }) => <tr key={goal.id}><td>{goal.name}</td><td>{summary.rows.length}</td><td>{formatMoney(summary.baseMonthlyExpense, currency)}</td><td>{formatMoney(summary.currentMonthlyExpense, currency)}</td><td>{formatMoney(summary.firstYearExpense, currency)}</td><td>{summary.source === "expenses" ? "expense CSV" : "manual"}</td></tr>)}</tbody></table></div>}
+      <p className="message">Use detailed rows with <code>goal,as_of_date,scenario,category,sub_category,item,amount,frequency,payer,quantity,unit_amount,active_scenario</code>. Dates can be <code>YYYY-MM-DD</code> or <code>DD-MM-YYYY</code>. If <code>amount</code> is blank, quantity x unit_amount is used. Yearly rows are divided by 12.</p>
+      {includedSummaries.length === 0 ? <p className="message">No goals are enabled for expense analytics. Use Settings / Goal Assumptions / Expense totals to include a goal.</p> : <div className="table-wrap expense-compact-table"><table><thead><tr><th>Included goal</th><th>Active scenario</th><th>Rows</th><th>Base monthly</th><th>Current monthly</th><th>First goal-year spend</th><th>Source</th></tr></thead><tbody>{includedSummaries.map(({ goal, summary }) => <tr key={goal.id}><td>{goal.name}</td><td>{summary.selectedScenario || "Manual"}</td><td>{summary.rows.length}</td><td>{formatMoney(summary.baseMonthlyExpense, currency)}</td><td>{formatMoney(summary.currentMonthlyExpense, currency)}</td><td>{formatMoney(summary.firstYearExpense, currency)}</td><td>{summary.source === "expenses" ? "expense CSV" : "manual"}</td></tr>)}</tbody></table></div>}
     </div>
   );
 }
@@ -2787,7 +3078,7 @@ function GoalSettingsDraftCard({ goal, goalExpenses, updateDraftGoal, currency }
   };
   return (
     <div className="goal-settings-card">
-      <div className="goal-settings-card-head"><div><strong>{goal.name}</strong><span>{goal.type === "retirement" ? "Retirement" : "Custom"} · target {targetYear}</span></div><label className="goal-include-toggle" title="Excluded goals remain visible individually but are not counted in Combined Goals totals."><input type="checkbox" checked={goal.includeInCombinedGoals !== false} onChange={(event) => updateDraftGoal(goal.id, { includeInCombinedGoals: event.target.checked })} /><span>Combined</span></label></div>
+      <div className="goal-settings-card-head"><div><strong>{goal.name}</strong><span>{goal.type === "retirement" ? "Retirement" : "Custom"} · target {targetYear}</span></div><div className="goal-settings-toggle-cluster"><label className="goal-include-toggle" title="Excluded goals remain visible individually but are not counted in Combined Goals totals."><input type="checkbox" checked={goal.includeInCombinedGoals !== false} onChange={(event) => updateDraftGoal(goal.id, { includeInCombinedGoals: event.target.checked })} /><span>Combined goals</span></label><label className="goal-include-toggle" title="Excluded goals remain visible individually but are not counted in the Expenses page rollups."><input type="checkbox" checked={goal.includeInExpenseTotals !== false} onChange={(event) => updateDraftGoal(goal.id, { includeInExpenseTotals: event.target.checked })} /><span>Expense totals</span></label></div></div>
       <div className="settings-grid compact-settings-grid goal-settings-fields">
         <label><span>Goal name</span><input value={goal.name} onChange={(event) => updateDraftGoal(goal.id, { name: event.target.value })} /></label>
         <label><span>Type</span><select value={goal.type} onChange={(event) => updateDraftGoal(goal.id, { type: event.target.value as Goal["type"] })}><option value="retirement">Retirement</option><option value="custom">Custom</option></select></label>
@@ -3054,6 +3345,8 @@ function AssetClassCard({ insight, currency }: { insight: AssetClassInsight; cur
   );
 }
 
+const activeSelectorStyle: CSSProperties = { background: "#0f172a", backgroundColor: "#0f172a", borderColor: "#0e7490", color: "#ffffff", opacity: 1, filter: "none" };
+
 function AnalyticsScopeSelector({ scope, setScope, goals, combinedGoalCount }: { scope: AnalyticsScope; setScope: (scope: AnalyticsScope) => void; goals: GoalProgress[]; combinedGoalCount: number }) {
   return (
     <div className="analytics-scope-panel">
@@ -3062,11 +3355,11 @@ function AnalyticsScopeSelector({ scope, setScope, goals, combinedGoalCount }: {
         <p>Switch the entire analytics cockpit between the overall portfolio, combined goal funding, or one selected goal.</p>
       </div>
       <div className="analytics-scope-control" role="tablist" aria-label="Analytics scope">
-        <button className={scope === "portfolio" ? "active" : ""} onClick={() => setScope("portfolio")}><strong>Overall</strong><span>full portfolio</span></button>
-        <button className={scope === "goals-combined" ? "active" : ""} onClick={() => setScope("goals-combined")} disabled={combinedGoalCount === 0}><strong>Combined Goals</strong><span>{combinedGoalCount} included goal(s)</span></button>
+        <button className={scope === "portfolio" ? "active" : ""} style={scope === "portfolio" ? activeSelectorStyle : undefined} onClick={() => setScope("portfolio")}><strong>Overall</strong><span>full portfolio</span></button>
+        <button className={scope === "goals-combined" ? "active" : ""} style={scope === "goals-combined" ? activeSelectorStyle : undefined} onClick={() => setScope("goals-combined")} disabled={combinedGoalCount === 0}><strong>Combined Goals</strong><span>{combinedGoalCount} included goal(s)</span></button>
         {goals.map((goal) => {
           const id = `goal:${goal.goal.id}` as AnalyticsScope;
-          return <button key={goal.goal.id} className={scope === id ? "active" : ""} onClick={() => setScope(id)}><strong>{goal.goal.name}</strong><span>{goal.corpusTodayFundedPercent.toFixed(1)}% ready today</span></button>;
+          return <button key={goal.goal.id} className={scope === id ? "active" : ""} style={scope === id ? activeSelectorStyle : undefined} onClick={() => setScope(id)}><strong>{goal.goal.name}</strong><span>{goal.corpusTodayFundedPercent.toFixed(1)}% ready today</span></button>;
         })}
       </div>
     </div>
@@ -3081,7 +3374,7 @@ function AnalyticsTabs({ active, setActive }: { active: AnalyticsTab; setActive:
     { id: "risk", label: "Risk", detail: "concentration and gaps" },
     { id: "history", label: "History", detail: "market-data dependent" }
   ];
-  return <div className="analytics-tabs" role="tablist">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} onClick={() => setActive(tab.id)}><strong>{tab.label}</strong><span>{tab.detail}</span></button>)}</div>;
+  return <div className="analytics-tabs" role="tablist">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} style={active === tab.id ? activeSelectorStyle : undefined} onClick={() => setActive(tab.id)}><strong>{tab.label}</strong><span>{tab.detail}</span></button>)}</div>;
 }
 
 function Metric({ label, value, secondary }: { label: string; value: string; secondary?: string }) {
@@ -3452,8 +3745,10 @@ function DonutChart({ data, currency }: { data: Array<{ name: string; value: num
   );
 }
 
-function HorizontalBar({ data, currency }: { data: Array<{ name: string; value: number }>; currency: string }) {
-  const chartData = labeledChartData(data.filter((item) => Number.isFinite(item.value) && item.value > 0).slice(0, 8));
+function HorizontalBar({ data, currency, maxItems = 8 }: { data: Array<{ name: string; value: number }>; currency: string; maxItems?: number }) {
+  const positiveData = data.filter((item) => Number.isFinite(item.value) && item.value > 0);
+  const limit = Number.isFinite(maxItems) ? Math.max(1, Math.floor(maxItems)) : positiveData.length;
+  const chartData = labeledChartData(positiveData.slice(0, limit));
   if (chartData.length === 0) return <p className="message">No data yet.</p>;
   const total = chartData.reduce((sum, item) => sum + item.value, 0);
   return (
@@ -3470,7 +3765,7 @@ function HorizontalBar({ data, currency }: { data: Array<{ name: string; value: 
           </div>
         );
       })}
-      {data.length > chartData.length && <p className="chart-note compact-note">Showing top {chartData.length} of {data.length} positive-value items.</p>}
+      {positiveData.length > chartData.length && <p className="chart-note compact-note">Showing top {chartData.length} of {positiveData.length} positive-value items.</p>}
     </div>
   );
 }
@@ -3842,6 +4137,7 @@ function viewTitle(view: View): string {
   if (view === "holdings") return "Holdings";
   if (view === "transactions") return "Transactions";
   if (view === "goals") return "Goals";
+  if (view === "expenses") return "Expenses";
   if (view === "tax") return "Tax";
   if (view === "goal-longevity") return "Goal Longevity";
   if (view === "data") return "Data Quality";

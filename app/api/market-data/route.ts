@@ -36,12 +36,13 @@ export async function GET(request: NextRequest) {
   const fxEnd = normalizeDate(searchParams.get("fxEnd")) ?? todayIso();
   const historyStart = normalizeDate(searchParams.get("historyStart"));
   const historyEnd = normalizeDate(searchParams.get("historyEnd")) ?? todayIso();
+  const includeNavHistory = searchParams.get("navHistory") !== "0";
   const errors: string[] = [];
   const payload: MarketDataPayload = { navs: [], stocks: [], fxs: [], errors };
 
   await Promise.all([
     isins.length > 0 ? loadNavs([...new Set(isins)], payload, errors) : Promise.resolve(),
-    isins.length > 0 && historyStart ? loadHistoricalNavs([...new Set(isins)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
+    isins.length > 0 && historyStart && includeNavHistory ? loadHistoricalNavs([...new Set(isins)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
     symbols.length > 0 ? loadStockQuotes([...new Set(symbols)], payload, errors) : Promise.resolve(),
     symbols.length > 0 && historyStart ? loadHistoricalStockQuotes([...new Set(symbols)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
     indianSymbols.length > 0 ? loadIndianStockQuotes([...new Set(indianSymbols)], payload, errors) : Promise.resolve(),
@@ -93,6 +94,18 @@ async function loadHistoricalNavs(isins: string[], start: string, end: string, p
     }
   ], (quotes) => quotes.length > 0);
 
+  const amfiHistory = await firstUsable<NavQuote[]>([
+    {
+      name: "AMFI historical NAV portal",
+      run: async () => parseAmfiNavAll(await fetchText("https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx?frmdt=" + amfiDate(start) + "&todt=" + amfiDate(end)), requested).map((quote) => ({ ...quote, source: "amfi_history" }))
+    }
+  ], (quotes) => quotes.length > 0);
+
+  if (amfiHistory.value) {
+    payload.navs = mergeNavQuotes(payload.navs, amfiHistory.value);
+    return;
+  }
+
   const schemeByIsin = new Map((latest.value ?? []).map((quote) => [quote.isin, quote.schemeCode]));
   const mfapiQuotes = await Promise.allSettled(
     [...schemeByIsin.entries()].map(async ([isin, schemeCode]) => {
@@ -107,18 +120,6 @@ async function loadHistoricalNavs(isins: string[], start: string, end: string, p
     const found = new Set(historical.map((quote) => quote.isin));
     const missing = isins.filter((isin) => !found.has(isin));
     if (missing.length > 0) errors.push("Historical mutual fund NAV missing for: " + missing.join(", "));
-    return;
-  }
-
-  const amfiHistory = await firstUsable<NavQuote[]>([
-    {
-      name: "AMFI historical NAV portal",
-      run: async () => parseAmfiNavAll(await fetchText("https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx?frmdt=" + amfiDate(start) + "&todt=" + amfiDate(end)), requested).map((quote) => ({ ...quote, source: "amfi_history" }))
-    }
-  ], (quotes) => quotes.length > 0);
-
-  if (amfiHistory.value) {
-    payload.navs = mergeNavQuotes(payload.navs, amfiHistory.value);
     return;
   }
 

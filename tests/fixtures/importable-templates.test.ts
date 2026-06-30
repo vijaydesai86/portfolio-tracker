@@ -9,6 +9,7 @@ const fixtureDir = resolve(root, "fixtures/importable");
 describe("importable canonical template pack", () => {
   it("parses every committed CSV template without errors", () => {
     const files = readdirSync(fixtureDir).filter((name) => name.endsWith(".csv"));
+    const manualFiles = files.filter((name) => !name.startsWith("goal-expenses-"));
 
     expect(files.sort()).toEqual([
       "all-assets-template.csv",
@@ -20,10 +21,13 @@ describe("importable canonical template pack", () => {
       "manual-balances-sample.csv",
       "manual-balances-template.csv",
       "manual-transactions-template.csv",
-      "monthly-all-assets-template.csv"
-    ]);
+      "monthly-all-assets-template.csv",
+      "goal-expenses-bhoomi.csv",
+      "goal-expenses-chinnu.csv",
+      "goal-expenses-retirement.csv"
+    ].sort());
 
-    for (const file of files) {
+    for (const file of manualFiles) {
       const csv = readFileSync(resolve(fixtureDir, file), "utf8");
       const result = parseManualCsv(csv, { importId: `template_${file}` });
 
@@ -35,7 +39,7 @@ describe("importable canonical template pack", () => {
   it("covers every requested manual asset type across the template pack", () => {
     const assetTypes = new Set<string>();
 
-    for (const file of readdirSync(fixtureDir).filter((name) => name.endsWith(".csv"))) {
+    for (const file of readdirSync(fixtureDir).filter((name) => name.endsWith(".csv") && !name.startsWith("goal-expenses-"))) {
       const csv = readFileSync(resolve(fixtureDir, file), "utf8");
       const result = parseManualCsv(csv, { importId: `template_${file}` });
 

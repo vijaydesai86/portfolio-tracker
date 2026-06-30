@@ -1,0 +1,6 @@
+goal,as_of_date,scenario,category,sub_category,item,amount,frequency,payer,quantity,unit_amount,active_scenario,notes
+Chinnu,2026-01-01,Current,Grocery,Food,Grocery,50000,monthly,,,,yes,user-provided example row
+Chinnu,2026-01-01,Current,Vegetable,Food,Vegetable,50000,monthly,,,,,user-provided example row
+Chinnu,2026-01-01,Current,Milk,Food,Milk,20000,monthly,,,,,user-provided example row
+Chinnu,2026-01-01,Current,Fuel,Transport,Fuel,20000,monthly,,,,,user-provided example row
+Chinnu,2026-01-01,Current,Others,Misc,Others,1559,monthly,,,,,user-provided example row

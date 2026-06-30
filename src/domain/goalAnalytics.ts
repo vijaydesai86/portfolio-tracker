@@ -122,6 +122,7 @@ export function buildGoal(input: GoalDraft, now = new Date().toISOString()): Goa
     consumptionGlideTo: input.consumptionGlideTo ?? "Debt",
     consumptionGlideFloorPercent: input.consumptionGlideFloorPercent ?? 20,
     includeInCombinedGoals: true,
+    includeInExpenseTotals: true,
     createdAt: now,
     updatedAt: now
   };

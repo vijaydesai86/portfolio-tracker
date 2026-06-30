@@ -163,6 +163,8 @@ export const goalSchema = z.object({
   consumptionGlideTo: categorySchema.optional(),
   consumptionGlideFloorPercent: z.number().min(0).max(100).optional(),
   includeInCombinedGoals: z.boolean().default(true),
+  includeInExpenseTotals: z.boolean().optional().default(true),
+  expenseScenario: z.string().optional(),
   accumulationTargetAllocation: goalAllocationSchema.optional(),
   consumptionTargetAllocation: goalAllocationSchema.optional(),
   createdAt: timestampSchema,
@@ -177,6 +179,14 @@ export const goalExpenseSchema = z.object({
   amount: z.number().finite().nonnegative(),
   currency: currencySchema,
   baseDate: dateSchema,
+  scenario: z.string().default("Current"),
+  category: z.string().optional(),
+  subCategory: z.string().optional(),
+  payer: z.string().optional(),
+  frequency: z.enum(["monthly", "yearly", "one_time"]).default("monthly"),
+  quantity: z.number().finite().nonnegative().optional(),
+  unitAmount: z.number().finite().nonnegative().optional(),
+  notes: z.string().optional(),
   createdAt: timestampSchema,
   updatedAt: timestampSchema
 });

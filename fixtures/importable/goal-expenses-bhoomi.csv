@@ -1,0 +1,9 @@
+goal,as_of_date,scenario,category,sub_category,item,amount,frequency,payer,quantity,unit_amount,active_scenario,notes
+Bhoomi,2026-01-01,Current,Bhoomi,Class,Nidhi,35000,monthly,,,,yes,direct monthly
+Bhoomi,2026-01-01,Current,Bhoomi,Class,Shweta,,monthly,,2,1000,,2 sessions
+Bhoomi,2026-01-01,Current,Bhoomi,Class,Anitha,,monthly,,4,1200,,4 sessions including transport
+Bhoomi,2026-01-01,Current,Bhoomi,Class,Heeral,,monthly,,5,1400,,5 sessions including transport
+Bhoomi,2026-01-01,Current,Bhoomi,Class,Hamshi,,monthly,,5,1400,,5 sessions including transport
+Bhoomi,2026-01-01,Current,Bhoomi,Transport,Nidhi transport,,monthly,,22,850,,22 transport days
+Bhoomi,2026-01-01,Current,Bhoomi,Transport,Petrol,0,monthly,,,,,
+Bhoomi,2026-01-01,Current,Bhoomi,Transport,Driver,,monthly,,20,0,,driver placeholder

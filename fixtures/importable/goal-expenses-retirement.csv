@@ -1,0 +1,111 @@
+goal,as_of_date,scenario,category,sub_category,item,amount,frequency,payer,quantity,unit_amount,active_scenario,notes
+Retirement,2026-01-01,Current,Bhoomi,Class,Nidhi,35000,monthly,Archana,,,,
+Retirement,2026-01-01,Current,Bhoomi,Class,Shweta,,monthly,Archana,2,1000,,
+Retirement,2026-01-01,Current,Bhoomi,Class,Anitha,,monthly,Archana,4,1200,,
+Retirement,2026-01-01,Current,Bhoomi,Class,Heeral,,monthly,Archana,5,1400,,
+Retirement,2026-01-01,Current,Bhoomi,Class,Hamshi,,monthly,Archana,5,1400,,
+Retirement,2026-01-01,Current,Bhoomi,Transport,Nidhi transport,,monthly,Archana,22,850,,
+Retirement,2026-01-01,Current,Bhoomi,Transport,Petrol,0,monthly,Archana,,,,
+Retirement,2026-01-01,Current,Bhoomi,Transport,Driver,,monthly,Archana,20,0,,
+Retirement,2026-01-01,Current,Travel,Transport,Auto/cab,5000,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Maid+Cook,House help,Cook,4500,monthly,Archana,,,,
+Retirement,2026-01-01,Current,Maid+Cook,House help,Maid,4000,monthly,Archana,,,,
+Retirement,2026-01-01,Current,Utility,Core,Electricity,3000,monthly,Archana,,,,
+Retirement,2026-01-01,Current,Utility,Core,Water,750,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Core,Internet,1200,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Netflix,200,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Amazon,200,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Hotstar,200,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Sony,0,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Zee,0,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Airtel,0,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Vijay Jio,300,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Archana Jio,300,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Vijay Airtel,300,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Communication,Archana Airtel,300,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Utility,Core,Gas,500,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Maintenance,Housing,Maintenance,7500,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Grocery,Food,Grocery,10000,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Veg/Fruit,Food,Vegetables and fruit,6000,monthly,Archana,,,,
+Retirement,2026-01-01,Current,Milk/Curd,Food,Milk and curd,2500,monthly,Archana,,,,
+Retirement,2026-01-01,Current,Eatout,Meals,Lunch/Dinner,,monthly,Vijay,2,2500,,
+Retirement,2026-01-01,Current,Eatout,Meals,Zomato meal,,monthly,Vijay,2,1000,,
+Retirement,2026-01-01,Current,Eatout,Meals,Breakfast,,monthly,Vijay,3,500,,
+Retirement,2026-01-01,Current,Eatout,Meals,Vijay office,,monthly,Vijay,8,125,,
+Retirement,2026-01-01,Current,Eatout,Meals,Archana school,,monthly,Archana,20,100,,
+Retirement,2026-01-01,Current,Eatout,Meals,Drinks regular,,monthly,Vijay,2,800,,
+Retirement,2026-01-01,Current,Eatout,Meals,Drinks once,,monthly,Vijay,0,800,,
+Retirement,2026-01-01,Current,Eatout,Meals,Snacks,,monthly,Vijay,3,200,,
+Retirement,2026-01-01,Current,Insurance,Healthcare,Term Archana,2000,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Insurance,Healthcare,Term Vijay,3000,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Insurance,Healthcare,Health,2500,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Insurance,Healthcare,Health home,2500,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Medical,Healthcare,Archana share,2000,monthly,Archana,,,,
+Retirement,2026-01-01,Current,Medical,Healthcare,Vijay share,4000,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Support,Family,Home support,20000,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Shopping,Lifestyle,Shopping,10000,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,House tax,30000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Water purifier,12000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,House cleaning,13200,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Repair,12000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Tax filing,6000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Pest control,3600,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Health check-up,9000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Car service,13200,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Bhoomi check-up,15000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Vacation,120000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Renovation,12000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Dharwad travel,36000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Medical,24000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Cult,15000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Adhoc,Yearly spread,Car insurance,6000,yearly,Vijay,,,,annual value divided by 12
+Retirement,2026-01-01,Current,Others,Misc,Others,2500,monthly,Vijay,,,,
+Retirement,2026-01-01,Current,EMIs,Debt service,EMIs,0,monthly,,,,,
+Retirement,2026-01-01,Retirement,Bhoomi,Derived scenario,Bhoomi,0,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Travel,Derived scenario,Travel,25000,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Maid+Cook,Derived scenario,Maid+Cook,8500,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Utility,Derived scenario,Utility,7250,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Maintenance,Derived scenario,Maintenance,7500,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Grocery,Derived scenario,Grocery,10000,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Veg/Fruit,Derived scenario,Veg/Fruit,6000,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Milk/Curd,Derived scenario,Milk/Curd,2500,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Eatout,Derived scenario,Eatout,9000,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Insurance,Derived scenario,Insurance,10000,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Medical,Derived scenario,Medical,12000,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Support,Derived scenario,Support,0,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Shopping,Derived scenario,Shopping,10000,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Adhoc,Derived scenario,Adhoc,27250,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,Others,Derived scenario,Others,2500,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Retirement,EMIs,Derived scenario,EMIs,0,monthly,,,,yes,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Bhoomi,Derived scenario,Bhoomi,35000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Travel,Derived scenario,Travel,25000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Maid+Cook,Derived scenario,Maid+Cook,4000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Utility,Derived scenario,Utility,7250,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Maintenance,Derived scenario,Maintenance,7500,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Grocery,Derived scenario,Grocery,10000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Veg/Fruit,Derived scenario,Veg/Fruit,6000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Milk/Curd,Derived scenario,Milk/Curd,2500,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Eatout,Derived scenario,Eatout,0,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Insurance,Derived scenario,Insurance,10000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Medical,Derived scenario,Medical,6000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Support,Derived scenario,Support,0,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Shopping,Derived scenario,Shopping,5000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Adhoc,Derived scenario,Adhoc,13625,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,Others,Derived scenario,Others,1250,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Bare Minimum,EMIs,Derived scenario,EMIs,0,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Bhoomi,Derived scenario,Bhoomi,74500,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Travel,Derived scenario,Travel,5000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Maid+Cook,Derived scenario,Maid+Cook,8500,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Utility,Derived scenario,Utility,7250,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Maintenance,Derived scenario,Maintenance,7500,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Grocery,Derived scenario,Grocery,10000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Veg/Fruit,Derived scenario,Veg/Fruit,6000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Milk/Curd,Derived scenario,Milk/Curd,2500,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Eatout,Derived scenario,Eatout,13700,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Insurance,Derived scenario,Insurance,10000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Medical,Derived scenario,Medical,6000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Support,Derived scenario,Support,20000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Shopping,Derived scenario,Shopping,10000,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Adhoc,Derived scenario,Adhoc,27250,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,Others,Derived scenario,Others,2500,monthly,,,,,derived from Current category table
+Retirement,2026-01-01,Retire Now,EMIs,Derived scenario,EMIs,0,monthly,,,,,derived from Current category table
