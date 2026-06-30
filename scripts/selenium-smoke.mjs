@@ -818,11 +818,11 @@ try {
   await waitForBodyText("Imported 3 goal expense row(s)", 15000);
   await navClick("Expenses");
   await waitForBodyText("Goal expenses are modeled from detailed line items", 15000);
-  await waitForBodyText("Current lifestyle", 15000);
+  await waitForBodyText("Current monthly", 15000);
   await waitForBodyText("Planning monthly", 15000);
   await waitForBodyText("Current Expense Categories", 15000);
   await waitForBodyText("Current Payer Responsibility", 15000);
-  await waitForBodyText("Current Line-Item Drivers", 15000);
+  await waitForBodyText("Current Expense Lines", 15000);
   await waitForBodyText("Scenario Playbook", 15000);
   await waitForBodyText("Expense Line Audit", 15000);
   await waitForBodyText("₹1,20,000.00", 15000);

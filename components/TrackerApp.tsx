@@ -450,7 +450,7 @@ function installInteractiveTables(root: HTMLElement): () => void {
     wrap.setAttribute("aria-label", "Scrollable sortable data table");
     const hint = document.createElement("div");
     hint.className = "table-interaction-hint";
-    hint.textContent = "Sort columns by selecting a header. Wide audit tables scroll inside this panel.";
+    hint.textContent = "Select a column header to sort. Wide tables scroll inside this panel.";
     wrap.parentElement?.insertBefore(hint, wrap);
     cleanups.push(() => hint.remove());
     Array.from(headerRow.cells).forEach((cell, columnIndex) => {
@@ -1192,11 +1192,13 @@ export function TrackerApp() {
       const payload = (await response.json()) as MarketDataPayload;
       const refreshed = applyMarketDataPayload(portfolio, payload);
       const updatedValuations = countChangedCurrentValuations(portfolio, refreshed);
+      const refreshIssues = splitMarketRefreshErrors(payload.errors);
       setBackup(refreshed);
-      setErrors(payload.errors);
+      setErrors(refreshIssues.blockingErrors);
       setStatus(
         (prefix ? prefix + " " : "") +
-          `Market refresh complete: ${payload.navs.length} NAV snapshot(s), ${payload.stocks.length} stock price snapshot(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s), ${updatedValuations} holding valuation(s) updated.`
+          `Market refresh complete: ${payload.navs.length} NAV snapshot(s), ${payload.stocks.length} stock price snapshot(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s), ${updatedValuations} holding valuation(s) updated.` +
+          (refreshIssues.historyWarnings.length > 0 ? ` Historical chart coverage warning: ${refreshIssues.historyWarnings.length} non-blocking provider issue(s); current valuations are unaffected.` : "")
       );
     } catch (error) {
       setErrors([error instanceof Error ? error.message : "Market refresh failed"]);
@@ -1336,6 +1338,12 @@ export function TrackerApp() {
       const previous = beforeById.get(balance.id);
       return previous && (previous.value !== balance.value || previous.price !== balance.price || previous.asOfDate !== balance.asOfDate || previous.currency !== balance.currency);
     }).length;
+  }
+
+  function splitMarketRefreshErrors(errors: string[] = []): { blockingErrors: string[]; historyWarnings: string[] } {
+    const historyWarnings = errors.filter((error) => /historical|scheme history|provider request|timed out|AMFI historical/i.test(error));
+    const blockingErrors = errors.filter((error) => !historyWarnings.includes(error));
+    return { blockingErrors, historyWarnings };
   }
 
   function withImportLabel<T extends { importRun: { label?: string; fileName?: string } }>(imported: T, label: string): T {
@@ -1843,7 +1851,7 @@ export function TrackerApp() {
 
         {view === "imports" && <ImportsView {...{ backup, csv, setCsv, manualImportPreview, previewManualCsv, importCsv, importLabel, setImportLabel, replaceImportId, setReplaceImportId, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText, goalExpenseCsv, setGoalExpenseCsv, goalExpenseGoalId: goalExpenseGoalId || backup.goals[0]?.id || "", setGoalExpenseGoalId, goalExpenseBaseDate, setGoalExpenseBaseDate, importGoalExpensesFromText, importGoalExpensesFromFile, editSessionActive }} />}
 
-        {view === "data" && <DataAuditView report={reconciliationReport} currency={backup.baseCurrency} />}
+        {view === "data" && <DataAuditView report={reconciliationReport} taxReport={taxReport} currency={backup.baseCurrency} />}
 
         {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} displaySettings={displayCurrencySettings} updateDisplaySettings={updateDisplayCurrencyFromForm} planningSettings={planningSettings} updatePlanningSettings={updatePlanningSettingsFromForm} goals={backup.goals} goalExpenses={backup.goalExpenses ?? []} updateGoalSettings={updateGoalSettingsFromForm} currency={backup.baseCurrency} />}
 
@@ -2104,6 +2112,8 @@ function SnapshotsView(props: {
           <MiniInsight label="Goal readiness" value={latestPoint && latestPoint.goalRequiredToday > 0 ? ((latestPoint.goalMappedCurrent / latestPoint.goalRequiredToday) * 100).toFixed(1) + "%" : "-"} detail="mapped now vs needed today" />
         </div>
       </div>
+
+      {props.backup.snapshots.length === 1 && <div className="notice snapshot-sparse-note">One frozen snapshot is saved. Capture another snapshot after the next refresh/import cycle to turn these points into real trend lines; no market fetch is used while viewing saved snapshots.</div>}
 
       {props.backup.snapshots.length >= 2 && <SnapshotComparisonPanel snapshots={props.backup.snapshots} comparison={snapshotComparison} compareFromId={compareFromId || props.backup.snapshots[0]?.id || ""} compareToId={compareToId || props.backup.snapshots.at(-1)?.id || ""} setCompareFromId={setCompareFromId} setCompareToId={setCompareToId} currency={props.backup.baseCurrency} />}
 
@@ -2598,6 +2608,7 @@ function ImportsView(props: {
   const npsWarningCount = npsParses.reduce((sum, parsed) => sum + parsed.warnings.length, 0);
   const npsHasErrors = npsParses.some((parsed) => parsed.errors.length > 0);
   const stagedPreview = nativeStagedPreviewRows(props.backup, props.stagedCas ? [props.stagedCas] : [], props.stagedInd ? [props.stagedInd] : [], props.stagedEpfo ?? [], props.stagedNps ?? []);
+  const selectedReplacement = props.backup.imports.find((run) => run.id === props.replaceImportId);
   return (
     <section className="grid imports-workspace">
       {props.editSessionActive && <div className="notice">Finish or cancel draft editing before importing, restoring, or refreshing files.</div>}
@@ -2605,7 +2616,7 @@ function ImportsView(props: {
         <div className="card">
           <h2>Native File Intake</h2>
           <input placeholder="Import name" value={props.importLabel} onChange={(event) => props.setImportLabel(event.target.value)} />
-          <label className="import-replace-field"><span>Replace existing import</span><select value={props.replaceImportId} onChange={(event) => props.setReplaceImportId(event.target.value)}><option value="">New import</option>{props.backup.imports.filter((run) => run.status === "committed").map((run) => <option key={run.id} value={run.id}>{importRunLabel(run)}</option>)}</select>{props.replaceImportId && <button type="button" onClick={() => props.setReplaceImportId("")}>Clear replacement</button>}</label>
+          <label className="import-replace-field"><span>Replace existing import</span><select value={props.replaceImportId} onChange={(event) => props.setReplaceImportId(event.target.value)}><option value="">New import</option>{props.backup.imports.filter((run) => run.status === "committed").map((run) => <option key={run.id} value={run.id}>{importRunLabel(run)}</option>)}</select>{props.replaceImportId && <button type="button" onClick={() => props.setReplaceImportId("")}>Clear replacement</button>}</label>{selectedReplacement ? <div className="import-mode-banner replace-mode"><strong>Replace mode</strong><span>Replacing {importRunLabel(selectedReplacement)}. Matching user edits such as goal mappings, taper, FMV, and manual fields are preserved when record identity still matches.</span></div> : <div className="import-mode-banner new-mode"><strong>New import</strong><span>Adds a separate source. Existing goal mappings and user edits stay attached to matching holdings already in the portfolio.</span></div>}
           <input type="file" multiple accept=".json,.csv,.pdf,.html,.xlsx,application/json,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => props.inspectNativeFile(event.target.files ?? undefined)} />
           {props.nativeDetection && <div className="detection"><div><span>Provider</span><strong>{props.nativeDetection.label}</strong></div><div><span>Files</span><strong>{props.nativeFileCount}</strong></div><div><span>Status</span><strong>{props.nativeDetection.status}</strong></div><div><span>Type</span><strong>{props.nativeDetection.nativeInputType}</strong></div><div><span>Confidence</span><strong>{props.nativeDetection.confidence}</strong></div><p>{props.nativeDetection.reason}</p></div>}
           {props.nativeDetection?.providerId === "canonical_json" && <div className="native-actions"><button className="primary" onClick={props.restoreNativeBackup}>Restore JSON Backup</button></div>}
@@ -2627,7 +2638,7 @@ function ImportsView(props: {
         <div className="card"><h2>USD/INR FX Rates</h2><div className="native-actions"><input type="number" step="0.0001" placeholder="USD/INR rate" value={props.fxRate} onChange={(event) => props.setFxRate(event.target.value)} /><input type="date" value={props.fxDate} onChange={(event) => props.setFxDate(event.target.value)} /><button className="primary" onClick={props.applyManualFxRate}>Add Rate</button></div><p className="message">Use a real USD/INR rate. Current holdings use the latest rate; transaction analytics use rates on or before each transaction date.</p><input type="file" accept=".csv,text/csv" onChange={(event) => props.importFxCsvFile(event.target.files?.[0])} /><textarea value={props.fxCsv} onChange={(event) => props.setFxCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button className="primary" onClick={props.importFxCsvText}>Import FX CSV</button></div></div>
         <div className="card"><h2>Manual CSV Preview and Commit</h2><p className="message">Use the committed templates for normal uploads. Preview shows the before/after impact without mutating the portfolio; commit then writes the same canonical records. Choose an old manual import only when replacing the same file family and preserving matching user edits.</p><p className="message">Replacement target is selected in Native File Intake or from Import History. Manual CSV uses the same replace engine and preserves matching user edits.</p><textarea value={props.csv} onChange={(event) => props.setCsv(event.target.value)} spellCheck={false} /><div className="actions" style={{ marginTop: 12 }}><button onClick={props.previewManualCsv}>Preview Manual CSV</button><button className="primary" onClick={props.importCsv}>{props.replaceImportId ? "Replace and Commit" : "Stage and Commit"}</button></div><ImportPreviewPanel preview={props.manualImportPreview} currency={props.backup.baseCurrency} /></div>
         <div className="card"><h2>Goal Expense CSV</h2><GoalExpenseImportEditor goals={props.backup.goals} goalExpenses={props.backup.goalExpenses ?? []} csv={props.goalExpenseCsv} setCsv={props.setGoalExpenseCsv} selectedGoalId={props.goalExpenseGoalId || props.backup.goals[0]?.id || ""} setSelectedGoalId={props.setGoalExpenseGoalId} baseDate={props.goalExpenseBaseDate} setBaseDate={props.setGoalExpenseBaseDate} importFromText={props.importGoalExpensesFromText} importFromFile={props.importGoalExpensesFromFile} currency={props.backup.baseCurrency} /></div>
-        <div className="card"><h2>Import History</h2>{props.backup.imports.length === 0 ? <p className="message">No imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Name</th><th>Provider</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{props.backup.imports.map((run) => <tr key={run.id}><td>{run.label ?? run.fileName ?? run.id}</td><td>{run.provider}</td><td>{run.status}</td><td>{new Date(run.createdAt).toLocaleString()}</td><td><div className="table-actions"><button onClick={() => props.setReplaceImportId(run.id)} disabled={run.status !== "committed"}>Replace</button><button className="danger-button" onClick={() => props.deleteImport(run.id)}>Delete</button></div></td></tr>)}</tbody></table></div>}</div>
+        <div className="card"><h2>Import History</h2>{props.backup.imports.length === 0 ? <p className="message">No imports yet.</p> : <div className="table-wrap"><table><thead><tr><th>Name</th><th>Provider</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{props.backup.imports.map((run) => <tr key={run.id} className={props.replaceImportId === run.id ? "selected-row" : ""}><td>{run.label ?? run.fileName ?? run.id}</td><td>{run.provider}</td><td>{run.status}{props.replaceImportId === run.id && <small className="row-subtext">selected for replace</small>}</td><td>{new Date(run.createdAt).toLocaleString()}</td><td><div className="table-actions"><button onClick={() => props.setReplaceImportId(run.id)} disabled={run.status !== "committed"}>{props.replaceImportId === run.id ? "Selected" : "Replace"}</button><button className="danger-button" onClick={() => props.deleteImport(run.id)}>Delete</button></div></td></tr>)}</tbody></table></div>}</div>
       </div>
     </section>
   );
@@ -2683,6 +2694,7 @@ function TaxView({ report, currency, financialYears, selectedFinancialYear, setS
         </div>
       </div>
 
+
       <div className="analytics-grid">
         <ChartCard title="Realized Bucket Magnitude"><RankingBar data={bucketRows} formatValue={(value) => formatMoney(value, currency)} emptyMessage="No realized disposal buckets in the selected FY yet." tone="profit" /></ChartCard>
         <ChartCard title="Unrealized Gain Watch"><RankingBar data={unrealizedGainRows} formatValue={(value) => formatMoney(value, currency)} emptyMessage="No unrealized gains in open lots yet." tone="profit" /></ChartCard>
@@ -2704,7 +2716,11 @@ function TaxView({ report, currency, financialYears, selectedFinancialYear, setS
   );
 }
 
-function DataAuditView({ report, currency }: { report: ReturnType<typeof buildReconciliationReport>; currency: string }) {
+function DataAuditView({ report, taxReport, currency }: { report: ReturnType<typeof buildReconciliationReport>; taxReport: ReturnType<typeof calculatePortfolioTaxReport>; currency: string }) {
+  const actionRows = [
+    ...report.marketDataGaps.slice(0, 8).map((gap) => ({ area: gap.kind, item: gap.label, severity: gap.severity, action: gap.kind.toLowerCase().includes("fx") ? "Add/import FX rate or refresh market data." : "Refresh market data; if still missing, add a manual price/NAV override." })),
+    ...report.validationRows.filter((row) => row.status !== "ok").slice(0, 8).map((row) => ({ area: row.label, item: row.detail, severity: row.status, action: "Review the source import and parser output before relying on affected analytics." }))
+  ].slice(0, 10);
   return (
     <section className="grid data-audit-workspace">
       <div className="card wide-card">
@@ -2718,6 +2734,8 @@ function DataAuditView({ report, currency }: { report: ReturnType<typeof buildRe
         </div>
       </div>
       <div className="analytics-grid">
+        <TaxDataChecksCard report={taxReport} currency={currency} />
+        <div className="card wide-card data-action-card"><h2>Review Queue</h2><p className="chart-note compact-note">Actionable items only. Fix these before trusting affected history, tax, XIRR, or INR conversions.</p>{actionRows.length === 0 ? <p className="message">No immediate data actions. Current data quality checks are clean.</p> : <div className="table-wrap"><table><thead><tr><th>Area</th><th>Item</th><th>Severity</th><th>Suggested action</th></tr></thead><tbody>{actionRows.map((row, index) => <tr key={row.area + row.item + index}><td>{row.area}</td><td>{row.item}</td><td><span className={"status-pill " + (row.severity === "critical" || row.severity === "warn" ? "planned" : "partial")}>{row.severity}</span></td><td>{row.action}</td></tr>)}</tbody></table></div>}</div>
         <ChartCard title="Source Value Mix"><HorizontalBar data={report.sourceTotals.map((row) => ({ name: row.source, value: row.value }))} currency={currency} /></ChartCard>
         <div className="card"><h2>Data Quality Matrix</h2><p className="chart-note compact-note">Trust score for the data layer only. Analytics stays in the dashboard; this matrix explains whether inputs, market data, cost basis, XIRR, and freshness are ready.</p><div className="quality-row-list">{report.dataQuality.rows.map((row) => <div className={"quality-row status-" + row.status} key={row.area}><div><span>{row.area}</span><strong>{row.status.toUpperCase()}</strong></div><em>{row.score}%</em><small>{row.detail}</small></div>)}</div></div>
         <div className="card"><h2>Validation Checks</h2><div className="signal-list">{report.validationRows.map((row) => <div className={"signal-item " + (row.status === "ok" ? "good" : "warn")} key={row.label}><ShieldCheck size={18} /><div><span>{row.label}</span><strong>{row.status.toUpperCase()}</strong><small>{row.detail}</small></div></div>)}</div></div>
@@ -2843,10 +2861,9 @@ function ExpensesView({ goals, goalExpenses, currency }: { goals: Goal[]; goalEx
 
       <div className="card wide-card"><h2>Scenario Playbook</h2><p className="chart-note compact-note">Expense-to-goal link: each scenario shows monthly spend today, change from Current, first goal-year spend, and corpus implied by the goal multiple.</p>{scenarioRows.length === 0 ? <p className="message">No expense scenarios imported yet.</p> : <div className="table-wrap expense-compact-table"><table><thead><tr><th>Goal</th><th>Scenario</th><th>Rows</th><th>Monthly</th><th>Vs current</th><th>Goal-year annual</th><th>Corpus implied</th><th>Status</th></tr></thead><tbody>{scenarioRows.map((row) => <tr key={row.goal.id + row.scenario}><td>{row.goal.name}</td><td>{row.scenario}</td><td>{row.rows}</td><td>{formatMoney(row.monthly, currency)}</td><td>{row.scenario === "Current" ? "-" : formatMoney(row.deltaVsCurrent, currency)}</td><td>{formatMoney(row.annualAtGoal, currency)}</td><td>{formatMoney(row.corpus, currency)}</td><td><span className={"status-pill " + (row.active ? "implemented" : "partial")}>{row.active ? "active" : "compare"}</span></td></tr>)}</tbody></table></div>}</div>
 
-      <div className="card expense-data-quality-card"><h2>Expense Data Quality</h2><div className="signal-list"><div className="signal-item good"><ShieldCheck size={18} /><div><span>Imported coverage</span><strong>{importedSummaries.length}/{expenseIncluded.length} included goal(s)</strong><small>{excludedExpenseGoals > 0 ? excludedExpenseGoals + " goal(s) excluded from expense totals" : "All included goals are counted in expense rollups."}</small></div></div><div className={"signal-item " + (payerCoverage >= 90 ? "good" : payerCoverage > 0 ? "warn" : "bad")}><ShieldCheck size={18} /><div><span>Payer coverage</span><strong>{payerCoverage.toFixed(0)}%</strong><small>{payerCovered}/{payerCoverageRows.length} current/planning rows have payer ownership.</small></div></div></div></div>
-
       <div className="card wide-card"><h2>Goal Expense Summary</h2><p className="chart-note compact-note">Compact audit of included goals only. Goals with Expense totals off remain available for their own goal math but are excluded from this page.</p><div className="table-wrap expense-compact-table"><table className="expense-summary-table"><thead><tr><th>Goal</th><th>Active scenario</th><th>Rows</th><th>Planning monthly</th><th>Today planning</th><th>Goal-year spend</th><th>Available scenarios</th></tr></thead><tbody>{expenseIncluded.map(({ goal, summary }) => <tr key={goal.id}><td><strong>{goal.name}</strong><small>Included</small></td><td><span className="status-pill implemented">{summary.selectedScenario || "Manual"}</span></td><td>{summary.rows.length}</td><td>{formatMoney(summary.baseMonthlyExpense, currency)}</td><td>{formatMoney(summary.currentMonthlyExpense, currency)}</td><td>{formatMoney(summary.firstYearExpense, currency)}</td><td><div className="scenario-chip-list">{summary.scenarioTotals.length === 0 ? <span className="muted">-</span> : summary.scenarioTotals.map((row) => <span className={"scenario-chip " + (row.scenario === summary.selectedScenario ? "is-active" : "")} key={row.scenario}><strong>{row.scenario}</strong><em>{formatMoney(row.baseMonthlyExpense, currency)}</em></span>)}</div></td></tr>)}</tbody></table></div></div>
       <div className="card wide-card expense-audit-card compact-audit-card"><h2>Expense Line Audit</h2><p className="chart-note compact-note">Verification drilldown only. Re-uploading an expense CSV replaces the affected goal ledger, and JSON export keeps all rows.</p><div className="table-wrap expense-audit-table"><table><thead><tr><th>Goal</th><th>Scenario</th><th>Category</th><th>Item</th><th>Frequency</th><th>Qty</th><th>Unit</th><th>Monthly</th><th>Payer</th><th>Notes</th></tr></thead><tbody>{auditRows.slice(0, 120).map(({ goal, row }) => <tr key={row.id}><td>{goal.name}</td><td>{row.scenario}</td><td>{row.category || "-"}</td><td>{row.subCategory ? row.subCategory + " · " + row.expense : row.expense}</td><td>{row.frequency}</td><td>{row.quantity ?? "-"}</td><td>{row.unitAmount != null ? formatMoney(row.unitAmount, row.currency) : "-"}</td><td>{formatMoney(row.amount, row.currency)}</td><td>{row.payer || "-"}</td><td>{row.notes || "-"}</td></tr>)}</tbody></table></div>{auditRows.length > 120 && <p className="helper">Showing first 120 active-scenario rows; export JSON keeps the full detail ledger.</p>}</div>
+      <div className="card expense-data-quality-card compact-quality-card"><h2>Expense Import Checks</h2><div className="signal-list compact-signal-list"><div className="signal-item good"><ShieldCheck size={18} /><div><span>Included goal coverage</span><strong>{importedSummaries.length}/{expenseIncluded.length}</strong><small>{excludedExpenseGoals > 0 ? excludedExpenseGoals + " goal(s) excluded from expense analytics" : "All included goals have expense rollups or manual fallback."}</small></div></div><div className={"signal-item " + (payerCoverage >= 90 ? "good" : payerCoverage > 0 ? "warn" : "bad")}><ShieldCheck size={18} /><div><span>Payer coverage</span><strong>{payerCoverage.toFixed(0)}%</strong><small>{payerCovered}/{payerCoverageRows.length} current/planning rows have payer ownership.</small></div></div></div></div>
     </section>
   );
 }
@@ -3061,7 +3078,7 @@ function GoalSettingsDraftEditor({ goals, goalExpenses, updateGoalSettings, curr
   const reset = () => setDraftGoals(goals);
   return (
     <div className="goal-settings-draft-editor">
-      <div className="goal-settings-header"><div><h3>Goal Assumptions</h3><p>Central place for goal inputs, phase allocations, drawdown, and consumption glidepath. Goal and Planning pages read these values.</p></div><div className="draft-actions compact-draft-actions"><button className="primary" disabled={!dirty} onClick={apply}>Done editing goals</button><button disabled={!dirty} onClick={reset}>Reset draft</button></div></div>
+      <div className="goal-settings-header"><div><h3>Goal Assumptions</h3><p>Central place for goal inputs, expense-derived monthly spend, phase allocations, drawdown, and consumption glidepath. Goal and Planning pages read these values.</p></div><div className="draft-actions compact-draft-actions"><button className="primary" disabled={!dirty} onClick={apply}>Done editing goals</button><button disabled={!dirty} onClick={reset}>Reset draft</button></div></div>
       {draftGoals.length === 0 ? <p className="message">No goals yet. Add a goal from Add Entry, then configure assumptions here.</p> : <div className="goal-settings-list">{draftGoals.map((goal) => <GoalSettingsDraftCard key={goal.id} goal={goal} goalExpenses={goalExpenses.filter((row) => row.goalId === goal.id)} updateDraftGoal={updateDraftGoal} currency={currency} />)}</div>}
     </div>
   );
@@ -3093,15 +3110,15 @@ function GoalSettingsDraftCard({ goal, goalExpenses, updateDraftGoal, currency }
         <label><span>Spend growth %</span><input type="number" step="0.1" value={goal.drawdownSpendGrowth ?? 6} onChange={(event) => updateDraftGoal(goal.id, { drawdownSpendGrowth: Number(event.target.value) })} /></label>
         <label><span>Corpus consumption years</span><input type="number" min="1" max="100" value={goal.drawdownHorizonYears ?? 45} onChange={(event) => updateDraftGoal(goal.id, { drawdownHorizonYears: Number(event.target.value) })} /></label>
         <label><span>Withdrawal timing</span><select value={goal.drawdownWithdrawalTiming ?? "beginning"} onChange={(event) => updateDraftGoal(goal.id, { drawdownWithdrawalTiming: event.target.value as Goal["drawdownWithdrawalTiming"] })}><option value="beginning">Beginning of year</option><option value="end">End of year</option></select></label>
-        <label><span>Glide every years</span><input type="number" min="1" max="50" value={goal.consumptionGlideIntervalYears ?? 5} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideIntervalYears: Number(event.target.value) })} /></label>
-        <label><span>Glide shift %</span><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideShiftPercent ?? 0} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideShiftPercent: Number(event.target.value) })} /></label>
+        <label title="How often the consumption allocation shifts from the source asset class to the destination asset class."><span>Shift every N years</span><input type="number" min="1" max="50" value={goal.consumptionGlideIntervalYears ?? 5} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideIntervalYears: Number(event.target.value) })} /></label>
+        <label title="Percentage points moved each interval, for example 5 means equity can move from 50% to 45% at the next interval."><span>Shift amount %</span><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideShiftPercent ?? 0} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideShiftPercent: Number(event.target.value) })} /></label>
         <label><span>Shift from</span><select value={goal.consumptionGlideFrom ?? "Equity"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFrom: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
         <label><span>Shift to</span><select value={goal.consumptionGlideTo ?? "Debt"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideTo: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
-        <label><span>From-floor %</span><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideFloorPercent ?? 20} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFloorPercent: Number(event.target.value) })} /></label>
+        <label title="Minimum allocation allowed for the source asset class after glidepath shifts. Example: 20 keeps equity from tapering below 20%."><span>Minimum source %</span><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideFloorPercent ?? 20} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFloorPercent: Number(event.target.value) })} /></label>
       </div>
       <div className="goal-settings-phase-grid">
         <GoalSettingsAllocationBlock title="Accumulation target" detail="Used for goal rebalance before the goal year." goal={goal} phase="accumulation" updateAllocation={updateAllocation} />
-        <GoalSettingsAllocationBlock title="Consumption start target" detail="Starting mix for drawdown; glidepath changes this over time." goal={goal} phase="consumption" updateAllocation={updateAllocation} />
+        <GoalSettingsAllocationBlock title="Consumption start target" detail="Starting mix at the goal date; glidepath shifts this mix during consumption." goal={goal} phase="consumption" updateAllocation={updateAllocation} />
       </div>
     </div>
   );
@@ -3134,6 +3151,29 @@ function ImportPreviewPanel({ preview, currency }: { preview: ManualImportPrevie
       </div>
       {hasErrors && <div className="error-list">{preview.errors.map((error) => <div key={error.row + error.message}>Row {error.row}: {error.message}</div>)}</div>}
       <div className="table-wrap"><table><thead><tr><th>Action</th><th>Kind</th><th>Record</th><th>Detail</th></tr></thead><tbody>{preview.rows.slice(0, 60).map((row, index) => <tr key={row.kind + row.label + row.action + index}><td>{row.action}</td><td>{row.kind}</td><td>{row.label}</td><td>{row.detail}</td></tr>)}</tbody></table></div>
+    </div>
+  );
+}
+
+function TaxDataChecksCard({ report, currency }: { report: ReturnType<typeof calculatePortfolioTaxReport>; currency: string }) {
+  const tracedRows = report.realized.rows.filter(hasTaxTrace);
+  const fmvTraceRows = tracedRows.filter((row) => /fmv/i.test(row.trace.costFormula + " " + row.trace.proceedsFormula));
+  const missingLotNotes = report.notes.filter((note) => /missing buy lot/i.test(note));
+  const migrationNotes = report.notes.filter((note) => /zero-value|migration/i.test(note));
+  const realizedCount = report.realized.rows.length;
+  const traceCoverage = realizedCount === 0 ? "-" : tracedRows.length + "/" + realizedCount;
+  const setoffUsed = Object.values(report.realized.byBucket).reduce((sum, bucket) => sum + bucket.lossSetoff, 0);
+  return (
+    <div className="card wide-card tax-confidence-card">
+      <div className="section-head compact-section-head"><div><h2>Tax Data Checks</h2><p>Diagnostics for the tax input layer: FIFO traceability, FMV overrides, missing buy lots, migration filtering, and bucket set-off visibility. These are data-quality checks, not tax results.</p></div></div>
+      <div className="holding-command-strip compact-command-strip">
+        <MiniInsight label="FIFO trace coverage" value={traceCoverage} detail="realized lots with audit trace" />
+        <MiniInsight label="FMV overrides" value={String(fmvTraceRows.length)} detail="tax-only FMV rows used" />
+        <MiniInsight label="Missing buy lots" value={String(missingLotNotes.length)} detail={missingLotNotes.length > 0 ? "review notes below" : "none detected"} />
+        <MiniInsight label="Loss set-off used" value={formatMoney(setoffUsed, currency)} detail="bucket-level offset" />
+        <MiniInsight label="Migration handling" value={migrationNotes.length > 0 ? "active" : "standard"} detail="zero-value transfers ignored" />
+      </div>
+      {missingLotNotes.length > 0 && <div className="error-list compact-error-list">{missingLotNotes.map((note) => <div key={note}>{note}</div>)}</div>}
     </div>
   );
 }
@@ -3345,7 +3385,7 @@ function AssetClassCard({ insight, currency }: { insight: AssetClassInsight; cur
   );
 }
 
-const activeSelectorStyle: CSSProperties = { background: "#0f172a", backgroundColor: "#0f172a", borderColor: "#0e7490", color: "#ffffff", opacity: 1, filter: "none" };
+const activeSelectorStyle: CSSProperties = { background: "#0f766e", backgroundColor: "#0f766e", borderColor: "#0f766e", color: "#ffffff", opacity: 1, filter: "none" };
 
 function AnalyticsScopeSelector({ scope, setScope, goals, combinedGoalCount }: { scope: AnalyticsScope; setScope: (scope: AnalyticsScope) => void; goals: GoalProgress[]; combinedGoalCount: number }) {
   return (

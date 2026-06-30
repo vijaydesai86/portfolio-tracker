@@ -7138,3 +7138,219 @@ textarea {
 .expense-current-lines-table td:nth-child(7) {
   overflow-wrap: anywhere;
 }
+
+/* Product-grade polish pass: compact actions, readable tables, and explicit modes */
+.import-mode-banner {
+  display: grid;
+  gap: 3px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #dbe7ef;
+  border-radius: 10px;
+  background: #f8fbfd;
+  color: #334155;
+}
+
+.import-mode-banner strong {
+  color: #0f172a;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.import-mode-banner span {
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.import-mode-banner.replace-mode {
+  border-color: #bae6fd;
+  background: #f0f9ff;
+}
+
+.table-wrap tbody tr.selected-row {
+  background: #eff6ff;
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.row-subtext {
+  display: block;
+  margin-top: 2px;
+  color: #2563eb;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.data-action-card {
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.compact-quality-card {
+  align-self: start;
+  background: #f8fafc;
+}
+
+.compact-signal-list .signal-item {
+  min-height: auto;
+}
+
+.interactive-table-wrap {
+  border: 1px solid #dbe7ef;
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.03);
+}
+
+.interactive-table-wrap thead th {
+  box-shadow: 0 1px 0 #dbe7ef;
+}
+
+.interactive-table-wrap tbody tr:nth-child(even) {
+  background: #fbfdff;
+}
+
+.table-interaction-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+/* final trust and guidance polish */
+.tax-confidence-card {
+  border-color: #cbd5e1;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.compact-error-list {
+  margin-top: 10px;
+  max-height: 130px;
+  overflow: auto;
+}
+
+.snapshot-sparse-note {
+  grid-column: 1 / -1;
+}
+
+.import-mode-banner strong,
+.import-mode-banner span {
+  min-width: 0;
+}
+
+.table-wrap td,
+.table-wrap th {
+  overflow-wrap: anywhere;
+}
+
+.table-wrap td:first-child,
+.table-wrap th:first-child {
+  overflow-wrap: normal;
+}
+
+.goal-settings-fields label[title] span::after,
+.tax-confidence-card h2::after {
+  content: "";
+}
+
+@media (max-width: 760px) {
+  .tax-head-actions,
+  .snapshot-form-row,
+  .native-actions,
+  .draft-actions {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .tax-head-actions button,
+  .snapshot-form-row button,
+  .native-actions button,
+  .draft-actions button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .goal-settings-toggle-cluster {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+}
+
+/* Final selected scope/tab contrast: light selected surface with dark readable text. */
+.analytics-scope-control button.active,
+.analytics-tabs button.active,
+.analytics-scope-control button.active:disabled,
+.analytics-tabs button.active:disabled,
+.app-shell-v2 .analytics-scope-control button.active,
+.app-shell-v2 .analytics-tabs button.active,
+.app-shell-v2 .analytics-scope-control button.active:disabled,
+.app-shell-v2 .analytics-tabs button.active:disabled {
+  background: #f2f7fb !important;
+  background-color: #f2f7fb !important;
+  border-color: #0e7490 !important;
+  color: #0f172a !important;
+  opacity: 1 !important;
+  box-shadow: 0 10px 24px rgba(14, 116, 144, 0.14) !important;
+}
+
+.analytics-scope-control button.active strong,
+.analytics-tabs button.active strong,
+.analytics-scope-control button.active em,
+.analytics-tabs button.active em,
+.app-shell-v2 .analytics-scope-control button.active strong,
+.app-shell-v2 .analytics-tabs button.active strong,
+.app-shell-v2 .analytics-scope-control button.active em,
+.app-shell-v2 .analytics-tabs button.active em {
+  color: #0f172a !important;
+}
+
+.analytics-scope-control button.active span,
+.analytics-scope-control button.active small,
+.analytics-tabs button.active span,
+.analytics-tabs button.active small,
+.app-shell-v2 .analytics-scope-control button.active span,
+.app-shell-v2 .analytics-scope-control button.active small,
+.app-shell-v2 .analytics-tabs button.active span,
+.app-shell-v2 .analytics-tabs button.active small {
+  color: #334155 !important;
+}
+
+/* Central selected-control state: match sidebar green selection everywhere. */
+.app-shell-v2 .analytics-scope-control button.active,
+.app-shell-v2 .analytics-tabs button.active,
+.analytics-scope-control button.active,
+.analytics-tabs button.active,
+.app-shell-v2 .analytics-scope-control button.active:disabled,
+.app-shell-v2 .analytics-tabs button.active:disabled,
+.analytics-scope-control button.active:disabled,
+.analytics-tabs button.active:disabled {
+  background: linear-gradient(180deg, #0f766e, #0e7490) !important;
+  background-color: #0f766e !important;
+  border-color: #0f766e !important;
+  color: #ffffff !important;
+  opacity: 1 !important;
+  box-shadow: 0 8px 18px rgba(14, 116, 144, 0.22) !important;
+}
+
+.app-shell-v2 .analytics-scope-control button.active strong,
+.app-shell-v2 .analytics-tabs button.active strong,
+.analytics-scope-control button.active strong,
+.analytics-tabs button.active strong,
+.app-shell-v2 .analytics-scope-control button.active em,
+.app-shell-v2 .analytics-tabs button.active em,
+.analytics-scope-control button.active em,
+.analytics-tabs button.active em {
+  color: #ffffff !important;
+}
+
+.app-shell-v2 .analytics-scope-control button.active span,
+.app-shell-v2 .analytics-scope-control button.active small,
+.app-shell-v2 .analytics-tabs button.active span,
+.app-shell-v2 .analytics-tabs button.active small,
+.analytics-scope-control button.active span,
+.analytics-scope-control button.active small,
+.analytics-tabs button.active span,
+.analytics-tabs button.active small {
+  color: rgba(255, 255, 255, 0.88) !important;
+}
