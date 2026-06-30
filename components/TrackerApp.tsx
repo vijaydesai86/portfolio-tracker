@@ -45,7 +45,7 @@ const assetClassCards = [
 
 const transactionTypes: Transaction["type"][] = ["buy", "sell", "sip", "redemption", "switch_in", "switch_out", "dividend", "interest", "interest_accrual", "deposit", "withdrawal", "fee", "tax", "maturity", "contribution", "split"];
 
-type View = "dashboard" | "holdings" | "transactions" | "goals" | "planning" | "tax" | "snapshots" | "add-entry" | "imports" | "data" | "settings" | "backup";
+type View = "dashboard" | "holdings" | "goals" | "goal-longevity" | "planning" | "tax" | "transactions" | "imports" | "data" | "snapshots" | "add-entry" | "settings" | "backup";
 type AnalyticsTab = "overview" | "allocation" | "returns" | "risk" | "history";
 type AnalyticsScope = "portfolio" | "goals-combined" | `goal:${string}`;
 type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
@@ -97,6 +97,8 @@ type ScopedHolding = HoldingInsight & {
   scopedReturnPercent?: number;
   scopedAllocationPercent: number;
   mappedPercent?: number;
+  actualValueInBase: number;
+  sourceValueInBase: number;
 };
 
 type RankingDatum = { name: string; value: number; tag?: string; category?: AssetCategory };
@@ -221,7 +223,8 @@ function goalScopedAnalytics(input: {
       rows.push(scopedHoldingFromInsight(insight, mapped.value, undefined, {
         invested: mapped.invested,
         profit: mapped.profit,
-        mappedPercent: mapped.mappedPercent
+        mappedPercent: mapped.mappedPercent,
+        actualValue: mapped.actualValue
       }));
     }
   }
@@ -273,7 +276,7 @@ function goalScopedAnalytics(input: {
   };
 }
 
-function scopedHoldingFromInsight(holding: HoldingInsight, value: number, returns?: HoldingReturn, override?: { invested?: number; profit?: number; mappedPercent?: number }): ScopedHolding {
+function scopedHoldingFromInsight(holding: HoldingInsight, value: number, returns?: HoldingReturn, override?: { invested?: number; profit?: number; mappedPercent?: number; actualValue?: number }): ScopedHolding {
   const invested = override?.invested ?? returns?.netInvested;
   const profit = override?.profit ?? returns?.profit;
   return {
@@ -284,7 +287,9 @@ function scopedHoldingFromInsight(holding: HoldingInsight, value: number, return
     scopedProfit: profit === undefined ? undefined : roundMoney(profit),
     scopedReturnPercent: profit === undefined || invested === undefined || invested <= 0 ? undefined : roundPercent((profit / invested) * 100),
     scopedAllocationPercent: 0,
-    mappedPercent: override?.mappedPercent
+    mappedPercent: override?.mappedPercent,
+    actualValueInBase: roundMoney(override?.actualValue ?? holding.valueInBase ?? value),
+    sourceValueInBase: roundMoney(holding.valueInBase ?? value)
   };
 }
 
@@ -299,6 +304,8 @@ function mergeScopedHoldings(rows: ScopedHolding[]): ScopedHolding[] {
     const value = existing.scopedValue + row.scopedValue;
     const invested = (existing.scopedInvested ?? 0) + (row.scopedInvested ?? 0);
     const profit = (existing.scopedProfit ?? 0) + (row.scopedProfit ?? 0);
+    const actualValueInBase = existing.actualValueInBase + row.actualValueInBase;
+    const sourceValueInBase = existing.sourceValueInBase + row.sourceValueInBase;
     merged.set(row.id, {
       ...existing,
       scopedValue: roundMoney(value),
@@ -306,7 +313,9 @@ function mergeScopedHoldings(rows: ScopedHolding[]): ScopedHolding[] {
       scopedInvested: invested > 0 ? roundMoney(invested) : existing.scopedInvested,
       scopedProfit: roundMoney(profit),
       scopedReturnPercent: invested > 0 ? roundPercent((profit / invested) * 100) : undefined,
-      mappedPercent: undefined
+      mappedPercent: undefined,
+      actualValueInBase: roundMoney(actualValueInBase),
+      sourceValueInBase: roundMoney(sourceValueInBase)
     });
   }
   const total = [...merged.values()].reduce((sum, row) => sum + row.scopedValue, 0);
@@ -695,7 +704,8 @@ export function TrackerApp() {
   const assetClassInsights = useMemo(() => buildAssetClassInsights(scopedAnalytics.holdings, holdingReturns), [holdingReturns, scopedAnalytics.holdings]);
 
   const totalFxIssues = new Set([...summary.missingFx, ...insights.transactionStats.missingFx]).size;
-  const staleHoldings = scopedAnalytics.holdings.filter((holding) => daysSince(holding.asOfDate) > 7).length;
+  const staleHoldingRows = scopedAnalytics.holdings.filter((holding) => daysSince(holding.asOfDate) > 7);
+  const staleHoldings = staleHoldingRows.length;
   const reviewCategoryCount = scopedAnalytics.holdings.filter((holding) => holding.category === "Others").length;
   const performanceBridge = [
     { name: "Cost Basis", value: performance.netInvested },
@@ -712,28 +722,20 @@ export function TrackerApp() {
   const cashPercent = scopedAnalytics.allocation.Cash.percent;
   const commandInsights: CommandInsightCard[] = [
     {
+      label: scopedAnalytics.scopeKind === "portfolio" ? "Planning Value" : "Mapped Planning Value",
+      value: formatMoney(scopedAnalytics.planningValue, backup.baseCurrency),
+      detail: scopedAnalytics.planningAdjustment === 0 ? "No taper haircut is active in this scope." : "Conservative planning value after tapering; tax and net worth still use actual market value.",
+      tone: scopedAnalytics.planningAdjustment < 0 ? "info" : "good",
+      progress: scopedPerformance.current <= 0 ? undefined : Math.min(100, Math.max(0, (scopedAnalytics.planningValue / scopedPerformance.current) * 100)),
+      footnote: scopedAnalytics.planningAdjustment === 0 ? "Actual value" : "Adjustment " + formatMoney(scopedAnalytics.planningAdjustment, backup.baseCurrency)
+    },
+    {
       label: scopedAnalytics.scopeKind === "portfolio" ? "Goal Readiness" : "Scope Readiness",
       value: goalFundedPercent === undefined ? "Map goals" : goalFundedPercent.toFixed(1) + "%",
-      detail: scopedAnalytics.scopeKind === "portfolio" ? "Combined mapped corpus versus corpus needed today." : "Mapped value versus this goal's corpus needed today.",
+      detail: scopedAnalytics.scopeKind === "portfolio" ? "Included goals funded today from mapped tracked corpus." : "Mapped tracked value versus corpus needed today.",
       tone: goalFundedPercent === undefined ? "neutral" : goalFundedPercent >= 100 ? "good" : goalFundedPercent >= 75 ? "info" : "warn",
       progress: goalFundedPercent === undefined ? undefined : goalFundedPercent,
-      footnote: scopedAnalytics.scopeKind === "portfolio" ? String(goalProgress.length) + " goal(s)" : scopedAnalytics.label
-    },
-    {
-      label: "Valuation Quality",
-      value: timeline.coverage.totalDates === 0 ? "No history" : valuationCoveragePercent.toFixed(0) + "%",
-      detail: timeline.coverage.totalDates === 0 ? "Import dated records to build valuation coverage." : String(timeline.coverage.pricedDates) + "/" + String(timeline.coverage.totalDates) + " complete historical valuation dates.",
-      tone: valuationCoveragePercent >= 90 ? "good" : valuationCoveragePercent >= 60 ? "info" : "warn",
-      progress: valuationCoveragePercent,
-      footnote: totalFxIssues === 0 ? "FX/NAV covered" : String(totalFxIssues) + " market-data gap(s)"
-    },
-    {
-      label: "Concentration",
-      value: topFivePercent.toFixed(1) + "%",
-      detail: "Top five holdings share of the selected scope.",
-      tone: topFivePercent > 70 ? "warn" : topFivePercent > 50 ? "info" : "good",
-      progress: topFivePercent,
-      footnote: largestHolding ? "Largest: " + displayHoldingName(largestHolding.label) : "No holdings"
+      footnote: scopedAnalytics.scopeKind === "portfolio" ? String(combinedGoalProgress.length) + " included goal(s)" : scopedAnalytics.label
     },
     {
       label: "Return Engine",
@@ -744,49 +746,58 @@ export function TrackerApp() {
       footnote: String(xirrCoverageCount) + "/" + String(scopedAnalytics.holdings.length) + " holdings with XIRR"
     },
     {
-      label: "Allocation Balance",
-      value: equityPercent.toFixed(0) + "/" + debtPercent.toFixed(0),
-      detail: "Equity/Debt split with cash at " + cashPercent.toFixed(1) + "%.",
-      tone: reviewCategoryCount > 0 ? "warn" : "info",
-      progress: equityPercent,
-      footnote: reviewCategoryCount === 0 ? "Classified cleanly" : String(reviewCategoryCount) + " Others to review"
+      label: "Concentration",
+      value: topFivePercent.toFixed(1) + "%",
+      detail: "Top five holdings share of the selected scope.",
+      tone: topFivePercent > 70 ? "warn" : topFivePercent > 50 ? "info" : "good",
+      progress: topFivePercent,
+      footnote: largestHolding ? "Largest: " + displayHoldingName(largestHolding.label) : "No holdings"
+    },
+    {
+      label: scopedAnalytics.scopeKind === "portfolio" ? "Tax & Income" : "Goal Gap",
+      value: scopedAnalytics.scopeKind === "portfolio" ? formatMoney(taxReport.estimatedTax.totalTax, backup.baseCurrency) : formatMoney(scopedAnalytics.goalGap ?? 0, backup.baseCurrency),
+      detail: scopedAnalytics.scopeKind === "portfolio" ? "Estimated FY portfolio tax; full lot detail is in Tax." : "Projected surplus or shortfall at the goal year.",
+      tone: scopedAnalytics.scopeKind === "portfolio" ? (taxReport.estimatedTax.totalTax > 0 ? "info" : "good") : ((scopedAnalytics.goalGap ?? 0) <= 0 ? "good" : "warn"),
+      progress: scopedAnalytics.scopeKind === "portfolio" ? undefined : goalFundedPercent,
+      footnote: scopedAnalytics.scopeKind === "portfolio" ? taxReport.financialYear : "Goal planning"
     }
   ];
 
   const dashboardSignals: DashboardSignal[] = [
     {
       label: "Market Data",
-      value: totalFxIssues === 0 ? "Covered" : totalFxIssues + " gap(s)",
-      detail: totalFxIssues === 0 ? "NAV, quotes, and FX are usable for INR analytics." : "Refresh or add real FX/NAV data before trusting INR totals.",
+      value: totalFxIssues === 0 ? "Ready" : totalFxIssues + " gap(s)",
+      detail: totalFxIssues === 0 ? "Current INR analytics have usable FX, NAV, and quote inputs." : "Open Data Quality to review missing FX/NAV inputs before relying on INR totals.",
       tone: totalFxIssues === 0 ? "good" : "warn",
       icon: totalFxIssues === 0 ? "shield" : "alert"
     },
     {
-      label: "Freshness",
-      value: staleHoldings === 0 ? "Current" : staleHoldings + " stale",
-      detail: staleHoldings === 0 ? "All holdings are within the freshness window." : "Some valuations are older than 7 days.",
+      label: "Stale Valuations",
+      value: staleHoldings === 0 ? "None" : staleHoldings + " holding(s)",
+      detail: staleHoldings === 0 ? "Every scoped holding is inside the freshness window." : "Oldest: " + staleHoldingRows.slice(0, 3).map((holding) => displayHoldingName(holding.label) + " (" + holding.asOfDate + ")").join(", "),
       tone: staleHoldings === 0 ? "good" : "warn",
       icon: staleHoldings === 0 ? "shield" : "alert"
     },
     {
       label: "Concentration",
       value: topFivePercent.toFixed(1) + "%",
-      detail: scopedAnalytics.scopeKind === "portfolio" ? "Portfolio value held by the five largest positions." : "Scoped goal value held by the five largest mapped positions.",
+      detail: scopedAnalytics.scopeKind === "portfolio" ? "Top five positions drive this share of net worth." : "Top five mapped positions drive this share of goal funding.",
       tone: topFivePercent > 60 ? "warn" : "neutral",
       icon: "trend"
     },
     {
       label: "Classification",
       value: reviewCategoryCount === 0 ? "Clean" : reviewCategoryCount + " review",
-      detail: reviewCategoryCount === 0 ? "No scoped holdings are parked in Others." : "Others is visible so hybrid/custom records can be reviewed.",
+      detail: reviewCategoryCount === 0 ? "No scoped holdings are parked in Others." : "Open Allocation or Holdings to classify custom records parked in Others.",
       tone: reviewCategoryCount === 0 ? "good" : "warn",
       icon: reviewCategoryCount === 0 ? "shield" : "alert"
     }
   ];
-  const categoryTimelineKeys = categoryOrder.filter((category) => timeline.points.some((point) => (point.category[category] ?? 0) > 0));
-  const regionTimelineKeys = topTimelineKeys(timeline.points, "region", 5);
-  const assetKindTimelineKeys = topTimelineKeys(timeline.points, "assetKind", 6);
-  const issuerTimelineKeys = topTimelineKeys(timeline.points, "issuer", 5);
+  const scopedTimelinePoints = useMemo(() => buildScopedTimeline(timeline.points, scopedAnalytics), [scopedAnalytics, timeline.points]);
+  const categoryTimelineKeys = categoryOrder.filter((category) => scopedTimelinePoints.some((point) => (point.category[category] ?? 0) > 0));
+  const regionTimelineKeys = topTimelineKeys(scopedTimelinePoints, "region", 5);
+  const assetKindTimelineKeys = topTimelineKeys(scopedTimelinePoints, "assetKind", 6);
+  const issuerTimelineKeys = topTimelineKeys(scopedTimelinePoints, "issuer", 5);
 
   function blockIfDraftEditing(action: string): boolean {
     if (!editSessionActive) return false;
@@ -1594,18 +1605,19 @@ export function TrackerApp() {
       <aside className="sidebar">
         <div className="brand">Portfolio Tracker</div>
         <nav className="nav" aria-label="Primary">
-          <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}><LayoutDashboard size={18} /> Analytics</button>
+          <button className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}><LayoutDashboard size={18} /> Overview</button>
           <button className={view === "holdings" ? "active" : ""} onClick={() => setView("holdings")}><Table2 size={18} /> Holdings</button>
-          <button className={view === "transactions" ? "active" : ""} onClick={() => setView("transactions")}><Pencil size={18} /> Transactions</button>
           <button className={view === "goals" ? "active" : ""} onClick={() => setView("goals")}><Target size={18} /> Goals</button>
+          <button className={view === "goal-longevity" ? "active" : ""} onClick={() => setView("goal-longevity")}><TrendingDown size={18} /> Goal Longevity</button>
           <button className={view === "planning" ? "active" : ""} onClick={() => setView("planning")}><TrendingUp size={18} /> Planning</button>
           <button className={view === "tax" ? "active" : ""} onClick={() => setView("tax")}><ReceiptText size={18} /> Tax</button>
-          <button className={view === "snapshots" ? "active" : ""} onClick={() => setView("snapshots")}><Camera size={18} /> Snapshots</button>
-          <button className={view === "add-entry" ? "active" : ""} onClick={() => setView("add-entry")}><PlusCircle size={18} /> Add Entry</button>
+          <button className={view === "transactions" ? "active" : ""} onClick={() => setView("transactions")}><Pencil size={18} /> Transactions</button>
           <button className={view === "imports" ? "active" : ""} onClick={() => setView("imports")}><Upload size={18} /> Imports</button>
-          <button className={view === "data" ? "active" : ""} onClick={() => setView("data")}><Database size={18} /> Data</button>
-          <button className={view === "backup" ? "active" : ""} onClick={() => setView("backup")}><FileJson size={18} /> Backup</button>
+          <button className={view === "data" ? "active" : ""} onClick={() => setView("data")}><Database size={18} /> Data Quality</button>
+          <button className={view === "snapshots" ? "active" : ""} onClick={() => setView("snapshots")}><Camera size={18} /> Snapshots</button>
+          <button className={view === "add-entry" ? "active" : ""} onClick={() => setView("add-entry")}><PlusCircle size={18} /> Manual Entry</button>
           <button className={view === "settings" ? "active" : ""} onClick={() => setView("settings")}><Settings size={18} /> Settings</button>
+          <button className={view === "backup" ? "active" : ""} onClick={() => setView("backup")}><FileJson size={18} /> Backup</button>
         </nav>
       </aside>
 
@@ -1670,10 +1682,10 @@ export function TrackerApp() {
                   <Metric label="Profit / Loss" value={scopedPerformance.profitKnown ? formatMoney(scopedPerformance.totalProfit, backup.baseCurrency) : "-"} secondary={scopedPerformance.profitKnown ? usdSecondary(scopedPerformance.totalProfit) : undefined} />
                 </div>
                 <CommandInsightDeck cards={commandInsights} />
-                <div className="feature-grid">
-                  <ChartCard title="Current Allocation Explorer"><CurrentAllocationExplorer datasets={chartData} currency={backup.baseCurrency} /></ChartCard>
+                <div className="feature-grid overview-focus-grid">
+                  <ChartCard title="Scope Mix"><DonutChart data={chartData.allocation} currency={backup.baseCurrency} /></ChartCard>
                   <div className="signal-panel cardless-panel">
-                    <div className="panel-heading"><span>Portfolio Signals</span><strong>{dashboardSignals.filter((signal) => signal.tone === "warn").length} action(s)</strong></div>
+                    <div className="panel-heading"><span>Action Checks</span><strong>{dashboardSignals.filter((signal) => signal.tone === "warn").length} action(s)</strong></div>
                     <div className="signal-list">{dashboardSignals.map((signal) => <SignalCard signal={signal} key={signal.label} />)}</div>
                   </div>
                 </div>
@@ -1719,27 +1731,15 @@ export function TrackerApp() {
 
             {analyticsTab === "history" && (
               <div className="analytics-tab-panel">
-                {scopedAnalytics.scopeKind === "portfolio" ? (
-                  <>
-                    <div className="notice history-notice">Historical charts reconstruct month-end value from transactions plus available real NAV/quote/FX snapshots. Use them as a research view; current dashboard totals remain the source of truth when historical market coverage is incomplete.</div>
-                    <div className="analytics-grid">
-                      <ChartCard title="Portfolio Growth"><PortfolioGrowthChart points={timeline.points} currency={backup.baseCurrency} /></ChartCard>
-                      <ChartCard title="Asset Class Growth"><BreakdownGrowthChart points={timeline.points} field="category" keys={categoryTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                      <ChartCard title="Region Growth"><BreakdownGrowthChart points={timeline.points} field="region" keys={regionTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                      <ChartCard title="Asset Type Growth"><BreakdownGrowthChart points={timeline.points} field="assetKind" keys={assetKindTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                      <ChartCard title="AMC / Platform Growth"><BreakdownGrowthChart points={timeline.points} field="issuer" keys={issuerTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
-                      <ChartCard title="Institution Accounts"><HorizontalBar data={chartData.institution} currency={backup.baseCurrency} /></ChartCard>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="notice history-notice">Goal-scoped history needs dated snapshots because current goal mappings are not historical facts. Use Snapshots after each review cycle to build real goal history without market refresh.</div>
-                    <div className="analytics-grid">
-                      <ChartCard title="Snapshot Goal History"><SnapshotGoalHistoryChart points={snapshotHistory} currency={backup.baseCurrency} /></ChartCard>
-                      <ChartCard title="Current Goal Allocation"><CurrentAllocationExplorer datasets={chartData} currency={backup.baseCurrency} /></ChartCard>
-                    </div>
-                  </>
-                )}
+                <div className="notice history-notice">{scopedAnalytics.scopeKind === "portfolio" ? "Historical charts reconstruct month-end value from transactions plus available real NAV/quote/FX snapshots. Current dashboard totals remain the source of truth when historical market coverage is incomplete." : "Goal history reconstructs the currently mapped holdings through time. It uses tracked/tapered planning values by default and applies today's goal mapping to historical holdings; snapshots remain the frozen audit trail."}</div>
+                <div className="analytics-grid">
+                  <ChartCard title={scopedAnalytics.scopeKind === "portfolio" ? "Portfolio Growth" : scopedAnalytics.label + " Growth"}><PortfolioGrowthChart points={scopedTimelinePoints} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Asset Class Growth"><BreakdownGrowthChart points={scopedTimelinePoints} field="category" keys={categoryTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Region Growth"><BreakdownGrowthChart points={scopedTimelinePoints} field="region" keys={regionTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="Asset Type Growth"><BreakdownGrowthChart points={scopedTimelinePoints} field="assetKind" keys={assetKindTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title="AMC / Platform Growth"><BreakdownGrowthChart points={scopedTimelinePoints} field="issuer" keys={issuerTimelineKeys} currency={backup.baseCurrency} /></ChartCard>
+                  <ChartCard title={scopedAnalytics.scopeKind === "portfolio" ? "Institution Accounts" : "Current Goal Allocation"}>{scopedAnalytics.scopeKind === "portfolio" ? <HorizontalBar data={chartData.institution} currency={backup.baseCurrency} /> : <DonutChart data={chartData.allocation} currency={backup.baseCurrency} />}</ChartCard>
+                </div>
               </div>
             )}
 
@@ -1824,7 +1824,9 @@ export function TrackerApp() {
 
         {view === "tax" && <TaxView report={taxReport} currency={backup.baseCurrency} financialYears={taxFinancialYears} selectedFinancialYear={taxFinancialYear} setSelectedFinancialYear={setTaxFinancialYear} />}
 
-        {view === "planning" && <PlanningView backup={backup} settings={planningSettings} scenario={scenarioPlan} rebalancing={rebalancingPlan} goalRebalancing={goalRebalancingPlans} incomeProjection={incomeProjection} goalDrawdowns={goalDrawdowns} attribution={attribution} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
+        {view === "goal-longevity" && <GoalLongevityView goalDrawdowns={goalDrawdowns} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
+
+        {view === "planning" && <PlanningView backup={backup} settings={planningSettings} scenario={scenarioPlan} rebalancing={rebalancingPlan} goalRebalancing={goalRebalancingPlans} incomeProjection={incomeProjection} attribution={attribution} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
 
         {view === "snapshots" && <SnapshotsView {...{ backup, snapshotName, setSnapshotName, snapshotNotes, setSnapshotNotes, selectedSnapshotId, setSelectedSnapshotId, snapshotHistory, takePortfolioSnapshot, deletePortfolioSnapshot }} />}
 
@@ -1849,9 +1851,45 @@ export function TrackerApp() {
 
 
 
-function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing, incomeProjection, goalDrawdowns, attribution, currency, usdSecondary }: { backup: PortfolioBackup; settings: PlanningSettings; scenario: ScenarioPlan; rebalancing: RebalanceRow[]; goalRebalancing: GoalRebalancePlan[]; incomeProjection: IncomeProjection; goalDrawdowns: GoalDrawdownReport[]; attribution: PerformanceAttribution; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+function GoalLongevityView({ goalDrawdowns, currency, usdSecondary }: { goalDrawdowns: GoalDrawdownReport[]; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+  const selectedDefault = goalDrawdowns[0]?.goalId ?? "";
+  const [selectedGoalId, setSelectedGoalId] = useState(selectedDefault);
+  useEffect(() => {
+    if (!selectedGoalId && selectedDefault) setSelectedGoalId(selectedDefault);
+    if (selectedGoalId && !goalDrawdowns.some((row) => row.goalId === selectedGoalId)) setSelectedGoalId(selectedDefault);
+  }, [goalDrawdowns, selectedDefault, selectedGoalId]);
+  const selected = goalDrawdowns.find((row) => row.goalId === selectedGoalId) ?? goalDrawdowns[0];
+  const atRisk = goalDrawdowns.filter((row) => row.depletionYear).length;
+  const longest = goalDrawdowns.reduce<GoalDrawdownReport | undefined>((best, row) => !best || row.lastsYears > best.lastsYears ? row : best, undefined);
+  const largestSurplus = goalDrawdowns.reduce<GoalDrawdownReport | undefined>((best, row) => !best || row.surplusAtHorizon > best.surplusAtHorizon ? row : best, undefined);
+  return (
+    <section className="grid goal-longevity-workspace">
+      <div className="card wide-card planning-hero-card">
+        <div className="section-head"><div><h2>Goal Longevity</h2><p>Forward-looking corpus survival workspace. It uses mapped goal corpus, expense-derived withdrawals, per-goal consumption years, spend growth, withdrawal timing, and glidepath allocation assumptions.</p></div></div>
+        <div className="holding-command-strip">
+          <MiniInsight label="Modeled goals" value={String(goalDrawdowns.length)} detail="goals with drawdown plans" />
+          <MiniInsight label="At-risk goals" value={String(atRisk)} detail="projected depletion inside horizon" />
+          <MiniInsight label="Longest runway" value={longest ? longest.goalName : "-"} detail={longest ? (longest.depletionYear ? String(longest.lastsYears) + " years" : String(longest.horizonYears) + "+ years") : "map goals first"} />
+          <MiniInsight label="Largest horizon surplus" value={largestSurplus ? formatMoney(largestSurplus.surplusAtHorizon, currency) : "-"} secondary={largestSurplus ? usdSecondary(largestSurplus.surplusAtHorizon) : undefined} detail={largestSurplus ? largestSurplus.goalName : "no modeled surplus"} />
+        </div>
+      </div>
+      {goalDrawdowns.length === 0 ? <div className="card wide-card"><p className="message">Create goals and map assets to model drawdown longevity.</p></div> : (
+        <>
+          <div className="analytics-scope-panel goal-longevity-selector">
+            <div><span className="eyebrow">Goal selector</span><p>Select one goal for the detailed longevity model. Summary cards above still reflect every modeled goal.</p></div>
+            <div className="analytics-scope-control" role="tablist" aria-label="Goal longevity selector">
+              {goalDrawdowns.map((row) => <button key={row.goalId} className={selected?.goalId === row.goalId ? "active" : ""} onClick={() => setSelectedGoalId(row.goalId)}><strong>{row.goalName}</strong><span>{row.depletionYear ? "depletes " + row.depletionYear : row.horizonYears + "+ years"}</span></button>)}
+            </div>
+          </div>
+          {selected && <GoalDrawdownCard report={selected} currency={currency} usdSecondary={usdSecondary} />}
+        </>
+      )}
+    </section>
+  );
+}
+
+function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing, incomeProjection, attribution, currency, usdSecondary }: { backup: PortfolioBackup; settings: PlanningSettings; scenario: ScenarioPlan; rebalancing: RebalanceRow[]; goalRebalancing: GoalRebalancePlan[]; incomeProjection: IncomeProjection; attribution: PerformanceAttribution; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
   const largestRebalance = [...rebalancing].sort((a, b) => Math.abs(b.driftValue) - Math.abs(a.driftValue))[0];
-  const drawdownRows = goalDrawdowns.map((row) => ({ name: row.goalName, value: row.surplusAtHorizon > 0 ? row.surplusAtHorizon : row.startingCorpus, tag: row.depletionYear ? "depletes " + row.depletionYear : "survives", category: "Others" as AssetCategory }));
   return (
     <section className="grid planning-workspace">
       <div className="card wide-card planning-hero-card">
@@ -1884,13 +1922,6 @@ function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing
 
         <ChartCard title="Performance Attribution"><AttributionBridge attribution={attribution} currency={currency} /></ChartCard>
         <IncomeProjectionCard projection={incomeProjection} currency={currency} usdSecondary={usdSecondary} />
-        <ChartCard title="Goal Longevity Summary"><RankingBar data={drawdownRows} formatValue={(value) => formatMoney(value, currency)} emptyMessage="Map goals to assets before drawdown planning." /></ChartCard>
-      </div>
-
-      <div className="card wide-card goal-drawdown-card">
-        <div className="section-head"><div><h2>Goal Drawdown Longevity</h2><p>Projects each goal from the goal date forward using mapped corpus, first-year spending, per-goal spend growth, corpus consumption years, withdrawal timing, and mapped asset return mix.</p></div></div>
-        <p className="chart-note compact-note">Each goal can use different drawdown assumptions. Corpus consumption years controls how far the chart and table project after the goal year. Settings stores defaults used when a goal has not been customized.</p>
-        {goalDrawdowns.length === 0 ? <p className="message">Create goals and map assets to model drawdown longevity.</p> : <div className="drawdown-grid">{goalDrawdowns.map((row) => <GoalDrawdownCard key={row.goalId} report={row} currency={currency} usdSecondary={usdSecondary} />)}</div>}
       </div>
     </section>
   );
@@ -3531,6 +3562,74 @@ function daysSince(date: string): number {
   return Math.max(0, Math.floor((Date.now() - parsed) / 86400000));
 }
 
+function buildScopedTimeline(points: PortfolioTimelinePoint[], scopedAnalytics: ScopedAnalyticsData): PortfolioTimelinePoint[] {
+  if (scopedAnalytics.scopeKind === "portfolio") return points;
+  const rows = scopedAnalytics.holdings
+    .map((holding) => {
+      const sourceValue = holding.sourceValueInBase > 0 ? holding.sourceValueInBase : holding.actualValueInBase;
+      return {
+        holding,
+        actualFactor: sourceValue > 0 ? holding.actualValueInBase / sourceValue : 0,
+        trackedFactor: sourceValue > 0 ? holding.scopedValue / sourceValue : 0
+      };
+    })
+    .filter((row) => row.trackedFactor > 0 || row.actualFactor > 0);
+
+  return points.map((point) => {
+    const category: Record<string, number> = {};
+    const region: Record<string, number> = {};
+    const assetKind: Record<string, number> = {};
+    const issuer: Record<string, number> = {};
+    const holdingValues: Record<string, number> = {};
+    const holdingInvested: Record<string, number> = {};
+    let current = 0;
+    let invested = 0;
+
+    for (const row of rows) {
+      const rawValue = point.holdingValues[row.holding.id] ?? 0;
+      const rawInvested = point.holdingInvested[row.holding.id] ?? 0;
+      const scopedValue = rawValue * row.trackedFactor;
+      const scopedInvested = rawInvested * row.actualFactor;
+      if (scopedValue > 0) {
+        current += scopedValue;
+        holdingValues[row.holding.id] = roundMoney(scopedValue);
+        addChartBreakdown(category, row.holding.category, scopedValue);
+        addChartBreakdown(region, row.holding.region, scopedValue);
+        addChartBreakdown(assetKind, row.holding.assetKind, scopedValue);
+        addChartBreakdown(issuer, row.holding.issuer, scopedValue);
+      }
+      if (scopedInvested > 0) {
+        invested += scopedInvested;
+        holdingInvested[row.holding.id] = roundMoney(scopedInvested);
+      }
+    }
+
+    const roundedCurrent = current > 0 ? roundMoney(current) : null;
+    const roundedInvested = roundMoney(invested);
+    return {
+      date: point.date,
+      invested: roundedInvested,
+      current: roundedCurrent,
+      profit: roundedCurrent === null ? null : roundMoney(roundedCurrent - roundedInvested),
+      holdingValues,
+      holdingInvested,
+      category: roundChartBreakdown(category),
+      region: roundChartBreakdown(region),
+      assetKind: roundChartBreakdown(assetKind),
+      issuer: roundChartBreakdown(issuer)
+    };
+  });
+}
+
+function addChartBreakdown(record: Record<string, number>, key: string, value: number) {
+  if (!key || !Number.isFinite(value) || value <= 0) return;
+  record[key] = (record[key] ?? 0) + value;
+}
+
+function roundChartBreakdown(record: Record<string, number>): Record<string, number> {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value > 0).map(([key, value]) => [key, roundMoney(value)]));
+}
+
 function topTimelineKeys(points: PortfolioTimelinePoint[], field: keyof Pick<PortfolioTimelinePoint, "category" | "region" | "assetKind" | "issuer">, limit: number): string[] {
   const totals = new Map<string, number>();
   for (const point of points) {
@@ -3744,11 +3843,12 @@ function viewTitle(view: View): string {
   if (view === "transactions") return "Transactions";
   if (view === "goals") return "Goals";
   if (view === "tax") return "Tax";
-  if (view === "data") return "Data and Reconciliation";
+  if (view === "goal-longevity") return "Goal Longevity";
+  if (view === "data") return "Data Quality";
   if (view === "settings") return "Settings";
   if (view === "snapshots") return "Snapshots";
-  if (view === "add-entry") return "Add Entry";
-  return "Portfolio Analytics";
+  if (view === "add-entry") return "Manual Entry";
+  return "Overview";
 }
 
 function displayHoldingName(name: string): string {

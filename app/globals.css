@@ -6579,3 +6579,185 @@ textarea {
   background: #edf4f7;
   border-color: #cbdde7;
 }
+
+/* Product architecture pass: stronger shared controls and page hierarchy */
+.app-shell-v2 .nav {
+  gap: 0.35rem;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.app-shell-v2 .nav button,
+.app-shell-v2 .actions button,
+.app-shell-v2 .toolbar button,
+.app-shell-v2 .native-actions button,
+.app-shell-v2 .table-actions button,
+.app-shell-v2 .draft-actions button,
+.app-shell-v2 .snapshot-form-row button {
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.app-shell-v2 .nav button:hover,
+.app-shell-v2 .actions button:hover,
+.app-shell-v2 .toolbar button:hover,
+.app-shell-v2 .native-actions button:hover,
+.app-shell-v2 .table-actions button:hover,
+.app-shell-v2 .draft-actions button:hover,
+.app-shell-v2 .snapshot-form-row button:hover {
+  border-color: rgba(14, 116, 144, 0.48);
+  background: #f0fdfa;
+  color: #0f172a;
+}
+
+.app-shell-v2 .nav button.active,
+.app-shell-v2 button.primary,
+.app-shell-v2 .primary {
+  border-color: #0f766e;
+  background: linear-gradient(180deg, #0f766e, #0e7490);
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(14, 116, 144, 0.22);
+}
+
+.app-shell-v2 .danger-button {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: #fff1f2;
+  color: #991b1b;
+}
+
+.analytics-scope-panel,
+.analytics-tabs {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+}
+
+.analytics-scope-control,
+.analytics-tabs {
+  gap: 0.55rem;
+}
+
+.analytics-scope-control button,
+.analytics-tabs button {
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  background: #f8fafc;
+  color: #0f172a;
+  box-shadow: inset 0 -1px 0 rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.analytics-scope-control button:hover,
+.analytics-scope-control button:focus-visible,
+.analytics-tabs button:hover,
+.analytics-tabs button:focus-visible {
+  border-color: rgba(14, 116, 144, 0.55);
+  background: #ecfeff;
+  outline: 2px solid rgba(14, 116, 144, 0.18);
+  outline-offset: 2px;
+}
+
+.analytics-scope-control button.active,
+.analytics-tabs button.active {
+  border-color: #0e7490;
+  background: #0f172a;
+  color: #ffffff;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.22);
+}
+
+.analytics-scope-control button.active span,
+.analytics-tabs button.active span {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.goal-longevity-workspace .goal-drawdown-item {
+  grid-column: 1 / -1;
+}
+
+.goal-longevity-selector {
+  grid-column: 1 / -1;
+}
+
+.goal-longevity-workspace .goal-drawdown-item .table-wrap {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.goal-longevity-workspace .goal-drawdown-item .table-wrap table {
+  min-width: 980px;
+}
+
+.card.wide-card > .section-head h2,
+.snapshot-command-main h2,
+.planning-hero-card h2,
+.goals-card h2,
+.tax-workspace h2,
+.data-audit-workspace h2 {
+  color: #0f172a;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.chart-card h2,
+.card h2,
+.goal-drawdown-item h3,
+.asset-type-card h3 {
+  color: #0f172a;
+}
+
+@media (max-width: 900px) {
+  .analytics-scope-control,
+  .analytics-tabs {
+    grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  }
+
+  .analytics-scope-control button,
+  .analytics-tabs button {
+    min-width: 0;
+  }
+
+  .goal-longevity-workspace .holding-command-strip,
+  .goal-longevity-workspace .glide-summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+}
+
+/* Keep page and card headings visually above metric labels across all responsive layouts. */
+.card h2,
+.chart-card h2,
+.section-head h2,
+.goal-drawdown-item h3,
+.asset-type-card h3 {
+  font-weight: 900;
+}
+
+.app-shell-v2 .card h2,
+.app-shell-v2 .chart-card h2,
+.app-shell-v2 .section-head h2,
+.app-shell-v2 .goal-drawdown-item h3,
+.app-shell-v2 .asset-type-card h3 {
+  font-weight: 900;
+}
+
+.app-shell-v2 .card > .section-head h2,
+.app-shell-v2 .card > h2,
+.app-shell-v2 .chart-card > h2 {
+  font-size: 20px;
+  font-weight: 950 !important;
+  line-height: 1.18;
+}
+
+/* Final selector contrast guard: active segmented controls must remain readable. */
+.analytics-scope-control button.active strong,
+.analytics-tabs button.active strong,
+.analytics-scope-control button.active em,
+.analytics-tabs button.active em {
+  color: #ffffff;
+}
+
+.analytics-scope-control button.active span,
+.analytics-tabs button.active span,
+.analytics-scope-control button.active small,
+.analytics-tabs button.active small {
+  color: rgba(255, 255, 255, 0.82);
+}

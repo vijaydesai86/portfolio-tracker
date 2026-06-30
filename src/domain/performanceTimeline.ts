@@ -14,6 +14,8 @@ export type PortfolioTimelinePoint = TimelineBreakdowns & {
   invested: number;
   current: number | null;
   profit: number | null;
+  holdingValues: Record<string, number>;
+  holdingInvested: Record<string, number>;
 };
 
 export type PortfolioTimeline = {
@@ -58,6 +60,11 @@ function buildLatestPoint(backup: PortfolioBackup, date: string): PortfolioTimel
     invested: historicalPoint.invested,
     current,
     profit: current === null ? null : roundMoney(current - historicalPoint.invested),
+    holdingValues: roundBreakdown(Object.fromEntries(backup.manualBalances.map((balance) => {
+      const value = tryConvertToBase(balance.value, balance.currency, backup);
+      return [balance.id, value ?? 0];
+    }))),
+    holdingInvested: historicalPoint.holdingInvested,
     category: roundBreakdown(currentBreakdown.category),
     region: roundBreakdown(currentBreakdown.region),
     assetKind: roundBreakdown(currentBreakdown.assetKind),
@@ -67,6 +74,7 @@ function buildLatestPoint(backup: PortfolioBackup, date: string): PortfolioTimel
 
 function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoint {
   const investedBreakdown = emptyBreakdowns();
+  const holdingInvested: Record<string, number> = {};
   let invested = 0;
   const units = new Map<string, PositionQuantity>();
   const capitalizedValue = new Map<string, PositionValue>();
@@ -81,10 +89,12 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
     if (convertedPortfolioFlow !== undefined && convertedPortfolioFlow < 0) {
       invested += Math.abs(convertedPortfolioFlow);
       addBreakdowns(investedBreakdown, dimensions, Math.abs(convertedPortfolioFlow));
+      addHoldingAmount(holdingInvested, holdingIdForTransaction(tx, backup), Math.abs(convertedPortfolioFlow));
     }
     if (convertedPortfolioFlow !== undefined && convertedPortfolioFlow > 0) {
       invested -= convertedPortfolioFlow;
       addBreakdowns(investedBreakdown, dimensions, -convertedPortfolioFlow);
+      addHoldingAmount(holdingInvested, holdingIdForTransaction(tx, backup), -convertedPortfolioFlow);
     }
 
     const key = positionKey(tx.accountId, tx.instrumentId);
@@ -108,6 +118,7 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
   }
 
   const currentBreakdown = emptyBreakdowns();
+  const holdingValues: Record<string, number> = {};
   const activePositions = new Set<string>();
   const valuedPositions = new Set<string>();
   let current = 0;
@@ -122,6 +133,7 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
     const dimensions = instrumentDimensions(position.instrumentId, backup, position.accountId);
     current += value;
     addBreakdowns(currentBreakdown, dimensions, value);
+    addHoldingAmount(holdingValues, holdingIdForPosition(backup, position.accountId, position.instrumentId), value);
     valuedPositions.add(key);
   }
 
@@ -132,6 +144,7 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
     const dimensions = instrumentDimensions(position.instrumentId, backup, position.accountId);
     current += position.value;
     addBreakdowns(currentBreakdown, dimensions, position.value);
+    addHoldingAmount(holdingValues, holdingIdForPosition(backup, position.accountId, position.instrumentId), position.value);
     valuedPositions.add(key);
   }
 
@@ -143,6 +156,7 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
     if (value === undefined) continue;
     current += value;
     addBreakdowns(currentBreakdown, balanceDimensions(balance, backup), value);
+    addHoldingAmount(holdingValues, balance.id, value);
     valuedPositions.add(key);
   }
 
@@ -153,6 +167,8 @@ function buildPoint(backup: PortfolioBackup, date: string): PortfolioTimelinePoi
     invested: roundMoney(invested),
     current: roundedCurrent,
     profit: roundedCurrent === null ? null : roundMoney(roundedCurrent - invested),
+    holdingValues: roundBreakdown(holdingValues),
+    holdingInvested: roundBreakdown(holdingInvested),
     category: roundBreakdown(currentBreakdown.category),
     region: roundBreakdown(currentBreakdown.region),
     assetKind: roundBreakdown(currentBreakdown.assetKind),
@@ -227,6 +243,19 @@ function isCapitalizedAccount(tx: Transaction, backup: PortfolioBackup): boolean
 
 function transactionDimensions(tx: Transaction, backup: PortfolioBackup): Dimensions {
   return instrumentDimensions(tx.instrumentId, backup, tx.accountId);
+}
+
+function holdingIdForTransaction(tx: Transaction, backup: PortfolioBackup): string | undefined {
+  return tx.instrumentId ? holdingIdForPosition(backup, tx.accountId, tx.instrumentId) : undefined;
+}
+
+function holdingIdForPosition(backup: PortfolioBackup, accountId: string, instrumentId: string): string | undefined {
+  return backup.manualBalances.find((balance) => balance.accountId === accountId && balance.instrumentId === instrumentId)?.id;
+}
+
+function addHoldingAmount(record: Record<string, number>, holdingId: string | undefined, value: number) {
+  if (!holdingId || !Number.isFinite(value) || value === 0) return;
+  record[holdingId] = (record[holdingId] ?? 0) + value;
 }
 
 function instrumentDimensions(instrumentId: string, backup: PortfolioBackup, accountId?: string): Dimensions {

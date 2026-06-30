@@ -37,8 +37,30 @@ async function jsClick(xpath, timeout = 15000) {
   await driver.executeScript("arguments[0].click();", element);
 }
 
+async function navClick(label) {
+  const clicked = await driver.executeScript((target) => {
+    const buttons = [...document.querySelectorAll(".app-shell-v2 .nav button")];
+    const button = buttons.find((candidate) => {
+      const text = (candidate.textContent || "").trim();
+      return text === target || text.includes(target);
+    });
+    if (!button) return false;
+    button.scrollIntoView({ block: "center", inline: "center" });
+    window.setTimeout(() => button.click(), 0);
+    return true;
+  }, label);
+  if (!clicked) throw new Error("Navigation button not found: " + label);
+  await driver.sleep(220);
+}
 async function waitForBodyText(text, timeout = 15000) {
-  await driver.wait(async () => (await driver.findElement(By.css("body")).getText()).toLowerCase().includes(text.toLowerCase()), timeout);
+  const started = Date.now();
+  let sample = "";
+  while (Date.now() - started < timeout) {
+    sample = String(await driver.executeScript("return document.body ? document.body.textContent : '';"));
+    if (sample.toLowerCase().includes(text.toLowerCase())) return;
+    await driver.sleep(150);
+  }
+  throw new Error(`Timed out waiting for body text: ${text}. Sample: ${sample.slice(0, 500)}`);
 }
 
 async function waitForFile(filePath, timeout = 15000) {
@@ -259,6 +281,50 @@ async function assertAssetCommandMetricContrast(context) {
   }
 }
 
+
+async function assertActiveSelectorContrast(context) {
+  const stats = await driver.executeScript(() => {
+    function parseRgb(value) {
+      const match = value.match(/rgba?\(([^)]+)\)/);
+      if (!match) return null;
+      const parts = match[1].split(",").map((part) => Number.parseFloat(part.trim()));
+      if (parts.length < 3 || parts.some((part, index) => index < 3 && !Number.isFinite(part))) return null;
+      return { r: parts[0], g: parts[1], b: parts[2] };
+    }
+    function luminance(rgb) {
+      const values = [rgb.r, rgb.g, rgb.b].map((value) => {
+        const channel = value / 255;
+        return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+      });
+      return values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722;
+    }
+    function contrast(a, b) {
+      const l1 = luminance(a);
+      const l2 = luminance(b);
+      return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+    }
+    const bad = [];
+    const checked = [];
+    for (const element of document.querySelectorAll(".analytics-scope-control button.active strong, .analytics-scope-control button.active span, .analytics-tabs button.active strong, .analytics-tabs button.active span")) {
+      const rect = element.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      const button = element.closest("button");
+      const fg = parseRgb(getComputedStyle(element).color);
+      const bg = parseRgb(getComputedStyle(button).backgroundColor);
+      if (!fg || !bg) {
+        bad.push({ text: element.textContent.trim().slice(0, 60), fg: getComputedStyle(element).color, bg: getComputedStyle(button).backgroundColor, reason: "unparsed color" });
+        continue;
+      }
+      const ratio = contrast(fg, bg);
+      checked.push({ text: element.textContent.trim().slice(0, 60), ratio });
+      if (ratio < 3.5) bad.push({ text: element.textContent.trim().slice(0, 60), ratio, fg: getComputedStyle(element).color, bg: getComputedStyle(button).backgroundColor });
+    }
+    return { checked: checked.length, bad: bad.slice(0, 8) };
+  });
+  if (stats.checked < 4 || stats.bad.length > 0) {
+    throw new Error(context + " rendered unreadable active selector text: " + JSON.stringify(stats));
+  }
+}
 
 async function assertHeadingVisualHierarchy(context) {
   const stats = await driver.executeScript(() => {
@@ -542,9 +608,18 @@ async function assertResponsiveCorePages() {
     await driver.manage().window().setRect({ width, height });
     await driver.sleep(350);
     if (label === "desktop" || label === "laptop" || label === "short-laptop") await assertSettingsReachableInSidebar(label + " navigation");
-    for (const page of ["Analytics", "Holdings", "Goals", "Planning", "Tax", "Snapshots", "Data", "Settings"]) {
-      await jsClick("//button[contains(., '" + page + "')]");
-      await waitForBodyText(page === "Data" ? "Data Reconciliation" : page === "Planning" ? "Planning Lab" : page === "Snapshots" ? "Frozen portfolio archive" : page, 15000);
+    for (const page of ["Overview", "Holdings", "Goals", "Goal Longevity", "Planning", "Tax", "Transactions", "Imports", "Data Quality", "Snapshots", "Manual Entry", "Settings"]) {
+      await navClick(page);
+      await waitForBodyText(
+        page === "Overview" ? "Analytics scope" :
+        page === "Data Quality" ? "Data Reconciliation" :
+        page === "Planning" ? "Planning Lab" :
+        page === "Goal Longevity" ? "Goal Longevity" :
+        page === "Snapshots" ? "Frozen portfolio archive" :
+        page === "Manual Entry" ? "Add a transaction or balance snapshot" :
+        page,
+        15000
+      );
       await assertNoPageOverflow(label + " " + page);
       await assertNoChartRowOverlap(label + " " + page + " chart rows");
       await assertCardsContained(label + " " + page + " cards");
@@ -553,21 +628,23 @@ async function assertResponsiveCorePages() {
       await assertCollapsibleSections(label + " " + page + " collapsible sections");
       await assertFinanceTablesReadable(label + " " + page + " finance tables");
       await assertInteractiveTables(label + " " + page + " interactive tables");
-      if (page === "Analytics") {
+      if (page === "Overview") {
         for (const tab of ["Overview", "Allocation", "Returns", "Risk", "History"]) {
           await jsClick("//button[.//strong[normalize-space(.)='" + tab + "']]");
-          await assertNoPageOverflow(label + " Analytics " + tab);
-          await assertNoChartRowOverlap(label + " Analytics " + tab + " chart rows");
-          await assertCardsContained(label + " Analytics " + tab + " cards");
+          await assertNoPageOverflow(label + " Overview " + tab);
+          await assertNoChartRowOverlap(label + " Overview " + tab + " chart rows");
+          await assertCardsContained(label + " Overview " + tab + " cards");
         }
       }
       if (page === "Goals") await assertGoalsReadable(label + " Goals");
+      if (page === "Goal Longevity") {
+        await waitForBodyText("Modeled goals", 15000);
+      }
       if (page === "Planning") {
         await waitForBodyText("Scenario Planning", 15000);
         await waitForBodyText("Rebalancing View", 15000);
-  await waitForBodyText("Goal-level advisory drift", 15000);
-  await waitForBodyText("Income Projection", 15000);
-        await waitForBodyText("Goal Drawdown Longevity", 15000);
+        await waitForBodyText("Goal-level advisory drift", 15000);
+        await waitForBodyText("Income Projection", 15000);
       }
       if (page === "Snapshots") await waitForBodyText("Snapshot Library", 15000);
     }
@@ -627,21 +704,21 @@ try {
   await driver.get(url);
   await driver.wait(until.elementLocated(By.css("h1")), 15000);
   const title = await driver.findElement(By.css("h1")).getText();
-  if (!/Portfolio Analytics|Holdings|Transactions|Goals|Planning|Tax|Snapshots|Add Entry|Imports|Data|Settings|Backup/.test(title)) {
+  if (!/Portfolio Analytics|Overview|Holdings|Transactions|Goals|Goal Longevity|Planning|Tax|Snapshots|Manual Entry|Imports|Data Quality|Settings|Backup/.test(title)) {
     throw new Error(`Unexpected page heading: ${title}`);
   }
   for (const label of ["Overview", "Allocation", "Returns", "Risk", "History"]) {
     await jsClick(`//button[.//strong[normalize-space(.)='${label}']]`);
     await driver.wait(async () => {
       const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
-      if (label === "Overview") return body.includes("current allocation explorer");
+      if (label === "Overview") return body.includes("scope mix") && body.includes("action checks");
       if (label === "Allocation") return body.includes("allocation map") && body.includes("by asset type");
       if (label === "Returns") return body.includes("returns cockpit") && body.includes("return distribution");
       if (label === "Risk") return body.includes("risk and trust cockpit") && body.includes("currency exposure");
       return body.includes("historical charts reconstruct") && body.includes("portfolio growth");
     }, 15000);
   }
-  await jsClick("//button[contains(., 'Imports')]");
+  await navClick("Imports");
   await waitForBodyText("Native File Intake");
   await jsClick("//button[normalize-space(.)='Preview Manual CSV']");
   await waitForBodyText("Import Preview");
@@ -650,14 +727,14 @@ try {
   await assertImportPreviewContained("manual CSV preview");
   await jsClick("//button[normalize-space(.)='Stage and Commit']");
   await waitForBodyText("Manual CSV committed");
-  await jsClick("//button[contains(., 'Add Entry')]");
+  await navClick("Manual Entry");
   await waitForBodyText("Add a transaction or balance snapshot");
   const amountInput = await driver.wait(until.elementLocated(By.xpath("//label[span[normalize-space(.)='Amount']]//input")), 15000);
   await amountInput.clear();
   await amountInput.sendKeys("250");
   await jsClick("//section[.//h2[normalize-space(.)='Add Entry']]//button[contains(., 'Add Entry')]");
   await waitForBodyText("Added Deposit / Contribution for Cash Wallet");
-  await jsClick("//button[contains(., 'Transactions')]");
+  await navClick("Transactions");
   await driver.wait(async () => {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("deposit") && body.includes("manual_entry") && body.includes("250");
@@ -668,7 +745,7 @@ try {
   await waitForBodyText("Draft transaction delete captured");
   await jsClick("//button[contains(., 'Done Editing')]");
   await waitForBodyText("Draft edits committed locally");
-  await jsClick("//button[contains(., 'Holdings')]");
+  await navClick("Holdings");
   await waitForBodyText("XIRR Coverage");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
@@ -681,21 +758,24 @@ try {
 
   await jsClick("//button[contains(., 'Reset')]");
   await waitForBodyText("Portfolio reset locally");
-  await jsClick("//button[contains(., 'Imports')]");
+  await navClick("Imports");
   const nativeFileInput = await driver.wait(until.elementLocated(By.xpath("(//input[@type='file'])[1]")), 15000);
   await nativeFileInput.sendKeys(path.resolve("fixtures/importable/manual-balance-ledger-sample.csv"));
   await waitForBodyText("parse the manual CSV");
   await jsClick("//button[normalize-space(.)='Parse Manual CSV']");
   await waitForBodyText("Manual CSV committed: 5 holding(s), 33 transaction(s)", 30000);
-  await jsClick("//button[contains(., 'Analytics')]");
+  await navClick("Overview");
   await jsClick("//button[.//strong[normalize-space(.)='Overview']]");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
     return body.includes("₹8,940.00") && body.includes("₹8,730.00") && body.includes("₹210.00");
   }, 20000);
-  await waitForBodyText("Valuation Quality", 15000);
+  await waitForBodyText("Planning Value", 15000);
   await waitForBodyText("Return Engine", 15000);
-  await waitForBodyText("Allocation Balance", 15000);
+  await waitForBodyText("Tax & Income", 15000);
+  await waitForBodyText("Action Checks", 15000);
+  await waitForBodyText("Scope Mix", 15000);
+  await assertActiveSelectorContrast("overview active scope and tab selectors");
   await jsClick("//button[.//strong[normalize-space(.)='History']]");
   await waitForBodyText("Unstacked month-end value lines", 20000);
   await waitForBodyText("not a stacked position", 20000);
@@ -703,27 +783,27 @@ try {
   await assertVisibleNativeLineCharts("history native timelines", 5);
   await assertNativeLineTooltip("history native timeline tooltip");
 
-  await jsClick("//button[contains(., 'Tax')]");
+  await navClick("Tax");
   await waitForBodyText("Portfolio Tax Estimates", 15000);
   await waitForBodyText("Estimated tax", 15000);
   await waitForBodyText("Financial year", 15000);
   await waitForBodyText("Tax Assumptions", 15000);
-  await jsClick("//button[contains(., 'Data')]");
+  await navClick("Data Quality");
   await waitForBodyText("Data Reconciliation", 15000);
   await waitForBodyText("Validation Checks", 15000);
   await waitForBodyText("Market Data Health", 15000);
   await waitForBodyText("Data Quality Matrix", 15000);
   await assertVisibleChartBars("data source value bars");
-  await jsClick("//button[contains(., 'Settings')]");
+  await navClick("Settings");
   await waitForBodyText("Tax regime", 15000);
   await waitForBodyText("Resident Indian individual", 15000);
   await waitForBodyText("Planning Assumptions", 15000);
 
-  await jsClick("//button[contains(., 'Add Entry')]");
+  await navClick("Manual Entry");
   await waitForBodyText("Add Goal");
   await jsClick("//section[.//h2[normalize-space(.)='Add Goal']]//button[contains(., 'Add Goal')]");
   await waitForBodyText("Goal added locally");
-  await jsClick("//button[contains(., 'Goals')]");
+  await navClick("Goals");
   await waitForBodyText("Selected goal snapshot");
   await waitForBodyText("Goal snapshot");
   await waitForBodyText("Target corpus");
@@ -737,20 +817,22 @@ try {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("retirement") && body.includes("needed today") && body.includes("combined goals") && body.includes("map assets to goals");
   }, 15000);
-  await jsClick("//button[contains(., 'Planning')]");
+  await navClick("Planning");
   await waitForBodyText("Planning Lab", 15000);
   await waitForBodyText("Scenario Planning", 15000);
   await waitForBodyText("Rebalancing View", 15000);
   await waitForBodyText("Goal-level advisory drift", 15000);
   await waitForBodyText("Income Projection", 15000);
-  await waitForBodyText("Goal Drawdown Longevity", 15000);
   await waitForBodyText("Performance Attribution", 15000);
+  await assertNoPageOverflow("Planning page");
+  await navClick("Goal Longevity");
+  await waitForBodyText("Goal Longevity", 15000);
   await waitForBodyText("Spend growth %", 15000);
   await waitForBodyText("Corpus consumption years", 15000);
   await waitForBodyText("Withdrawal timing", 15000);
-  await assertNoPageOverflow("Planning page");
-  await assertVisibleNativeLineCharts("planning drawdown chart", 1);
-  await jsClick("//button[contains(., 'Holdings')]");
+  await assertNoPageOverflow("Goal Longevity page");
+  await assertVisibleNativeLineCharts("goal longevity drawdown chart", 1);
+  await navClick("Holdings");
   await waitForBodyText("XIRR Coverage", 15000);
   await jsClick("(//button[normalize-space(.)='Details'])[1]");
   await waitForBodyText("Recent Transactions", 15000);
@@ -758,7 +840,7 @@ try {
   await waitForBodyText("Tax Lots", 15000);
   await assertNoPageOverflow("holding detail drawer");
   await jsClick("//button[normalize-space(.)='Hide details']");
-  await jsClick("//button[contains(., 'Analytics')]");
+  await navClick("Overview");
   await waitForBodyText("Analytics scope");
   await jsClick("//button[.//strong[normalize-space(.)='Allocation']]");
   await waitForBodyText("By Asset Type");
@@ -775,13 +857,19 @@ try {
   await assertVisibleChartBars("asset class ranking rows");
   await jsClick("//button[.//strong[normalize-space(.)='Combined Goals']]");
   await waitForBodyText("Combined goal analytics");
+  await assertActiveSelectorContrast("combined goal active scope selector");
   await driver.wait(async () => {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("mapped holding(s) with dated cash flows") && !body.includes("mapped holding xirr coverage");
   }, 15000);
   await jsClick("//button[.//strong[normalize-space(.)='Retirement']]");
   await waitForBodyText("Goal analytics");
-  await jsClick("//button[contains(., 'Snapshots')]");
+  await jsClick("//button[.//strong[normalize-space(.)='History']]");
+  await waitForBodyText("Goal history reconstructs", 15000);
+  await waitForBodyText("Retirement Growth", 15000);
+  await assertVisibleNativeLineCharts("goal scoped history timelines", 3);
+  await assertNativeLineTooltip("goal scoped history timeline tooltip");
+  await navClick("Snapshots");
   await waitForBodyText("Frozen portfolio archive");
   await jsClick("//button[contains(., 'Take Snapshot')]");
   await waitForBodyText("Snapshot captured locally");
@@ -810,20 +898,20 @@ try {
   }
   await jsClick("//button[contains(., 'Reset')]");
   await waitForBodyText("Portfolio reset locally");
-  await jsClick("//button[contains(., 'Backup')]");
+  await navClick("Backup");
   const restoreInput = await driver.wait(until.elementLocated(By.xpath("//input[@type='file' and contains(@accept, 'application/json')]")), 15000);
   await restoreInput.sendKeys(backupDownloadPath);
   await waitForBodyText("Restored 5 balance record(s) from backup");
-  await jsClick("//button[contains(., 'Goals')]");
+  await navClick("Goals");
   await driver.wait(async () => {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("retirement") && body.includes("needed today") && body.includes("combined goals") && body.includes("map assets to goals");
   }, 15000);
-  await jsClick("//button[contains(., 'Analytics')]");
+  await navClick("Overview");
   await waitForBodyText("Analytics scope");
   await jsClick("//button[.//strong[normalize-space(.)='Combined Goals']]");
   await waitForBodyText("Combined goal analytics");
-  await jsClick("//button[contains(., 'Snapshots')]");
+  await navClick("Snapshots");
   await driver.wait(async () => {
     const body = (await driver.findElement(By.css("body")).getText()).toLowerCase();
     return body.includes("snapshot library") && body.includes("no market fetch") && body.includes("snapshot history");
@@ -864,13 +952,13 @@ try {
   ].join("\n"));
   await jsClick("//button[contains(., 'Reset')]");
   await waitForBodyText("Portfolio reset locally");
-  await jsClick("//button[contains(., 'Imports')]");
+  await navClick("Imports");
   const fidelityFileInput = await driver.wait(until.elementLocated(By.xpath("(//input[@type='file'])[1]")), 15000);
   await fidelityFileInput.sendKeys(fidelityCsvPath);
   await waitForBodyText("parse the manual CSV");
   await jsClick("//button[normalize-space(.)='Parse Manual CSV']");
   await waitForBodyText("Manual CSV committed: 1 holding(s), 3 transaction(s)", 30000);
-  await jsClick("//button[contains(., 'Holdings')]");
+  await navClick("Holdings");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
     return body.includes("Example US Stock") && body.includes("Direct Stock") && body.toLowerCase().includes("price") && body.includes("$30.00") && body.includes("12");
@@ -888,7 +976,7 @@ try {
   await waitForBodyText("Medium taper", 15000);
   await jsClick("//button[contains(., 'Done Editing')]");
   await waitForBodyText("Tracked", 15000);
-  await jsClick("//button[contains(., 'Analytics')]");
+  await navClick("Overview");
   await jsClick("//button[.//strong[normalize-space(.)='Overall']]");
   await jsClick("//button[.//strong[normalize-space(.)='Allocation']]");
   await waitForBodyText("Direct stocks", 15000);
@@ -897,23 +985,23 @@ try {
   await assertNoFakeChartRows("direct stock asset class ranking rows");
   await assertNoChartRowOverlap("direct stock asset class ranking rows");
   await assertVisibleChartBars("direct stock asset class ranking rows");
-  await jsClick("//button[contains(., 'Planning')]");
+  await navClick("Planning");
   await waitForBodyText("Planning Lab", 15000);
   await waitForBodyText("Scenario Planning", 15000);
   await waitForBodyText("Rebalancing View", 15000);
   await waitForBodyText("Goal-level advisory drift", 15000);
   await waitForBodyText("Income Projection", 15000);
   await assertNoPageOverflow("Fidelity planning page");
-  await jsClick("//button[contains(., 'Tax')]");
+  await navClick("Tax");
   await waitForBodyText("Realized Lot Audit", 15000);
   await waitForBodyText("Tax Rule Trace", 15000);
   await waitForBodyText("FIFO", 15000);
   await waitForBodyText("Example US Stock", 15000);
   await waitForBodyText("Foreign", 15000);
-  await jsClick("//button[contains(., 'Data')]");
+  await navClick("Data Quality");
   await waitForBodyText("Data Reconciliation", 15000);
   await waitForBodyText("Market Data Health", 15000);
-  await jsClick("//button[contains(., 'Settings')]");
+  await navClick("Settings");
   await waitForBodyText("Portfolio tax estimate", 15000);
   await waitForBodyText("Show USD equivalents", 15000);
   await waitForBodyText("Planning Assumptions", 15000);
@@ -921,7 +1009,7 @@ try {
   await driver.executeScript("arguments[0].scrollIntoView({block: 'center'});", usdToggle);
   await usdToggle.click();
   await driver.wait(async () => await driver.executeScript(() => document.querySelector("label.toggle-row input[type='checkbox']")?.checked === true), 10000);
-  await jsClick("//button[contains(., 'Holdings')]");
+  await navClick("Holdings");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
     return body.includes("Example US Stock") && body.includes("~$");
@@ -944,12 +1032,12 @@ try {
   });
   await jsClick("//button[contains(., 'Reset')]");
   await waitForBodyText("Portfolio reset locally");
-  await jsClick("//button[contains(., 'Backup')]");
+  await navClick("Backup");
   const restoredFidelityInput = await driver.wait(until.elementLocated(By.xpath("//input[@type='file' and contains(@accept, 'application/json')]")), 15000);
   await restoredFidelityInput.sendKeys(backupDownloadPath);
   await waitForBodyText("Restored 1 balance record(s) from backup exactly as exported", 20000);
   await driver.wait(async () => await driver.executeScript(() => window.__portfolioTrackerMarketCalls === 0), 10000);
-  await jsClick("//button[contains(., 'Holdings')]");
+  await navClick("Holdings");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
     return body.includes("Example US Stock") && body.includes("$30.00") && body.includes("$360.00") && body.includes("~$");
@@ -957,7 +1045,7 @@ try {
   await jsClick("//button[contains(., 'Refresh')]");
   await waitForBodyText("holding valuation(s) updated", 20000);
   await driver.wait(async () => await driver.executeScript(() => window.__portfolioTrackerMarketCalls >= 1), 10000);
-  await jsClick("//button[contains(., 'Holdings')]");
+  await navClick("Holdings");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();
     return body.includes("Example US Stock") && body.includes("$44.00") && body.includes("$528.00") && body.includes("~$");
