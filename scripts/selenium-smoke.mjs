@@ -45,7 +45,7 @@ async function navClick(label) {
     if (!(await button.isDisplayed())) continue;
     await driver.executeScript("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", button);
     await driver.sleep(120);
-    await button.click();
+    await driver.executeScript("arguments[0].click();", button);
     await driver.sleep(350);
     return;
   }
@@ -846,7 +846,12 @@ try {
   await assertVisibleNativeLineCharts("goal longevity drawdown chart", 1);
   await navClick("Holdings");
   await waitForBodyText("XIRR Coverage", 15000);
-  await jsClick("(//button[normalize-space(.)='Details'])[1]");
+  const holdingDetailsButton = await driver.wait(until.elementLocated(By.css(".holding-list .holding-detail-summary")), 15000);
+  await driver.executeScript("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", holdingDetailsButton);
+  await driver.sleep(250);
+  await driver.executeScript("const details = arguments[0].closest('details'); if (details) { details.setAttribute('open', ''); }", holdingDetailsButton);
+  const holdingDrawer = await driver.wait(until.elementLocated(By.css(".holding-detail-drawer")), 15000);
+  await driver.wait(until.elementIsVisible(holdingDrawer), 15000);
   await waitForBodyText("Recent Transactions", 15000);
   await waitForBodyText("Goal Mappings", 15000);
   await waitForBodyText("Tax Lots", 15000);
@@ -1021,6 +1026,8 @@ try {
   await driver.executeScript("arguments[0].scrollIntoView({block: 'center'});", usdToggle);
   await usdToggle.click();
   await driver.wait(async () => await driver.executeScript(() => document.querySelector("label.toggle-row input[type='checkbox']")?.checked === true), 10000);
+  await jsClick("//button[contains(., 'Done editing settings')]");
+  await waitForBodyText("Settings updated locally", 15000);
   await navClick("Holdings");
   await driver.wait(async () => {
     const body = await driver.findElement(By.css("body")).getText();

@@ -16,6 +16,15 @@ export type ReconciliationReport = {
   marketDataGaps: Array<{ kind: "fx" | "price" | "nav"; label: string; date?: string; severity: "warn" | "critical" }>;
   marketDataHealth: Array<{ kind: "fx" | "price" | "nav"; label: string; status: "covered" | "missing" | "stale"; severity: "info" | "warn" | "critical"; source?: string; asOfDate?: string; detail: string }>;
   dataQuality: { score: number; blockers: number; warnings: number; rows: Array<{ area: string; status: "ok" | "warning" | "blocker"; score: number; detail: string }> };
+  refreshDiagnostics?: {
+    refreshedAt: string;
+    navSnapshots: number;
+    stockSnapshots: number;
+    fxSnapshots: number;
+    updatedValuations: number;
+    warnings: string[];
+    blockingErrors: string[];
+  };
   sourceTotals: Array<{ source: string; holdings: number; transactions: number; value: number }>;
   validationRows: Array<{ label: string; expected?: number; actual?: number; status: "ok" | "warn" | "info"; detail: string }>;
 };
@@ -24,7 +33,8 @@ export function buildReconciliationReport(backup: PortfolioBackup): Reconciliati
   const sourceTotals = buildSourceTotals(backup);
   const marketDataGaps = buildMarketDataGaps(backup);
   const marketDataHealth = buildMarketDataHealth(backup);
-  const dataQuality = buildDataQuality(backup, marketDataGaps);
+  const refreshDiagnostics = readRefreshDiagnostics(backup);
+  const dataQuality = buildDataQuality(backup, marketDataGaps, refreshDiagnostics);
   const imports = backup.imports.map((run) => {
     const holdings = backup.manualBalances.filter((balance) => balance.source.importId === run.id).length;
     const transactions = backup.transactions.filter((tx) => tx.source.importId === run.id).length;
@@ -77,12 +87,13 @@ export function buildReconciliationReport(backup: PortfolioBackup): Reconciliati
     marketDataGaps,
     marketDataHealth,
     dataQuality,
+    refreshDiagnostics,
     sourceTotals,
     validationRows
   };
 }
 
-function buildDataQuality(backup: PortfolioBackup, marketDataGaps: ReconciliationReport["marketDataGaps"]): ReconciliationReport["dataQuality"] {
+function buildDataQuality(backup: PortfolioBackup, marketDataGaps: ReconciliationReport["marketDataGaps"], refreshDiagnostics?: ReconciliationReport["refreshDiagnostics"]): ReconciliationReport["dataQuality"] {
   const returns = calculateHoldingReturns(backup);
   const valuedHoldings = backup.manualBalances.filter((balance) => Number.isFinite(balance.value) && balance.value > 0);
   const criticalMarketGaps = marketDataGaps.filter((gap) => gap.severity === "critical").length;
@@ -124,12 +135,49 @@ function buildDataQuality(backup: PortfolioBackup, marketDataGaps: Reconciliatio
       status: staleHoldings === 0 ? "ok" : staleHoldings <= 2 ? "warning" : "blocker",
       score: staleScore,
       detail: staleHoldings === 0 ? "No holding valuation is older than 30 days relative to the latest holding date." : staleHoldings + "/" + valuedHoldings.length + " holding valuation(s) are older than 30 days."
+    },
+    {
+      area: "Last refresh",
+      status: !refreshDiagnostics || refreshDiagnostics.blockingErrors.length > 0 ? "warning" : "ok",
+      score: !refreshDiagnostics ? 70 : refreshDiagnostics.blockingErrors.length > 0 ? 40 : refreshDiagnostics.warnings.length > 0 ? 85 : 100,
+      detail: !refreshDiagnostics
+        ? "No market refresh has been recorded in this browser backup yet."
+        : refreshDiagnostics.blockingErrors.length > 0
+          ? refreshDiagnostics.blockingErrors.length + " blocking refresh error(s) from the last refresh."
+          : refreshDiagnostics.warnings.length > 0
+            ? refreshDiagnostics.warnings.length + " non-blocking history warning(s); current valuation refresh completed."
+            : "Last refresh completed without provider warnings."
     }
   ];
   const blockers = rows.filter((row) => row.status === "blocker").length;
   const warnings = rows.filter((row) => row.status === "warning").length;
   const score = rows.length === 0 ? 100 : Math.round(rows.reduce((sum, row) => sum + row.score, 0) / rows.length);
   return { score, blockers, warnings, rows };
+}
+
+function readRefreshDiagnostics(backup: PortfolioBackup): ReconciliationReport["refreshDiagnostics"] | undefined {
+  const raw = backup.settings.marketRefresh;
+  if (!raw || typeof raw !== "object") return undefined;
+  const record = raw as Record<string, unknown>;
+  const refreshedAt = typeof record.refreshedAt === "string" ? record.refreshedAt : "";
+  if (!refreshedAt) return undefined;
+  return {
+    refreshedAt,
+    navSnapshots: finiteNumber(record.navSnapshots),
+    stockSnapshots: finiteNumber(record.stockSnapshots),
+    fxSnapshots: finiteNumber(record.fxSnapshots),
+    updatedValuations: finiteNumber(record.updatedValuations),
+    warnings: stringArray(record.warnings),
+    blockingErrors: stringArray(record.blockingErrors)
+  };
+}
+
+function finiteNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 function latestHoldingDate(holdings: PortfolioBackup["manualBalances"]): string | undefined {

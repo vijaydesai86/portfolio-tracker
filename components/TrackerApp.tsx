@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, Camera, Database, Download, FileJson, LayoutDashboard, Pencil, PlusCircle, ReceiptText, RefreshCw, RotateCcw, Search, Settings, ShieldCheck, Table2, Target, TrendingDown, TrendingUp, Upload, WalletCards } from "lucide-react";
-import { type CSSProperties, Fragment, type PointerEvent, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, Fragment, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { calculatePortfolioInsights, calculatePortfolioSummary, tryConvertToBase, type HoldingInsight } from "@/src/domain/analytics";
 import { deleteImportRunFromBackup, deleteTransactionFromBackup } from "@/src/domain/deleteRecords";
 import { assetSubtypeDisplayLabel, assetSubtypeLabel } from "@/src/domain/assetSubtype";
@@ -49,6 +49,7 @@ type View = "dashboard" | "holdings" | "goals" | "expenses" | "goal-longevity" |
 type AnalyticsTab = "overview" | "allocation" | "returns" | "risk" | "history";
 type AnalyticsScope = "portfolio" | "goals-combined" | `goal:${string}`;
 type HoldingSort = "value" | "gain" | "xirr" | "allocation" | "name" | "category" | "source";
+type MarketRefreshDiagnostic = NonNullable<ReturnType<typeof buildReconciliationReport>["refreshDiagnostics"]>;
 
 function currentIndianFinancialYear(date = new Date()): string {
   const year = date.getFullYear();
@@ -587,7 +588,6 @@ export function TrackerApp() {
   const [goalExpenseCsv, setGoalExpenseCsv] = useState(sampleGoalExpenseCsv);
   const [goalExpenseGoalId, setGoalExpenseGoalId] = useState("");
   const [goalExpenseBaseDate, setGoalExpenseBaseDate] = useState(() => todayIso());
-  const [selectedHoldingDetailId, setSelectedHoldingDetailId] = useState("");
   const editSessionActive = draftBackup !== null;
   const editBackup = draftBackup ?? backup;
 
@@ -1193,7 +1193,16 @@ export function TrackerApp() {
       const refreshed = applyMarketDataPayload(portfolio, payload);
       const updatedValuations = countChangedCurrentValuations(portfolio, refreshed);
       const refreshIssues = splitMarketRefreshErrors(payload.errors);
-      setBackup(refreshed);
+      const finalBackup = withMarketRefreshDiagnostics(refreshed, {
+        refreshedAt: new Date().toISOString(),
+        navSnapshots: payload.navs.length,
+        stockSnapshots: payload.stocks.length,
+        fxSnapshots: (payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0),
+        updatedValuations,
+        warnings: refreshIssues.historyWarnings,
+        blockingErrors: refreshIssues.blockingErrors
+      });
+      setBackup(finalBackup);
       setErrors(refreshIssues.blockingErrors);
       setStatus(
         (prefix ? prefix + " " : "") +
@@ -1201,7 +1210,17 @@ export function TrackerApp() {
           (refreshIssues.historyWarnings.length > 0 ? ` Historical chart coverage warning: ${refreshIssues.historyWarnings.length} non-blocking provider issue(s); current valuations are unaffected.` : "")
       );
     } catch (error) {
-      setErrors([error instanceof Error ? error.message : "Market refresh failed"]);
+      const message = error instanceof Error ? error.message : "Market refresh failed";
+      setBackup((current) => withMarketRefreshDiagnostics(current, {
+        refreshedAt: new Date().toISOString(),
+        navSnapshots: 0,
+        stockSnapshots: 0,
+        fxSnapshots: 0,
+        updatedValuations: 0,
+        warnings: [],
+        blockingErrors: [message]
+      }));
+      setErrors([message]);
       setStatus(prefix ? prefix + " Market refresh failed." : "Market refresh failed.");
     }
   }
@@ -1338,6 +1357,17 @@ export function TrackerApp() {
       const previous = beforeById.get(balance.id);
       return previous && (previous.value !== balance.value || previous.price !== balance.price || previous.asOfDate !== balance.asOfDate || previous.currency !== balance.currency);
     }).length;
+  }
+
+  function withMarketRefreshDiagnostics(portfolio: PortfolioBackup, diagnostic: MarketRefreshDiagnostic): PortfolioBackup {
+    return {
+      ...portfolio,
+      exportedAt: new Date().toISOString(),
+      settings: {
+        ...portfolio.settings,
+        marketRefresh: diagnostic
+      }
+    };
   }
 
   function splitMarketRefreshErrors(errors: string[] = []): { blockingErrors: string[]; historyWarnings: string[] } {
@@ -1801,10 +1831,7 @@ export function TrackerApp() {
                     {filteredHoldings.map((holding) => (
                       holdingEditMode ?
                         <HoldingEditRow key={holding.id} balance={editBackup.manualBalances.find((balance) => balance.id === holding.id)!} updateBalance={updateBalance} /> :
-                        <div className="holding-detail-group" key={holding.id}>
-                          <HoldingRow holding={holding} baseCurrency={backup.baseCurrency} returns={holdingReturns.get(holding.id)} usdSecondary={usdSecondary} expanded={selectedHoldingDetailId === holding.id} onDetails={() => setSelectedHoldingDetailId(selectedHoldingDetailId === holding.id ? "" : holding.id)} />
-                          {selectedHoldingDetailId === holding.id && <HoldingDetailDrawer backup={backup} holding={holding} returns={holdingReturns.get(holding.id)} taxReport={taxReport} goalProgress={goalProgress} currency={backup.baseCurrency} close={() => setSelectedHoldingDetailId("")} usdSecondary={usdSecondary} />}
-                        </div>
+                        <HoldingDetailGroup key={holding.id} backup={backup} holding={holding} returns={holdingReturns.get(holding.id)} taxReport={taxReport} goalProgress={goalProgress} currency={backup.baseCurrency} usdSecondary={usdSecondary} />
                     ))}
                   </div>
                 </>
@@ -1895,7 +1922,7 @@ function GoalLongevityView({ goalDrawdowns, currency, usdSecondary }: { goalDraw
           <div className="analytics-scope-panel goal-longevity-selector">
             <div><span className="eyebrow">Goal selector</span><p>Select one goal for the detailed longevity model. Summary cards above still reflect every modeled goal.</p></div>
             <div className="analytics-scope-control" role="tablist" aria-label="Goal longevity selector">
-              {goalDrawdowns.map((row) => <button key={row.goalId} className={selected?.goalId === row.goalId ? "active" : ""} onClick={() => setSelectedGoalId(row.goalId)}><strong>{row.goalName}</strong><span>{row.depletionYear ? "depletes " + row.depletionYear : row.horizonYears + "+ years"}</span></button>)}
+              {goalDrawdowns.map((row) => <button key={row.goalId} className={selected?.goalId === row.goalId ? "active" : ""} style={selected?.goalId === row.goalId ? activeSelectorStyle : undefined} onClick={() => setSelectedGoalId(row.goalId)}><strong>{row.goalName}</strong><span>{row.depletionYear ? "depletes " + row.depletionYear : row.horizonYears + "+ years"}</span></button>)}
             </div>
           </div>
           {selected && <GoalDrawdownCard report={selected} currency={currency} usdSecondary={usdSecondary} />}
@@ -2607,8 +2634,8 @@ function ImportsView(props: {
   const npsTransactionCount = npsParses.reduce((sum, parsed) => sum + parsed.transactions.length, 0);
   const npsWarningCount = npsParses.reduce((sum, parsed) => sum + parsed.warnings.length, 0);
   const npsHasErrors = npsParses.some((parsed) => parsed.errors.length > 0);
-  const stagedPreview = nativeStagedPreviewRows(props.backup, props.stagedCas ? [props.stagedCas] : [], props.stagedInd ? [props.stagedInd] : [], props.stagedEpfo ?? [], props.stagedNps ?? []);
   const selectedReplacement = props.backup.imports.find((run) => run.id === props.replaceImportId);
+  const stagedPreview = nativeStagedPreviewRows(props.backup, props.replaceImportId || undefined, props.stagedCas ? [props.stagedCas] : [], props.stagedInd ? [props.stagedInd] : [], props.stagedEpfo ?? [], props.stagedNps ?? []);
   return (
     <section className="grid imports-workspace">
       {props.editSessionActive && <div className="notice">Finish or cancel draft editing before importing, restoring, or refreshing files.</div>}
@@ -2735,6 +2762,7 @@ function DataAuditView({ report, taxReport, currency }: { report: ReturnType<typ
       </div>
       <div className="analytics-grid">
         <TaxDataChecksCard report={taxReport} currency={currency} />
+        {report.refreshDiagnostics && <MarketRefreshDiagnosticsCard diagnostic={report.refreshDiagnostics} />}
         <div className="card wide-card data-action-card"><h2>Review Queue</h2><p className="chart-note compact-note">Actionable items only. Fix these before trusting affected history, tax, XIRR, or INR conversions.</p>{actionRows.length === 0 ? <p className="message">No immediate data actions. Current data quality checks are clean.</p> : <div className="table-wrap"><table><thead><tr><th>Area</th><th>Item</th><th>Severity</th><th>Suggested action</th></tr></thead><tbody>{actionRows.map((row, index) => <tr key={row.area + row.item + index}><td>{row.area}</td><td>{row.item}</td><td><span className={"status-pill " + (row.severity === "critical" || row.severity === "warn" ? "planned" : "partial")}>{row.severity}</span></td><td>{row.action}</td></tr>)}</tbody></table></div>}</div>
         <ChartCard title="Source Value Mix"><HorizontalBar data={report.sourceTotals.map((row) => ({ name: row.source, value: row.value }))} currency={currency} /></ChartCard>
         <div className="card"><h2>Data Quality Matrix</h2><p className="chart-note compact-note">Trust score for the data layer only. Analytics stays in the dashboard; this matrix explains whether inputs, market data, cost basis, XIRR, and freshness are ready.</p><div className="quality-row-list">{report.dataQuality.rows.map((row) => <div className={"quality-row status-" + row.status} key={row.area}><div><span>{row.area}</span><strong>{row.status.toUpperCase()}</strong></div><em>{row.score}%</em><small>{row.detail}</small></div>)}</div></div>
@@ -2861,9 +2889,7 @@ function ExpensesView({ goals, goalExpenses, currency }: { goals: Goal[]; goalEx
 
       <div className="card wide-card"><h2>Scenario Playbook</h2><p className="chart-note compact-note">Expense-to-goal link: each scenario shows monthly spend today, change from Current, first goal-year spend, and corpus implied by the goal multiple.</p>{scenarioRows.length === 0 ? <p className="message">No expense scenarios imported yet.</p> : <div className="table-wrap expense-compact-table"><table><thead><tr><th>Goal</th><th>Scenario</th><th>Rows</th><th>Monthly</th><th>Vs current</th><th>Goal-year annual</th><th>Corpus implied</th><th>Status</th></tr></thead><tbody>{scenarioRows.map((row) => <tr key={row.goal.id + row.scenario}><td>{row.goal.name}</td><td>{row.scenario}</td><td>{row.rows}</td><td>{formatMoney(row.monthly, currency)}</td><td>{row.scenario === "Current" ? "-" : formatMoney(row.deltaVsCurrent, currency)}</td><td>{formatMoney(row.annualAtGoal, currency)}</td><td>{formatMoney(row.corpus, currency)}</td><td><span className={"status-pill " + (row.active ? "implemented" : "partial")}>{row.active ? "active" : "compare"}</span></td></tr>)}</tbody></table></div>}</div>
 
-      <div className="card wide-card"><h2>Goal Expense Summary</h2><p className="chart-note compact-note">Compact audit of included goals only. Goals with Expense totals off remain available for their own goal math but are excluded from this page.</p><div className="table-wrap expense-compact-table"><table className="expense-summary-table"><thead><tr><th>Goal</th><th>Active scenario</th><th>Rows</th><th>Planning monthly</th><th>Today planning</th><th>Goal-year spend</th><th>Available scenarios</th></tr></thead><tbody>{expenseIncluded.map(({ goal, summary }) => <tr key={goal.id}><td><strong>{goal.name}</strong><small>Included</small></td><td><span className="status-pill implemented">{summary.selectedScenario || "Manual"}</span></td><td>{summary.rows.length}</td><td>{formatMoney(summary.baseMonthlyExpense, currency)}</td><td>{formatMoney(summary.currentMonthlyExpense, currency)}</td><td>{formatMoney(summary.firstYearExpense, currency)}</td><td><div className="scenario-chip-list">{summary.scenarioTotals.length === 0 ? <span className="muted">-</span> : summary.scenarioTotals.map((row) => <span className={"scenario-chip " + (row.scenario === summary.selectedScenario ? "is-active" : "")} key={row.scenario}><strong>{row.scenario}</strong><em>{formatMoney(row.baseMonthlyExpense, currency)}</em></span>)}</div></td></tr>)}</tbody></table></div></div>
       <div className="card wide-card expense-audit-card compact-audit-card"><h2>Expense Line Audit</h2><p className="chart-note compact-note">Verification drilldown only. Re-uploading an expense CSV replaces the affected goal ledger, and JSON export keeps all rows.</p><div className="table-wrap expense-audit-table"><table><thead><tr><th>Goal</th><th>Scenario</th><th>Category</th><th>Item</th><th>Frequency</th><th>Qty</th><th>Unit</th><th>Monthly</th><th>Payer</th><th>Notes</th></tr></thead><tbody>{auditRows.slice(0, 120).map(({ goal, row }) => <tr key={row.id}><td>{goal.name}</td><td>{row.scenario}</td><td>{row.category || "-"}</td><td>{row.subCategory ? row.subCategory + " · " + row.expense : row.expense}</td><td>{row.frequency}</td><td>{row.quantity ?? "-"}</td><td>{row.unitAmount != null ? formatMoney(row.unitAmount, row.currency) : "-"}</td><td>{formatMoney(row.amount, row.currency)}</td><td>{row.payer || "-"}</td><td>{row.notes || "-"}</td></tr>)}</tbody></table></div>{auditRows.length > 120 && <p className="helper">Showing first 120 active-scenario rows; export JSON keeps the full detail ledger.</p>}</div>
-      <div className="card expense-data-quality-card compact-quality-card"><h2>Expense Import Checks</h2><div className="signal-list compact-signal-list"><div className="signal-item good"><ShieldCheck size={18} /><div><span>Included goal coverage</span><strong>{importedSummaries.length}/{expenseIncluded.length}</strong><small>{excludedExpenseGoals > 0 ? excludedExpenseGoals + " goal(s) excluded from expense analytics" : "All included goals have expense rollups or manual fallback."}</small></div></div><div className={"signal-item " + (payerCoverage >= 90 ? "good" : payerCoverage > 0 ? "warn" : "bad")}><ShieldCheck size={18} /><div><span>Payer coverage</span><strong>{payerCoverage.toFixed(0)}%</strong><small>{payerCovered}/{payerCoverageRows.length} current/planning rows have payer ownership.</small></div></div></div></div>
     </section>
   );
 }
@@ -3021,20 +3047,36 @@ function totalsFromExpenseRows<T extends { row: GoalExpense }>(rows: T[], keyFn:
 }
 
 function SettingsView({ profile, updateTaxProfile, displaySettings, updateDisplaySettings, planningSettings, updatePlanningSettings, goals, goalExpenses, updateGoalSettings, currency }: { profile: TaxProfile; updateTaxProfile: (patch: Partial<TaxProfile>) => void; displaySettings: DisplayCurrencySettings; updateDisplaySettings: (patch: Partial<DisplayCurrencySettings>) => void; planningSettings: PlanningSettings; updatePlanningSettings: (patch: PlanningSettingsPatch) => void; goals: Goal[]; goalExpenses: GoalExpense[]; updateGoalSettings: (patches: Array<{ goalId: string; patch: Partial<Goal> }>) => void; currency: string }) {
+  const [draftProfile, setDraftProfile] = useState<TaxProfile>(profile);
+  const [draftDisplaySettings, setDraftDisplaySettings] = useState<DisplayCurrencySettings>(displaySettings);
+  useEffect(() => setDraftProfile(profile), [profile]);
+  useEffect(() => setDraftDisplaySettings(displaySettings), [displaySettings]);
+  const taxDirty = JSON.stringify(draftProfile) !== JSON.stringify(profile);
+  const displayDirty = JSON.stringify(draftDisplaySettings) !== JSON.stringify(displaySettings);
+  const settingsDirty = taxDirty || displayDirty;
+  const applySettings = () => {
+    if (taxDirty) updateTaxProfile(draftProfile);
+    if (displayDirty) updateDisplaySettings(draftDisplaySettings);
+  };
+  const resetSettings = () => {
+    setDraftProfile(profile);
+    setDraftDisplaySettings(displaySettings);
+  };
   return (
     <section className="grid settings-workspace">
       <div className="card wide-card">
-        <div className="section-head"><div><h2>Settings</h2><p>Configure assumptions used by portfolio estimates. Settings are stored in the canonical JSON backup and restored across browsers.</p></div></div>
+        <div className="section-head"><div><h2>Settings</h2><p>Configure assumptions used by portfolio estimates. Settings are stored in the canonical JSON backup and restored across browsers.</p></div><div className="draft-actions compact-draft-actions"><button className="primary" disabled={!settingsDirty} onClick={applySettings}>Done editing settings</button><button disabled={!settingsDirty} onClick={resetSettings}>Reset draft</button></div></div>
+        <p className="message">Tax and display settings are edited as drafts here. Portfolio analytics refresh once when you press Done editing settings.</p>
         <div className="settings-grid">
-          <label><span>Taxpayer</span><select value={profile.residency} disabled><option value="resident_individual">Resident Indian individual</option></select></label>
-          <label><span>Tax regime</span><select value={profile.regime} onChange={(event) => updateTaxProfile({ regime: event.target.value as TaxProfile["regime"] })}><option value="new">New regime</option><option value="old">Old regime</option></select></label>
-          <label><span>Slab / marginal rate</span><select value={String(profile.slabRate)} onChange={(event) => updateTaxProfile({ slabRate: Number(event.target.value) })}>{[0, 5, 10, 15, 20, 25, 30].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
-          <label><span>Surcharge</span><select value={String(profile.surchargeRate)} onChange={(event) => updateTaxProfile({ surchargeRate: Number(event.target.value) })}>{[0, 10, 15, 25, 37].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
-          <label><span>Cess</span><input type="number" step="0.1" value={profile.cessRate} onChange={(event) => updateTaxProfile({ cessRate: Number(event.target.value) })} /></label>
-          <label><span>Tax mode</span><select value={profile.mode} disabled><option value="estimate">Portfolio tax estimate</option></select></label>
+          <label><span>Taxpayer</span><select value={draftProfile.residency} disabled><option value="resident_individual">Resident Indian individual</option></select></label>
+          <label><span>Tax regime</span><select value={draftProfile.regime} onChange={(event) => setDraftProfile((current) => ({ ...current, regime: event.target.value as TaxProfile["regime"] }))}><option value="new">New regime</option><option value="old">Old regime</option></select></label>
+          <label><span>Slab / marginal rate</span><select value={String(draftProfile.slabRate)} onChange={(event) => setDraftProfile((current) => ({ ...current, slabRate: Number(event.target.value) }))}>{[0, 5, 10, 15, 20, 25, 30].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
+          <label><span>Surcharge</span><select value={String(draftProfile.surchargeRate)} onChange={(event) => setDraftProfile((current) => ({ ...current, surchargeRate: Number(event.target.value) }))}>{[0, 10, 15, 25, 37].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
+          <label><span>Cess</span><input type="number" step="0.1" value={draftProfile.cessRate} onChange={(event) => setDraftProfile((current) => ({ ...current, cessRate: Number(event.target.value) }))} /></label>
+          <label><span>Tax mode</span><select value={draftProfile.mode} disabled><option value="estimate">Portfolio tax estimate</option></select></label>
         </div>
         <div className="settings-panel">
-          <label className="toggle-row"><input type="checkbox" checked={displaySettings.showUsdEquivalent} onChange={(event) => updateDisplaySettings({ showUsdEquivalent: event.target.checked })} /><span><strong>Show USD equivalents</strong><small>Display-only secondary USD values under INR portfolio, holding, and goal amounts when a real USD/INR snapshot exists.</small></span></label>
+          <label className="toggle-row"><input type="checkbox" checked={draftDisplaySettings.showUsdEquivalent} onChange={(event) => setDraftDisplaySettings((current) => ({ ...current, showUsdEquivalent: event.target.checked }))} /><span><strong>Show USD equivalents</strong><small>Display-only secondary USD values under INR portfolio, holding, and goal amounts when a real USD/INR snapshot exists.</small></span></label>
         </div>
         <div className="settings-panel planning-settings-panel">
           <h3>Planning Assumptions</h3>
@@ -3155,6 +3197,27 @@ function ImportPreviewPanel({ preview, currency }: { preview: ManualImportPrevie
   );
 }
 
+function MarketRefreshDiagnosticsCard({ diagnostic }: { diagnostic: NonNullable<ReturnType<typeof buildReconciliationReport>["refreshDiagnostics"]> }) {
+  const warningCount = diagnostic.warnings.length;
+  const errorCount = diagnostic.blockingErrors.length;
+  const refreshedAt = new Date(diagnostic.refreshedAt);
+  const refreshedLabel = Number.isFinite(refreshedAt.getTime()) ? refreshedAt.toLocaleString() : diagnostic.refreshedAt;
+  return (
+    <div className="card wide-card refresh-diagnostics-card">
+      <div className="section-head compact-section-head"><div><h2>Last Market Refresh</h2><p>Provider diagnostics from the latest refresh. Current valuations and historical coverage are separated so non-blocking history failures do not look like portfolio-value failures.</p></div></div>
+      <div className="holding-command-strip compact-command-strip">
+        <MiniInsight label="Refreshed" value={refreshedLabel} detail="stored in JSON backup" />
+        <MiniInsight label="NAV snapshots" value={String(diagnostic.navSnapshots)} detail="current and historical NAV rows" />
+        <MiniInsight label="Stock snapshots" value={String(diagnostic.stockSnapshots)} detail="quote rows imported" />
+        <MiniInsight label="FX snapshots" value={String(diagnostic.fxSnapshots)} detail="currency conversion rows" />
+        <MiniInsight label="Holding updates" value={String(diagnostic.updatedValuations)} detail="current valuations changed" />
+        <MiniInsight label="Provider issues" value={String(warningCount + errorCount)} detail={errorCount > 0 ? errorCount + " blocking" : warningCount + " non-blocking"} />
+      </div>
+      {(warningCount > 0 || errorCount > 0) && <div className="error-list compact-error-list">{diagnostic.blockingErrors.concat(diagnostic.warnings).slice(0, 8).map((item) => <div key={item}>{item}</div>)}</div>}
+    </div>
+  );
+}
+
 function TaxDataChecksCard({ report, currency }: { report: ReturnType<typeof calculatePortfolioTaxReport>; currency: string }) {
   const tracedRows = report.realized.rows.filter(hasTaxTrace);
   const fmvTraceRows = tracedRows.filter((row) => /fmv/i.test(row.trace.costFormula + " " + row.trace.proceedsFormula));
@@ -3187,13 +3250,19 @@ function hasTaxTrace(row: ReturnType<typeof calculatePortfolioTaxReport>["realiz
 
 type NativePreviewImport = { transactions?: unknown[]; manualBalances?: Array<{ value?: number; currency?: string; label?: string }>; priceSnapshots?: unknown[]; importRun?: { provider?: string; fileName?: string; label?: string } };
 
-type NativeStagedPreviewRow = { provider: string; label: string; balances: number; transactions: number; prices: number; estimatedValue: number; afterHoldings: number; afterTransactions: number };
+type NativeStagedPreviewRow = { provider: string; label: string; balances: number; transactions: number; prices: number; estimatedValue: number; afterHoldings: number; afterTransactions: number; preserved: number; removed: number; mode: "new" | "replace" };
 
-function nativeStagedPreviewRows(backup: PortfolioBackup, ...groups: NativePreviewImport[][]): NativeStagedPreviewRow[] {
+function nativeStagedPreviewRows(backup: PortfolioBackup, replaceImportId: string | undefined, ...groups: NativePreviewImport[][]): NativeStagedPreviewRow[] {
   return groups.flatMap((imports) => imports.length === 0 ? [] : imports.map((item) => {
     const balances = item.manualBalances ?? [];
     const transactions = item.transactions ?? [];
     const prices = item.priceSnapshots ?? [];
+    const incomingBalanceHashes = new Set(balances.map((balance) => typeof balance === "object" && balance && "source" in balance ? String((balance as { source?: { sourceRecordHash?: string } }).source?.sourceRecordHash ?? "") : "").filter(Boolean));
+    const incomingTransactionHashes = new Set(transactions.map((tx) => typeof tx === "object" && tx && "source" in tx ? String((tx as { source?: { sourceRecordHash?: string } }).source?.sourceRecordHash ?? "") : "").filter(Boolean));
+    const replacedBalances = replaceImportId ? backup.manualBalances.filter((balance) => balance.source.importId === replaceImportId) : [];
+    const replacedTransactions = replaceImportId ? backup.transactions.filter((tx) => tx.source.importId === replaceImportId) : [];
+    const preserved = replacedBalances.filter((balance) => balance.source.sourceRecordHash && incomingBalanceHashes.has(balance.source.sourceRecordHash)).length + replacedTransactions.filter((tx) => tx.source.sourceRecordHash && incomingTransactionHashes.has(tx.source.sourceRecordHash)).length;
+    const removed = replacedBalances.filter((balance) => !balance.source.sourceRecordHash || !incomingBalanceHashes.has(balance.source.sourceRecordHash)).length + replacedTransactions.filter((tx) => !tx.source.sourceRecordHash || !incomingTransactionHashes.has(tx.source.sourceRecordHash)).length;
     const estimatedValue = balances.reduce((sum, balance) => sum + (typeof balance.value === "number" ? balance.value : 0), 0);
     return {
       provider: item.importRun?.provider ?? "staged",
@@ -3202,15 +3271,18 @@ function nativeStagedPreviewRows(backup: PortfolioBackup, ...groups: NativePrevi
       transactions: transactions.length,
       prices: prices.length,
       estimatedValue: roundMoney(estimatedValue),
-      afterHoldings: backup.manualBalances.length + balances.length,
-      afterTransactions: backup.transactions.length + transactions.length
+      afterHoldings: replaceImportId ? backup.manualBalances.length - replacedBalances.length + balances.length : backup.manualBalances.length + balances.length,
+      afterTransactions: replaceImportId ? backup.transactions.length - replacedTransactions.length + transactions.length : backup.transactions.length + transactions.length,
+      preserved,
+      removed,
+      mode: replaceImportId ? "replace" : "new"
     };
   }));
 }
 
 function NativeStagedPreviewPanel({ rows, currency }: { rows: NativeStagedPreviewRow[]; currency: string }) {
   if (rows.length === 0) return null;
-  const totals = rows.reduce((sum, row) => ({ balances: sum.balances + row.balances, transactions: sum.transactions + row.transactions, prices: sum.prices + row.prices, estimatedValue: sum.estimatedValue + row.estimatedValue }), { balances: 0, transactions: 0, prices: 0, estimatedValue: 0 });
+  const totals = rows.reduce((sum, row) => ({ balances: sum.balances + row.balances, transactions: sum.transactions + row.transactions, prices: sum.prices + row.prices, estimatedValue: sum.estimatedValue + row.estimatedValue, preserved: sum.preserved + row.preserved, removed: sum.removed + row.removed }), { balances: 0, transactions: 0, prices: 0, estimatedValue: 0, preserved: 0, removed: 0 });
   return (
     <div className="native-preview-panel">
       <h3>Native Import Preview</h3>
@@ -3220,8 +3292,10 @@ function NativeStagedPreviewPanel({ rows, currency }: { rows: NativeStagedPrevie
         <MiniInsight label="Staged transactions" value={String(totals.transactions)} detail="ledger rows ready" />
         <MiniInsight label="Market rows" value={String(totals.prices)} detail="price/NAV/FX snapshots" />
         <MiniInsight label="Staged value" value={formatMoney(totals.estimatedValue, currency)} detail="local-currency estimate before FX" />
+        <MiniInsight label="Preserved on replace" value={String(totals.preserved)} detail="matching records keep user edits" />
+        <MiniInsight label="Removed on replace" value={String(totals.removed)} detail="old records absent in new file" />
       </div>
-      <div className="table-wrap"><table><thead><tr><th>Provider</th><th>File/import</th><th>Holdings</th><th>Transactions</th><th>Prices</th><th>After holdings</th><th>After transactions</th></tr></thead><tbody>{rows.map((row, index) => <tr key={row.provider + row.label + index}><td>{row.provider}</td><td>{row.label}</td><td>{row.balances}</td><td>{row.transactions}</td><td>{row.prices}</td><td>{row.afterHoldings}</td><td>{row.afterTransactions}</td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>Mode</th><th>Provider</th><th>File/import</th><th>Holdings</th><th>Transactions</th><th>Prices</th><th>Preserved</th><th>Removed</th><th>After holdings</th><th>After transactions</th></tr></thead><tbody>{rows.map((row, index) => <tr key={row.provider + row.label + index}><td>{row.mode}</td><td>{row.provider}</td><td>{row.label}</td><td>{row.balances}</td><td>{row.transactions}</td><td>{row.prices}</td><td>{row.preserved}</td><td>{row.removed}</td><td>{row.afterHoldings}</td><td>{row.afterTransactions}</td></tr>)}</tbody></table></div>
     </div>
   );
 }
@@ -3385,7 +3459,7 @@ function AssetClassCard({ insight, currency }: { insight: AssetClassInsight; cur
   );
 }
 
-const activeSelectorStyle: CSSProperties = { background: "#0f766e", backgroundColor: "#0f766e", borderColor: "#0f766e", color: "#ffffff", opacity: 1, filter: "none" };
+const activeSelectorStyle: CSSProperties = { background: "#0f766e", backgroundColor: "#0f766e", backgroundImage: "none", borderColor: "#0f766e", color: "#ffffff", opacity: 1, filter: "none", boxShadow: "0 10px 22px rgba(15, 118, 110, 0.24)" };
 
 function AnalyticsScopeSelector({ scope, setScope, goals, combinedGoalCount }: { scope: AnalyticsScope; setScope: (scope: AnalyticsScope) => void; goals: GoalProgress[]; combinedGoalCount: number }) {
   return (
@@ -3839,7 +3913,24 @@ function RankingBar({ data, formatValue, emptyMessage, tone = "value" }: Ranking
     </div>
   );
 }
-function HoldingRow({ holding, baseCurrency, returns, usdSecondary, expanded, onDetails }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; returns?: HoldingReturn; usdSecondary: (value: number | undefined) => string | undefined; expanded: boolean; onDetails: () => void }) {
+function HoldingDetailGroup({ backup, holding, returns, taxReport, goalProgress, currency, usdSecondary }: { backup: PortfolioBackup; holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; returns?: HoldingReturn; taxReport: ReturnType<typeof calculatePortfolioTaxReport>; goalProgress: GoalProgress[]; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+  const detailsRef = useRef<HTMLDetailsElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const close = () => {
+    if (detailsRef.current) detailsRef.current.open = false;
+    setExpanded(false);
+  };
+  return (
+    <details className="holding-detail-group" ref={detailsRef} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+      <summary className="holding-detail-summary">
+        <HoldingRow holding={holding} baseCurrency={currency} returns={returns} usdSecondary={usdSecondary} expanded={expanded} />
+      </summary>
+      <HoldingDetailDrawer backup={backup} holding={holding} returns={returns} taxReport={taxReport} goalProgress={goalProgress} currency={currency} close={close} usdSecondary={usdSecondary} />
+    </details>
+  );
+}
+
+function HoldingRow({ holding, baseCurrency, returns, usdSecondary, expanded, onDetails }: { holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; baseCurrency: string; returns?: HoldingReturn; usdSecondary: (value: number | undefined) => string | undefined; expanded: boolean; onDetails?: () => void }) {
   const value = holding.valueInBase === undefined ? "FX needed" : formatMoney(holding.valueInBase, baseCurrency);
   const price = holding.price === undefined ? "-" : formatMoney(holding.price, holding.currency);
   const priceDetail = holding.price === undefined ? "not available" : holding.quantity === undefined ? "latest unit price" : "per unit/share";
@@ -3849,7 +3940,7 @@ function HoldingRow({ holding, baseCurrency, returns, usdSecondary, expanded, on
   const costKnown = returns?.costBasisKnown === true;
   const xirrDetail = returns?.missingFx.length ? "FX needed" : returns?.hasCashFlows ? "cash-flow return" : "needs transactions";
   const subtype = assetSubtypeLabel(holding);
-  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge subtype-badge">{subtype}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong>{usdSecondary(holding.valueInBase) && <em className="usd-secondary">{usdSecondary(holding.valueInBase)}</em>}<small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Price</span><strong>{price}</strong><small>{priceDetail}</small></div><div className="holding-metric"><span>Tracked</span><strong>{trackedValue}</strong><small>{trackedDetail}</small></div><div className="holding-metric"><span>Invested</span><strong>{costKnown ? formatMoney(returns?.netInvested ?? 0, baseCurrency) : "-"}</strong><small>{costKnown ? "remaining cost basis" : "not provided"}</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{xirrDetail}</small></div><button className="detail-button" onClick={onDetails} aria-expanded={expanded}>{expanded ? "Hide" : "Details"}</button></div>;
+  return <div className="holding-row pro-row holding-analysis-row"><div className="holding-name-block"><strong title={holding.label}>{displayHoldingName(holding.label)}</strong><span>{holding.assetKind} · {holding.region} · {holding.provider} · {holding.asOfDate}</span></div><div className="holding-chips"><span className={`badge category-${holding.category}`}>{holding.category}</span><span className="badge subtype-badge">{subtype}</span><span className="badge muted-badge">{returns?.allocationPercent.toFixed(1) ?? "0.0"}%</span><span className="badge muted-badge">{holding.quantity === undefined ? "No qty" : formatNumber(holding.quantity)}</span></div><div className="holding-metric"><span>Value</span><strong>{value}</strong>{usdSecondary(holding.valueInBase) && <em className="usd-secondary">{usdSecondary(holding.valueInBase)}</em>}<small>{holding.currency === baseCurrency ? "base" : formatMoney(holding.value, holding.currency)}</small></div><div className="holding-metric"><span>Price</span><strong>{price}</strong><small>{priceDetail}</small></div><div className="holding-metric"><span>Tracked</span><strong>{trackedValue}</strong><small>{trackedDetail}</small></div><div className="holding-metric"><span>Invested</span><strong>{costKnown ? formatMoney(returns?.netInvested ?? 0, baseCurrency) : "-"}</strong><small>{costKnown ? "remaining cost basis" : "not provided"}</small></div><div className="holding-metric"><span>P/L</span><strong className={profitTone}>{returns?.profit === undefined ? "-" : formatMoney(returns.profit, baseCurrency)}</strong><small>{returns?.returnPercent === undefined ? "return unavailable" : returns.returnPercent.toFixed(1) + "% simple"}</small></div><div className="holding-metric"><span>XIRR</span><strong>{returns?.xirr === undefined || returns?.xirr === null ? "-" : returns.xirr.toFixed(2) + "%"}</strong><small>{xirrDetail}</small></div>{onDetails ? <button type="button" className="detail-button" onClick={onDetails} aria-expanded={expanded}>{expanded ? "Hide" : "Details"}</button> : <span className="detail-button summary-detail-button" aria-expanded={expanded}>{expanded ? "Hide" : "Details"}</span>}</div>;
 }
 
 function HoldingDetailDrawer({ backup, holding, returns, taxReport, goalProgress, currency, close, usdSecondary }: { backup: PortfolioBackup; holding: ReturnType<typeof calculatePortfolioInsights>["holdings"][number]; returns?: HoldingReturn; taxReport: ReturnType<typeof calculatePortfolioTaxReport>; goalProgress: GoalProgress[]; currency: string; close: () => void; usdSecondary: (value: number | undefined) => string | undefined }) {

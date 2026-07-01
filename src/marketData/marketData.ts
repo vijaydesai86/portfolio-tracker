@@ -275,7 +275,7 @@ function updateBalances(backup: PortfolioBackup, instrumentId: string, price: nu
   return {
     ...backup,
     manualBalances: backup.manualBalances.map((balance) => {
-      if (balance.instrumentId !== instrumentId || balance.quantity === undefined || balance.userModified) return balance;
+      if (balance.instrumentId !== instrumentId || balance.quantity === undefined) return balance;
       return {
         ...balance,
         value: roundMoney(balance.quantity * price),

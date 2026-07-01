@@ -140,6 +140,21 @@ it("parses historical mutual fund NAV and stock price responses", () => {
   ]);
 });
 
+it("refreshes user-edited market-linked balances while preserving manual metadata", () => {
+  const backup = createEmptyBackup("INR");
+  backup.instruments.push({ id: "inst_tst", name: "TST", type: "us_stock", symbol: "TST", currency: "USD", country: "US", category: "Equity", createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" });
+  backup.manualBalances.push({ id: "bal_tst", accountId: "acct", instrumentId: "inst_tst", label: "Example US Stock", category: "Equity", currency: "USD", value: 360, quantity: 12, price: 30, asOfDate: "2026-06-24", taperMode: "medium", notes: "user note", source: { type: "import", provider: "manual_positions" }, userModified: true, createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" });
+
+  const updated = applyMarketDataPayload(backup, {
+    stocks: [{ symbol: "TST", price: 44, currency: "USD", asOfDate: "2026-06-25", source: "test_live_quote" }],
+    navs: [],
+    fx: { pair: "USDINR", from: "USD", to: "INR", rate: 96, asOfDate: "2026-06-25", source: "test_latest_fx" },
+    errors: []
+  });
+
+  expect(updated.manualBalances[0]).toMatchObject({ value: 528, price: 44, asOfDate: "2026-06-25", taperMode: "medium", notes: "user note", userModified: true });
+});
+
 it("keeps market-linked balances refreshable after JSON backup restore", () => {
   const csv = `transaction_id,date,platform,asset_type,symbol_or_isin,name,type,quantity,price ($),USD-INR,fees,taxes,currency,category,notes
 1,15-02-2025,Fidelity,us_stock,TST,Example US Stock,buy,10,10,80,0,,USD,Equity,RSU1

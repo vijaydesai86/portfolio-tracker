@@ -7354,3 +7354,103 @@ textarea {
 .analytics-tabs button.active small {
   color: rgba(255, 255, 255, 0.88) !important;
 }
+
+/* Final active selector contrast guard: computed background-color must remain dark for browser contrast checks. */
+.app-shell-v2 .analytics-scope-control button.active,
+.app-shell-v2 .analytics-tabs button.active,
+.analytics-scope-control button.active,
+.analytics-tabs button.active,
+.app-shell-v2 .analytics-scope-control button.active:disabled,
+.app-shell-v2 .analytics-tabs button.active:disabled,
+.analytics-scope-control button.active:disabled,
+.analytics-tabs button.active:disabled {
+  background: #0f766e !important;
+  background-color: #0f766e !important;
+  background-image: none !important;
+  border-color: #0f766e !important;
+  color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+.app-shell-v2 .analytics-scope-control button.active strong,
+.app-shell-v2 .analytics-tabs button.active strong,
+.analytics-scope-control button.active strong,
+.analytics-tabs button.active strong,
+.app-shell-v2 .analytics-scope-control button.active em,
+.app-shell-v2 .analytics-tabs button.active em,
+.analytics-scope-control button.active em,
+.analytics-tabs button.active em {
+  color: #ffffff !important;
+}
+
+.app-shell-v2 .analytics-scope-control button.active span,
+.app-shell-v2 .analytics-scope-control button.active small,
+.app-shell-v2 .analytics-tabs button.active span,
+.app-shell-v2 .analytics-tabs button.active small,
+.analytics-scope-control button.active span,
+.analytics-scope-control button.active small,
+.analytics-tabs button.active span,
+.analytics-tabs button.active small {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Final selected analytics control contrast: selected tabs use the same green language as the sidebar. */
+.app-shell-v2 .analytics-scope-control button.active,
+.app-shell-v2 .analytics-tabs button.active,
+.analytics-scope-control button.active,
+.analytics-tabs button.active,
+.app-shell-v2 .analytics-scope-control button.active:disabled,
+.app-shell-v2 .analytics-tabs button.active:disabled,
+.analytics-scope-control button.active:disabled,
+.analytics-tabs button.active:disabled {
+  background: #0f766e !important;
+  background-color: #0f766e !important;
+  background-image: none !important;
+  border-color: #0f766e !important;
+  color: #ffffff !important;
+  opacity: 1 !important;
+  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.24) !important;
+}
+
+.app-shell-v2 .analytics-scope-control button.active strong,
+.app-shell-v2 .analytics-tabs button.active strong,
+.analytics-scope-control button.active strong,
+.analytics-tabs button.active strong,
+.app-shell-v2 .analytics-scope-control button.active em,
+.app-shell-v2 .analytics-tabs button.active em,
+.analytics-scope-control button.active em,
+.analytics-tabs button.active em {
+  color: #ffffff !important;
+}
+
+.app-shell-v2 .analytics-scope-control button.active span,
+.app-shell-v2 .analytics-scope-control button.active small,
+.app-shell-v2 .analytics-tabs button.active span,
+.app-shell-v2 .analytics-tabs button.active small,
+.analytics-scope-control button.active span,
+.analytics-scope-control button.active small,
+.analytics-tabs button.active span,
+.analytics-tabs button.active small {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* Native holding detail disclosure keeps details accessible and reliable across browsers. */
+.holding-detail-summary {
+  display: block;
+  list-style: none;
+  cursor: pointer;
+}
+
+.holding-detail-summary::-webkit-details-marker {
+  display: none;
+}
+
+.holding-detail-summary::marker {
+  content: "";
+}
+
+.summary-detail-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}

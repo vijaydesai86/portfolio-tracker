@@ -50,4 +50,32 @@ describe("portfolio reconciliation report", () => {
     expect(report.dataQuality.rows.map((row) => row.area)).toEqual(expect.arrayContaining(["Market data", "Cost basis", "XIRR coverage", "Valuation freshness"]));
   });
 
+  it("surfaces last market refresh diagnostics in the data-quality layer", () => {
+    const backup = createEmptyBackup("INR");
+    backup.settings.marketRefresh = {
+      refreshedAt: "2026-06-30T10:30:00.000Z",
+      navSnapshots: 9,
+      stockSnapshots: 12,
+      fxSnapshots: 3,
+      updatedValuations: 2,
+      warnings: ["MFapi scheme history failed for 9 scheme(s)."],
+      blockingErrors: []
+    };
+
+    const report = buildReconciliationReport(backup);
+
+    expect(report.refreshDiagnostics).toMatchObject({
+      refreshedAt: "2026-06-30T10:30:00.000Z",
+      navSnapshots: 9,
+      stockSnapshots: 12,
+      fxSnapshots: 3,
+      updatedValuations: 2,
+      warnings: ["MFapi scheme history failed for 9 scheme(s)."],
+      blockingErrors: []
+    });
+    expect(report.dataQuality.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ area: "Last refresh", status: "ok", score: 85, detail: expect.stringContaining("non-blocking history warning") })
+    ]));
+  });
+
 });
