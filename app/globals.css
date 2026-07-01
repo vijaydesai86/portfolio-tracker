@@ -7454,3 +7454,265 @@ textarea {
   align-items: center;
   justify-content: center;
 }
+
+
+/* Contract cleanup: shared drilldowns, import support matrix, and green selected controls. */
+.app-shell-v2 .analytics-scope-control button.active,
+.app-shell-v2 .analytics-tabs button.active,
+.app-shell-v2 [role="tablist"] button.active,
+.app-shell-v2 .goal-longevity-selector button.active {
+  border-color: #0f766e !important;
+  background: linear-gradient(180deg, #0f766e, #0e7490) !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.24) !important;
+}
+
+.app-shell-v2 .analytics-scope-control button.active strong,
+.app-shell-v2 .analytics-tabs button.active strong,
+.app-shell-v2 [role="tablist"] button.active strong,
+.app-shell-v2 .goal-longevity-selector button.active strong,
+.app-shell-v2 .analytics-scope-control button.active span,
+.app-shell-v2 .analytics-tabs button.active span,
+.app-shell-v2 [role="tablist"] button.active span,
+.app-shell-v2 .goal-longevity-selector button.active span,
+.app-shell-v2 .analytics-scope-control button.active small,
+.app-shell-v2 .analytics-tabs button.active small,
+.app-shell-v2 [role="tablist"] button.active small,
+.app-shell-v2 .goal-longevity-selector button.active small {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.drilldown-panel {
+  grid-column: 1 / -1;
+  border: 1px solid #d7e5ec;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.drilldown-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+  color: #0f172a;
+  font-weight: 900;
+}
+
+.drilldown-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.drilldown-panel summary::after {
+  content: "⌄";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid #bfd4dd;
+  color: #0f766e;
+  background: #ffffff;
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.drilldown-panel[open] summary::after {
+  transform: rotate(180deg);
+  background: #ecfeff;
+}
+
+.drilldown-panel summary small {
+  margin-left: auto;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.drilldown-body {
+  padding: 0 14px 14px;
+  min-width: 0;
+}
+
+.drilldown-body > .table-wrap,
+.drilldown-body .table-wrap {
+  max-height: min(58vh, 560px);
+  overflow: auto;
+  border: 1px solid #e2edf2;
+  background: #ffffff;
+}
+
+.supported-imports-card {
+  min-width: 0;
+}
+
+.support-matrix-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 10px;
+  margin: 10px 0 12px;
+}
+
+.support-matrix-list {
+  display: grid;
+  gap: 9px;
+}
+
+.support-matrix-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(72px, 0.42fr) auto;
+  gap: 10px 12px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid #e1edf2;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.support-matrix-row div,
+.support-matrix-row small {
+  min-width: 0;
+}
+
+.support-matrix-row div strong {
+  display: block;
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.support-matrix-row div span,
+.support-matrix-row em,
+.support-matrix-row small {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.support-matrix-row small {
+  grid-column: 1 / -1;
+}
+
+.import-detection-panel.needs-review {
+  border-color: #f2c58a;
+  background: #fffaf0;
+}
+
+.unsupported-import-guidance {
+  display: grid;
+  gap: 4px;
+  border-color: #f2c58a;
+  background: #fffaf0;
+}
+
+.unsupported-import-guidance strong {
+  color: #92400e;
+}
+
+.unsupported-import-guidance span {
+  color: #334155;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.expense-dashboard-v2 .expense-summary-strip,
+.holding-command-strip,
+.sub-analytics-strip {
+  align-items: stretch;
+}
+
+.expense-dashboard-v2 .expense-hero-note {
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+  .support-matrix-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .support-matrix-row .status-pill {
+    justify-self: start;
+  }
+
+  .drilldown-panel summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .drilldown-panel summary small {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .table-wrap table {
+    min-width: 760px;
+  }
+
+  .table-wrap th:first-child,
+  .table-wrap td:first-child {
+    min-width: 160px;
+    max-width: 260px;
+  }
+}
+
+@media (max-width: 560px) {
+  .chart-card,
+  .card,
+  .drilldown-panel {
+    border-radius: 10px;
+  }
+
+  .native-line-chart {
+    min-height: 260px;
+  }
+
+  .native-line-tooltip {
+    max-width: min(260px, 88vw);
+  }
+
+  .drilldown-body {
+    padding: 0 10px 10px;
+  }
+}
+
+
+
+/* Hard final guard for Selenium contrast: active selector button background-color itself must be green. */
+html body .app-shell-v2 .analytics-scope-control button.active,
+html body .app-shell-v2 .analytics-tabs button.active,
+html body .app-shell-v2 .goal-longevity-selector button.active,
+html body .app-shell-v2 [role="tablist"] button.active {
+  background: #0f766e !important;
+  background-color: #0f766e !important;
+  background-image: none !important;
+  color: #ffffff !important;
+  opacity: 1 !important;
+  border-color: #0f766e !important;
+}
+
+html body .app-shell-v2 .analytics-scope-control button.active strong,
+html body .app-shell-v2 .analytics-scope-control button.active span,
+html body .app-shell-v2 .analytics-tabs button.active strong,
+html body .app-shell-v2 .analytics-tabs button.active span,
+html body .app-shell-v2 .goal-longevity-selector button.active strong,
+html body .app-shell-v2 .goal-longevity-selector button.active span,
+html body .app-shell-v2 [role="tablist"] button.active strong,
+html body .app-shell-v2 [role="tablist"] button.active span {
+  color: #ffffff !important;
+  background-color: transparent !important;
+}
