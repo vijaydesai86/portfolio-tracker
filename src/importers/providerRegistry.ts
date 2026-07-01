@@ -83,10 +83,10 @@ export const providerImportSpecs: ProviderImportSpec[] = [
     id: "groww_stock_orders",
     label: "Groww stock order history CSV",
     status: "implemented",
-    nativeInputTypes: ["csv"],
+    nativeInputTypes: ["csv", "xlsx"],
     assetTypes: ["indian_stock"],
     categories: ["Equity"],
-    implementation: "Groww executed stock order history parser is implemented for Indian stock buy/sell rows. Open holdings derive from net quantity and market refresh updates current prices."
+    implementation: "Groww executed stock order history CSV/XLSX parser is implemented for Indian stock buy/sell rows. Open holdings derive from net quantity and market refresh updates current prices."
   },
   {
     id: "epfo_passbook",

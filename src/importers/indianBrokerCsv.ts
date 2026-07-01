@@ -1,3 +1,4 @@
+import readXlsxFile from "read-excel-file/browser";
 import Papa from "papaparse";
 import { slugId, stableHash } from "@/src/domain/hash";
 import type { Account, Instrument, PriceSnapshot, Transaction } from "@/src/schema/backup";
@@ -11,6 +12,8 @@ export type IndianBrokerParseOptions = {
 };
 
 type CsvRow = Record<string, string | undefined>;
+type WorkbookCell = string | number | boolean | Date | null | undefined;
+type WorkbookRow = WorkbookCell[];
 
 type NormalizedTrade = {
   provider: IndianBrokerProvider;
@@ -39,6 +42,23 @@ export function parseGrowwStockOrdersCsv(csv: string, options: IndianBrokerParse
   const body = headerOffset >= 0 ? csv.split(/\r?\n/).slice(headerOffset).join("\n") : csv;
   const rows = parseDelimitedRows(body);
   return normalizeTrades(rows.map((row, index) => normalizeGrowwRow(row, index + 1 + Math.max(0, headerOffset))).filter(Boolean) as NormalizedTrade[], options, "groww_stock_orders");
+}
+
+export async function parseGrowwStockOrdersWorkbook(file: File, options: IndianBrokerParseOptions): Promise<ManualCsvResult> {
+  const workbook = await readXlsxFile(file);
+  return parseGrowwStockOrderRows(normalizeWorkbookRows(workbook as unknown), options);
+}
+
+export function parseGrowwStockOrderRows(rows: WorkbookRow[], options: IndianBrokerParseOptions): ManualCsvResult {
+  const headerOffset = findGrowwHeaderOffsetInRows(rows);
+  if (headerOffset < 0) {
+    return { accounts: [], instruments: [], transactions: [], manualBalances: [], priceSnapshots: [], errors: [{ row: 1, message: "Missing Groww stock order history header row." }] };
+  }
+  const headers = rows[headerOffset].map((cell) => normalizeHeader(String(cell ?? "")));
+  const csvRows: CsvRow[] = rows.slice(headerOffset + 1)
+    .filter((row) => row.some((cell) => String(cell ?? "").trim() !== ""))
+    .map((row) => Object.fromEntries(headers.map((header, index) => [header, cellToString(row[index])])));
+  return normalizeTrades(csvRows.map((row, index) => normalizeGrowwRow(row, headerOffset + index + 2)).filter(Boolean) as NormalizedTrade[], options, "groww_stock_orders");
 }
 
 function normalizeTrades(trades: NormalizedTrade[], options: IndianBrokerParseOptions, provider: IndianBrokerProvider): ManualCsvResult {
@@ -202,6 +222,28 @@ function findGrowwHeaderOffset(csv: string): number {
     const normalized = line.toLowerCase();
     return normalized.includes("stock name") && normalized.includes("symbol") && normalized.includes("execution date");
   });
+}
+
+function findGrowwHeaderOffsetInRows(rows: WorkbookRow[]): number {
+  return rows.findIndex((row) => {
+    const normalized = row.map((cell) => String(cell ?? "").trim().toLowerCase()).join(" ");
+    return normalized.includes("stock name") && normalized.includes("symbol") && normalized.includes("execution date");
+  });
+}
+
+function normalizeWorkbookRows(input: unknown): WorkbookRow[] {
+  if (Array.isArray(input) && input.length === 1 && isSheetData(input[0])) return input[0].data as WorkbookRow[];
+  if (Array.isArray(input)) return input as WorkbookRow[];
+  return [];
+}
+
+function isSheetData(value: unknown): value is { data: WorkbookRow[] } {
+  return Boolean(value && typeof value === "object" && Array.isArray((value as { data?: unknown }).data));
+}
+
+function cellToString(value: WorkbookCell): string {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value ?? "").trim();
 }
 
 function pick(row: CsvRow, key: string): string {

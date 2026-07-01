@@ -45,6 +45,10 @@ export function detectImportSource(input: ImportDetectionInput): ImportDetection
     return detection("groww_stock_orders", "csv", "high", "Matches Groww executed stock order history headers.");
   }
 
+  if (extension === "xlsx" && isGrowwStockOrdersWorkbookName(fileName)) {
+    return detection("groww_stock_orders", "xlsx", "high", "Matches Groww stock order history XLSX filename.");
+  }
+
   if (extension === "csv" && hasCsvHeaders(text, manualTransactionHeaders) && hasAnyCsvHeader(text, ["symbol_or_isin", "symbol", "isin", "name", "asset_name"])) {
     return detection("manual_csv", "csv", "high", "Matches manual transaction CSV headers.");
   }
@@ -117,6 +121,10 @@ function isGrowwStockOrdersCsv(text: string): boolean {
     const headers = normalizedDelimitedHeaders(line);
     return ["stock_name", "symbol", "isin", "type", "quantity", "value", "execution_date_and_time", "order_status"].every((header) => headers.includes(header));
   });
+}
+
+function isGrowwStockOrdersWorkbookName(fileName: string): boolean {
+  return fileName.includes("stocks_order_history") || (fileName.includes("groww") && fileName.includes("stock"));
 }
 
 function normalizedDelimitedHeaders(line: string): string[] {

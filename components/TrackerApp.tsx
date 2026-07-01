@@ -25,7 +25,7 @@ import { applyCanonicalEpfoImport, buildCanonicalEpfoImport, parseEpfoPassbookTe
 import { applyCanonicalNpsImport, buildCanonicalNpsImport, parseNpsCsv, type NpsCanonicalImport, type NpsParseResult } from "@/src/importers/npsStatement";
 import { commitManualCsvImport, commitParsedImport, previewManualCsvImport, type ManualImportPreview } from "@/src/importers/importPipeline";
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
-import { parseGrowwStockOrdersCsv, parseZerodhaTradebookCsv } from "@/src/importers/indianBrokerCsv";
+import { parseGrowwStockOrdersCsv, parseGrowwStockOrdersWorkbook, parseZerodhaTradebookCsv } from "@/src/importers/indianBrokerCsv";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
 import { createEmptyBackup, parseBackup, type AssetCategory, type Goal, type GoalExpense, type ImportRun, type ManualBalance, type PortfolioBackup, type TaperMode, type Transaction } from "@/src/schema/backup";
@@ -774,7 +774,7 @@ export function TrackerApp() {
     } else if (detection.providerId === "manual_csv" && detection.nativeInputType === "csv") {
       setStatus(`${detection.label}: parse the manual CSV in browser.`);
     } else if (detection.providerId === "zerodha_tradebook" || detection.providerId === "groww_stock_orders") {
-      setStatus(`${detection.label}: parse and commit the broker CSV in browser.`);
+      setStatus(`${detection.label}: parse and commit the broker file in browser.`);
     } else if (detection.providerId === "indmoney_export") {
       setStatus(`${detection.label}: parse the XLSX ledger in browser.`);
     } else if (detection.providerId === "epfo_passbook") {
@@ -849,11 +849,13 @@ export function TrackerApp() {
 
     try {
       const importId = nativeDetection.providerId.replace(/_/g, "-") + "_" + Date.now();
-      const text = await nativeFile.text();
-      const parsed = nativeDetection.providerId === "zerodha_tradebook"
-        ? parseZerodhaTradebookCsv(text, { importId })
-        : parseGrowwStockOrdersCsv(text, { importId });
-      const result = commitParsedImport(backup, parsed, { importId, fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name, replaceImportId: replaceImportId || undefined, provider: nativeDetection.providerId, mimeType: "text/csv" });
+      const parsed = nativeDetection.providerId === "groww_stock_orders" && nativeDetection.nativeInputType === "xlsx"
+        ? await parseGrowwStockOrdersWorkbook(nativeFile, { importId })
+        : nativeDetection.providerId === "zerodha_tradebook"
+          ? parseZerodhaTradebookCsv(await nativeFile.text(), { importId })
+          : parseGrowwStockOrdersCsv(await nativeFile.text(), { importId });
+      const mimeType = nativeDetection.nativeInputType === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv";
+      const result = commitParsedImport(backup, parsed, { importId, fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name, replaceImportId: replaceImportId || undefined, provider: nativeDetection.providerId, mimeType });
       setManualImportPreview(null);
       setBackup(result.backup);
       setErrors(result.errors.map((error) => "Row " + error.row + ": " + error.message));
@@ -865,8 +867,8 @@ export function TrackerApp() {
       }
       if (result.errors.length === 0) setReplaceImportId("");
     } catch (error) {
-      setErrors([error instanceof Error ? error.message : "Unable to parse broker CSV file"]);
-      setStatus("Indian broker CSV import failed.");
+      setErrors([error instanceof Error ? error.message : "Unable to parse broker file"]);
+      setStatus("Indian broker import failed.");
     }
   }
 
@@ -2651,7 +2653,7 @@ function ImportDetectionPanel({ detection, fileCount }: { detection: ImportDetec
 
 function UnsupportedImportGuidance() {
   const accepted = providerImportSpecs.filter((spec) => spec.status === "implemented" || spec.status === "parser_implemented").map((spec) => spec.label).join("; ");
-  return <div className="notice unsupported-import-guidance"><strong>Unsupported file format</strong><span>Upload a known supported file or use a manual CSV template. Accepted now: {accepted}. Provider-specific formats such as Kuvera and bank FD statements need verified sample fixtures before they can be parsed safely. Zerodha and Groww stock CSVs are supported when they match the known tradebook/order-history layouts.</span></div>;
+  return <div className="notice unsupported-import-guidance"><strong>Unsupported file format</strong><span>Upload a known supported file or use a manual CSV template. Accepted now: {accepted}. Provider-specific formats such as Kuvera and bank FD statements need verified sample fixtures before they can be parsed safely. Zerodha CSVs and Groww CSV/XLSX stock files are supported when they match the known tradebook/order-history layouts.</span></div>;
 }
 
 function SupportedImportsMatrix() {

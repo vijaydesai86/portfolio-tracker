@@ -100,6 +100,7 @@ describe("native import source detection", () => {
   it("detects implemented Indian broker stock CSVs", () => {
     expect(detectImportSource({ fileName: "zerodha.csv", textSample: "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time" })).toMatchObject({ providerId: "zerodha_tradebook", status: "implemented" });
     expect(detectImportSource({ fileName: "groww.csv", textSample: "Stock name,Symbol,ISIN,Type,Quantity,Value,Exchange,Exchange Order Id,Execution date and time,Order status" })).toMatchObject({ providerId: "groww_stock_orders", status: "implemented" });
+    expect(detectImportSource({ fileName: "Stocks_Order_History_8689599389_01-04-2025_30-06-2026.xlsx", textSample: "" })).toMatchObject({ providerId: "groww_stock_orders", nativeInputType: "xlsx", status: "implemented" });
   });
 
   it("returns an explicit unsupported detection for unknown files", () => {
