@@ -56,6 +56,11 @@ export function commitManualCsvImport(backup: PortfolioBackup, csv: string, opti
   return commitManualParsedImport(backup, parsed, { ...options, now, provider: "manual_csv", mimeType: "text/csv" });
 }
 
+export function commitParsedImport(backup: PortfolioBackup, parsed: ManualCsvResult, options: CommitOptions & { provider: string; mimeType?: string }): CommitResult {
+  const now = options.now ?? new Date().toISOString();
+  return commitManualParsedImport(backup, parsed, { ...options, now, provider: options.provider, mimeType: options.mimeType ?? "text/csv" });
+}
+
 function commitManualParsedImport(backup: PortfolioBackup, parsed: ManualCsvResult, options: CommitOptions & { now: string; provider: string; mimeType: string }): CommitResult {
   const now = options.now;
   const next: PortfolioBackup = cloneBackup(backup);
@@ -65,11 +70,11 @@ function commitManualParsedImport(backup: PortfolioBackup, parsed: ManualCsvResu
   if (options.replaceImportId) {
     const staleBalanceIds = new Set(
       next.manualBalances
-        .filter((balance) => balance.source.importId === options.replaceImportId && !incomingBalanceHashes.has(balance.source.sourceRecordHash))
+        .filter((balance) => balance.source.provider !== "manual_positions" && balance.source.importId === options.replaceImportId && !incomingBalanceHashes.has(balance.source.sourceRecordHash))
         .map((balance) => balance.id)
     );
     next.transactions = next.transactions.filter((tx) => tx.source.importId !== options.replaceImportId || incomingTransactionHashes.has(tx.source.sourceRecordHash));
-    next.manualBalances = next.manualBalances.filter((balance) => balance.source.importId !== options.replaceImportId || incomingBalanceHashes.has(balance.source.sourceRecordHash));
+    next.manualBalances = next.manualBalances.filter((balance) => balance.source.provider === "manual_positions" || balance.source.importId !== options.replaceImportId || incomingBalanceHashes.has(balance.source.sourceRecordHash));
     next.goalMappings = next.goalMappings.filter((mapping) => !mapping.manualBalanceId || !staleBalanceIds.has(mapping.manualBalanceId));
     next.imports = next.imports.filter((run) => run.id !== options.replaceImportId);
     next.sourceDocuments = next.sourceDocuments.filter((doc) => doc.importId !== options.replaceImportId);

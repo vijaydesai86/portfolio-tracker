@@ -10,6 +10,8 @@ describe("native import source detection", () => {
       ["cas_pdf", "implemented"],
       ["fidelity_csv", "detected_only"],
       ["indmoney_export", "implemented"],
+      ["zerodha_tradebook", "implemented"],
+      ["groww_stock_orders", "implemented"],
       ["epfo_passbook", "implemented"],
       ["nps_statement", "parser_implemented"],
       ["bank_small_savings", "detected_only"]
@@ -93,6 +95,11 @@ describe("native import source detection", () => {
 
   it("detects EPFO text exports by content even when the filename is arbitrary", () => {
     expect(detectImportSource({ fileName: "download.html", textSample: "Member Passbook EPFO Closing Balance as on" })).toMatchObject({ providerId: "epfo_passbook", nativeInputType: "html" });
+  });
+
+  it("detects implemented Indian broker stock CSVs", () => {
+    expect(detectImportSource({ fileName: "zerodha.csv", textSample: "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time" })).toMatchObject({ providerId: "zerodha_tradebook", status: "implemented" });
+    expect(detectImportSource({ fileName: "groww.csv", textSample: "Stock name,Symbol,ISIN,Type,Quantity,Value,Exchange,Exchange Order Id,Execution date and time,Order status" })).toMatchObject({ providerId: "groww_stock_orders", status: "implemented" });
   });
 
   it("returns an explicit unsupported detection for unknown files", () => {

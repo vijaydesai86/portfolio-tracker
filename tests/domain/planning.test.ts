@@ -3,6 +3,7 @@ import { createEmptyBackup, type PortfolioBackup } from "@/src/schema/backup";
 import { buildGoal, calculateGoalProgress, createGoalMapping } from "@/src/domain/goalAnalytics";
 import { parseGoalExpenseCsv, mergeGoalExpenses } from "@/src/domain/goalExpenses";
 import {
+  calculateCashFlowPlan,
   calculateGoalDrawdowns,
   calculateGoalRebalancingPlans,
   calculateIncomeProjection,
@@ -92,6 +93,71 @@ describe("planning analytics", () => {
     expect(plan.currentValue).toBe(150000);
     expect(equity?.action).toBe("reduce");
     expect(equity?.actionAmount).toBe(15000);
+  });
+
+  it("models manual monthly cash-flow contributions without changing goal corpus", () => {
+    const base = backupFixture();
+    const backup = updatePlanningSettings(base, {
+      cashFlow: {
+        monthlySurplus: 50000,
+        annualStepUpPercent: 5,
+        contributionYears: 3,
+        startDate: "2026-07-01",
+        deploymentAllocation: { Equity: 100, Debt: 0, Gold: 0, Others: 0, Cash: 0 },
+        goalAllocations: { [base.goals[0].id]: 150 }
+      }
+    });
+    const progress = calculateGoalProgress(backup);
+    const plan = calculateCashFlowPlan(progress, getPlanningSettings(backup), new Date("2026-07-01T00:00:00.000Z"));
+    const row = plan.rows[0];
+
+    expect(plan.monthlySurplus).toBe(50000);
+    expect(plan.allocatedMonthlyTotal).toBe(50000);
+    expect(plan.unallocatedMonthly).toBe(0);
+    expect(plan.contributionYears).toBe(3);
+    expect(row.allocatedMonthly).toBe(50000);
+    expect(row.projectedWithoutContributions).toBe(progress[0].projectedValue);
+    expect(row.projectedWithContributions).toBeGreaterThan(row.projectedWithoutContributions);
+    const fullWindowBackup = updatePlanningSettings(base, {
+      cashFlow: {
+        monthlySurplus: 50000,
+        annualStepUpPercent: 5,
+        contributionYears: 0,
+        startDate: "2026-07-01",
+        deploymentAllocation: { Equity: 100, Debt: 0, Gold: 0, Others: 0, Cash: 0 },
+        goalAllocations: { [base.goals[0].id]: 100 }
+      }
+    });
+    const fullWindowPlan = calculateCashFlowPlan(calculateGoalProgress(fullWindowBackup), getPlanningSettings(fullWindowBackup), new Date("2026-07-01T00:00:00.000Z"));
+
+    expect(row.neededMonthly).toBeGreaterThan(0);
+    expect(row.neededMonthly).toBeGreaterThan(fullWindowPlan.rows[0].neededMonthly);
+  });
+
+  it("starts monthly cash-flow projection from next month when current month is already invested", () => {
+    const base = backupFixture();
+    const commonCashFlow = {
+      monthlySurplus: 50000,
+      annualStepUpPercent: 0,
+      contributionYears: 0,
+      startDate: "2026-01-01",
+      deploymentAllocation: { Equity: 100, Debt: 0, Gold: 0, Others: 0, Cash: 0 },
+      goalAllocations: { [base.goals[0].id]: 100 }
+    };
+    const pendingPlan = calculateCashFlowPlan(
+      calculateGoalProgress(updatePlanningSettings(base, { cashFlow: { ...commonCashFlow, currentMonthInvestedDone: false } })),
+      getPlanningSettings(updatePlanningSettings(base, { cashFlow: { ...commonCashFlow, currentMonthInvestedDone: false } })),
+      new Date("2026-07-01T00:00:00.000Z")
+    );
+    const donePlan = calculateCashFlowPlan(
+      calculateGoalProgress(updatePlanningSettings(base, { cashFlow: { ...commonCashFlow, currentMonthInvestedDone: true } })),
+      getPlanningSettings(updatePlanningSettings(base, { cashFlow: { ...commonCashFlow, currentMonthInvestedDone: true } })),
+      new Date("2026-07-01T00:00:00.000Z")
+    );
+
+    expect(pendingPlan.startDate).toBe("2026-07-01");
+    expect(donePlan.startDate).toBe("2026-08-01");
+    expect(donePlan.rows[0].contributionFutureValue).toBeLessThan(pendingPlan.rows[0].contributionFutureValue);
   });
 
   it("projects portfolio income separately from capital gains", () => {

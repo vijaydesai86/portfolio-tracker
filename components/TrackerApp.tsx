@@ -16,15 +16,16 @@ import { calculatePortfolioTaxReport, getTaxProfile, updateTaxProfile, type TaxP
 import { formatUsdEquivalent, getDisplayCurrencySettings, updateDisplayCurrencySettings, type DisplayCurrencySettings } from "@/src/domain/displayCurrency";
 import { taperPresets } from "@/src/domain/tapering";
 import { buildReconciliationReport } from "@/src/domain/reconciliation";
-import { calculateGoalDrawdowns, calculateGoalRebalancingPlans, calculateIncomeProjection, calculatePerformanceAttribution, calculateRebalancingPlan, calculateScenarioPlan, compareSnapshots, getPlanningSettings, updatePlanningSettings, type GoalDrawdownReport, type GoalRebalancePlan, type IncomeProjection, type PerformanceAttribution, type PlanningSettings, type PlanningSettingsPatch, type RebalanceRow, type ScenarioPlan, type SnapshotComparison } from "@/src/domain/planning";
+import { calculateCashFlowPlan, calculateGoalDrawdowns, calculateGoalRebalancingPlans, calculateIncomeProjection, calculatePerformanceAttribution, calculateRebalancingPlan, calculateScenarioPlan, compareSnapshots, getPlanningSettings, updatePlanningSettings, type CashFlowPlan, type GoalDrawdownReport, type GoalRebalancePlan, type IncomeProjection, type PerformanceAttribution, type PlanningSettings, type PlanningSettingsPatch, type RebalanceRow, type ScenarioPlan, type SnapshotComparison } from "@/src/domain/planning";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
 import { applyCanonicalCasImport, buildCanonicalCasImport, parseCasText, type CasCanonicalImport, type CasParseResult } from "@/src/importers/casText";
 import { applyCanonicalIndMoneyImport, buildCanonicalIndMoneyImport, parseIndMoneyWorkbook, type IndMoneyCanonicalImport, type IndMoneyParseResult } from "@/src/importers/indmoneyXlsx";
 import { applyCanonicalEpfoImport, buildCanonicalEpfoImport, parseEpfoPassbookText, type EpfoCanonicalImport, type EpfoPassbookParseResult } from "@/src/importers/epfoPassbook";
 import { applyCanonicalNpsImport, buildCanonicalNpsImport, parseNpsCsv, type NpsCanonicalImport, type NpsParseResult } from "@/src/importers/npsStatement";
-import { commitManualCsvImport, previewManualCsvImport, type ManualImportPreview } from "@/src/importers/importPipeline";
+import { commitManualCsvImport, commitParsedImport, previewManualCsvImport, type ManualImportPreview } from "@/src/importers/importPipeline";
 import { providerImportSpecs } from "@/src/importers/providerRegistry";
+import { parseGrowwStockOrdersCsv, parseZerodhaTradebookCsv } from "@/src/importers/indianBrokerCsv";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
 import { createEmptyBackup, parseBackup, type AssetCategory, type Goal, type GoalExpense, type ImportRun, type ManualBalance, type PortfolioBackup, type TaperMode, type Transaction } from "@/src/schema/backup";
@@ -524,6 +525,7 @@ export function TrackerApp() {
   const goalRebalancingPlans = useMemo(() => calculateGoalRebalancingPlans(goalProgress, planningSettings), [goalProgress, planningSettings]);
   const incomeProjection = useMemo(() => calculateIncomeProjection(backup), [backup]);
   const goalDrawdowns = useMemo(() => calculateGoalDrawdowns(goalProgress, planningSettings), [goalProgress, planningSettings]);
+  const cashFlowPlan = useMemo(() => calculateCashFlowPlan(goalProgress, planningSettings), [goalProgress, planningSettings]);
   const attribution = useMemo(() => calculatePerformanceAttribution(backup), [backup]);
   const scopedAnalytics = useMemo(() => buildScopedAnalytics({ backup, scope: analyticsScope, summary, insights, performance, holdingReturns, goalProgress: analyticsScope === "goals-combined" ? combinedGoalProgress : goalProgress, goalSummary }), [analyticsScope, backup, combinedGoalProgress, goalProgress, goalSummary, holdingReturns, insights, performance, summary]);
   const scopedPerformance = scopedAnalytics.performance;
@@ -771,6 +773,8 @@ export function TrackerApp() {
       setStatus(`${detection.label}: enter the PDF password and parse in browser.`);
     } else if (detection.providerId === "manual_csv" && detection.nativeInputType === "csv") {
       setStatus(`${detection.label}: parse the manual CSV in browser.`);
+    } else if (detection.providerId === "zerodha_tradebook" || detection.providerId === "groww_stock_orders") {
+      setStatus(`${detection.label}: parse and commit the broker CSV in browser.`);
     } else if (detection.providerId === "indmoney_export") {
       setStatus(`${detection.label}: parse the XLSX ledger in browser.`);
     } else if (detection.providerId === "epfo_passbook") {
@@ -830,6 +834,39 @@ export function TrackerApp() {
     } catch (error) {
       setErrors([error instanceof Error ? error.message : "Unable to parse manual portfolio file"]);
       setStatus("Manual portfolio import failed.");
+    }
+  }
+
+  async function parseIndianBrokerCsvInBrowser() {
+    if (blockIfDraftEditing("parsing Indian broker CSV files")) return;
+    const nativeFile = nativeFiles[0];
+    if (!nativeFile || !nativeDetection || (nativeDetection.providerId !== "zerodha_tradebook" && nativeDetection.providerId !== "groww_stock_orders")) {
+      setErrors(["Select a supported Zerodha or Groww CSV first."]);
+      return;
+    }
+    setErrors([]);
+    setStatus("Parsing " + nativeDetection.label + " in browser...");
+
+    try {
+      const importId = nativeDetection.providerId.replace(/_/g, "-") + "_" + Date.now();
+      const text = await nativeFile.text();
+      const parsed = nativeDetection.providerId === "zerodha_tradebook"
+        ? parseZerodhaTradebookCsv(text, { importId })
+        : parseGrowwStockOrdersCsv(text, { importId });
+      const result = commitParsedImport(backup, parsed, { importId, fileName: nativeFile.name, label: importLabel.trim() || nativeFile.name, replaceImportId: replaceImportId || undefined, provider: nativeDetection.providerId, mimeType: "text/csv" });
+      setManualImportPreview(null);
+      setBackup(result.backup);
+      setErrors(result.errors.map((error) => "Row " + error.row + ": " + error.message));
+      const message = (replaceImportId ? nativeDetection.label + " replaced" : nativeDetection.label + " committed") + ": " + result.addedTransactions + " transaction(s), " + result.addedBalances + " holding(s), " + result.addedPrices + " price row(s) added; " + result.skippedDuplicates + " duplicate(s) skipped.";
+      if (result.errors.length === 0 && shouldRefreshAfterImport(result.backup, result.addedTransactions)) {
+        await refreshMarketDataFor(result.backup, message);
+      } else {
+        setStatus(message);
+      }
+      if (result.errors.length === 0) setReplaceImportId("");
+    } catch (error) {
+      setErrors([error instanceof Error ? error.message : "Unable to parse broker CSV file"]);
+      setStatus("Indian broker CSV import failed.");
     }
   }
 
@@ -1751,13 +1788,13 @@ export function TrackerApp() {
 
         {view === "goal-longevity" && <GoalLongevityView goalDrawdowns={goalDrawdowns} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
 
-        {view === "planning" && <PlanningView backup={backup} settings={planningSettings} scenario={scenarioPlan} rebalancing={rebalancingPlan} goalRebalancing={goalRebalancingPlans} incomeProjection={incomeProjection} attribution={attribution} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
+        {view === "planning" && <PlanningView backup={backup} settings={planningSettings} scenario={scenarioPlan} rebalancing={rebalancingPlan} goalRebalancing={goalRebalancingPlans} cashFlowPlan={cashFlowPlan} incomeProjection={incomeProjection} attribution={attribution} currency={backup.baseCurrency} usdSecondary={usdSecondary} />}
 
         {view === "snapshots" && <SnapshotsView {...{ backup, snapshotName, setSnapshotName, snapshotNotes, setSnapshotNotes, selectedSnapshotId, setSelectedSnapshotId, snapshotHistory, takePortfolioSnapshot, deletePortfolioSnapshot }} />}
 
         {view === "add-entry" && <AddEntryView {...{ backup, entryHoldingId, setEntryHoldingId, entryActionId, setEntryActionId, entryDate, setEntryDate, entryAmount, setEntryAmount, entryQuantity, setEntryQuantity, entryPrice, setEntryPrice, entryFees, setEntryFees, entryTaxes, setEntryTaxes, entryCurrentValue, setEntryCurrentValue, entryInvestedAmount, setEntryInvestedAmount, entryNotes, setEntryNotes, addManualEntryFromForm, goalName, setGoalName, goalType, setGoalType, goalMonthlyExpense, setGoalMonthlyExpense, goalInflation, setGoalInflation, goalTargetYear, setGoalTargetYear, goalMultiplier, setGoalMultiplier, goalEquityReturn, setGoalEquityReturn, goalDebtReturn, setGoalDebtReturn, goalGoldReturn, setGoalGoldReturn, goalCashReturn, setGoalCashReturn, goalOtherReturn, setGoalOtherReturn, addGoalFromForm, applyGoalPreset }} />}
 
-        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, manualImportPreview, previewManualCsv, importCsv, importLabel, setImportLabel, replaceImportId, setReplaceImportId, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText, goalExpenseCsv, setGoalExpenseCsv, goalExpenseGoalId: goalExpenseGoalId || backup.goals[0]?.id || "", setGoalExpenseGoalId, goalExpenseBaseDate, setGoalExpenseBaseDate, importGoalExpensesFromText, importGoalExpensesFromFile, editSessionActive }} />}
+        {view === "imports" && <ImportsView {...{ backup, csv, setCsv, manualImportPreview, previewManualCsv, importCsv, importLabel, setImportLabel, replaceImportId, setReplaceImportId, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndianBrokerCsvInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText, goalExpenseCsv, setGoalExpenseCsv, goalExpenseGoalId: goalExpenseGoalId || backup.goals[0]?.id || "", setGoalExpenseGoalId, goalExpenseBaseDate, setGoalExpenseBaseDate, importGoalExpensesFromText, importGoalExpensesFromFile, editSessionActive }} />}
 
         {view === "data" && <DataAuditView report={reconciliationReport} taxReport={taxReport} currency={backup.baseCurrency} />}
 
@@ -1813,7 +1850,7 @@ function GoalLongevityView({ goalDrawdowns, currency, usdSecondary }: { goalDraw
   );
 }
 
-function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing, incomeProjection, attribution, currency, usdSecondary }: { backup: PortfolioBackup; settings: PlanningSettings; scenario: ScenarioPlan; rebalancing: RebalanceRow[]; goalRebalancing: GoalRebalancePlan[]; incomeProjection: IncomeProjection; attribution: PerformanceAttribution; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing, cashFlowPlan, incomeProjection, attribution, currency, usdSecondary }: { backup: PortfolioBackup; settings: PlanningSettings; scenario: ScenarioPlan; rebalancing: RebalanceRow[]; goalRebalancing: GoalRebalancePlan[]; cashFlowPlan: CashFlowPlan; incomeProjection: IncomeProjection; attribution: PerformanceAttribution; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
   const largestRebalance = [...rebalancing].sort((a, b) => Math.abs(b.driftValue) - Math.abs(a.driftValue))[0];
   return (
     <section className="grid planning-workspace">
@@ -1845,6 +1882,7 @@ function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing
           <GoalRebalancingPanel plans={goalRebalancing} currency={currency} />
         </div>
 
+        <CashFlowPlanCard plan={cashFlowPlan} currency={currency} usdSecondary={usdSecondary} />
         <ChartCard title="Performance Attribution"><AttributionBridge attribution={attribution} currency={currency} /></ChartCard>
         <IncomeProjectionCard projection={incomeProjection} currency={currency} usdSecondary={usdSecondary} />
       </div>
@@ -1852,13 +1890,16 @@ function PlanningView({ backup, settings, scenario, rebalancing, goalRebalancing
   );
 }
 
-function PlanningSettingsDraftEditor({ settings, onApply, mode }: { settings: PlanningSettings; onApply: (patch: PlanningSettingsPatch) => void; mode: "scenario" | "targets" | "all" }) {
+function PlanningSettingsDraftEditor({ settings, goals = [], onApply, mode }: { settings: PlanningSettings; goals?: Goal[]; onApply: (patch: PlanningSettingsPatch) => void; mode: "scenario" | "targets" | "all" }) {
   const [draft, setDraft] = useState<PlanningSettings>(settings);
   useEffect(() => setDraft(settings), [settings]);
   const dirty = JSON.stringify(draft) !== JSON.stringify(settings);
   const updateScenario = (patch: Partial<PlanningSettings["scenario"]>) => setDraft((current) => ({ ...current, scenario: { ...current.scenario, ...patch } }));
   const updateTarget = (category: AssetCategory, value: number) => setDraft((current) => ({ ...current, targetAllocation: { ...current.targetAllocation, [category]: value } }));
-  const apply = () => onApply({ scenario: draft.scenario, targetAllocation: draft.targetAllocation, drawdown: draft.drawdown });
+  const updateCashFlow = (patch: Partial<PlanningSettings["cashFlow"]>) => setDraft((current) => ({ ...current, cashFlow: { ...current.cashFlow, ...patch } }));
+  const updateCashFlowDeployment = (category: AssetCategory, value: number) => setDraft((current) => ({ ...current, cashFlow: { ...current.cashFlow, deploymentAllocation: { ...current.cashFlow.deploymentAllocation, [category]: value } } }));
+  const updateCashFlowGoalAllocation = (goalId: string, value: number) => setDraft((current) => ({ ...current, cashFlow: { ...current.cashFlow, goalAllocations: { ...current.cashFlow.goalAllocations, [goalId]: value } } }));
+  const apply = () => onApply({ scenario: draft.scenario, targetAllocation: draft.targetAllocation, drawdown: draft.drawdown, cashFlow: draft.cashFlow });
   const reset = () => setDraft(settings);
   return (
     <div className="planning-draft-editor">
@@ -1878,7 +1919,45 @@ function PlanningSettingsDraftEditor({ settings, onApply, mode }: { settings: Pl
           {categoryOrder.map((category) => <label key={category}><span>{category} target %</span><input type="number" step="1" value={draft.targetAllocation[category]} onChange={(event) => updateTarget(category, Number(event.target.value))} /></label>)}
         </div>
       )}
+      {mode === "all" && (
+        <div className="settings-panel cash-flow-settings-panel">
+          <h3>Cash-flow Planning</h3>
+          <p className="message">Optional advisory inputs only. Enter investable surplus directly; salary stays outside the tracker.</p>
+          <div className="settings-grid compact-settings-grid">
+            <label><span>Monthly investable surplus</span><input type="number" min="0" step="1000" value={draft.cashFlow.monthlySurplus} onChange={(event) => updateCashFlow({ monthlySurplus: Number(event.target.value) })} /></label>
+            <label><span>Annual surplus step-up %</span><input type="number" min="0" max="100" step="0.5" value={draft.cashFlow.annualStepUpPercent} onChange={(event) => updateCashFlow({ annualStepUpPercent: Number(event.target.value) })} /></label>
+            <label><span>Contribution years</span><input type="number" min="0" max="100" step="1" value={draft.cashFlow.contributionYears} onChange={(event) => updateCashFlow({ contributionYears: Number(event.target.value) })} /><small>0 means invest until each goal date.</small></label>
+            <label className="setting-checkbox-row"><span>This month's planned investment is already done</span><input type="checkbox" checked={draft.cashFlow.currentMonthInvestedDone} onChange={(event) => updateCashFlow({ currentMonthInvestedDone: event.target.checked })} /><small>On means projection starts next month; off includes this month.</small></label>
+          </div>
+          <div className="settings-grid compact-settings-grid target-grid">
+            {categoryOrder.map((category) => <label key={"cashflow-deploy-" + category}><span>{category} deployment %</span><input type="number" min="0" max="100" step="1" value={draft.cashFlow.deploymentAllocation[category]} onChange={(event) => updateCashFlowDeployment(category, Number(event.target.value))} /></label>)}
+          </div>
+          <div className="settings-grid compact-settings-grid target-grid">
+            {goals.length === 0 && <p className="message">Add goals before mapping monthly surplus.</p>}
+            {goals.map((goal) => <label key={"cashflow-goal-" + goal.id}><span>{goal.name} allocation %</span><input type="number" min="0" max="100" step="1" value={draft.cashFlow.goalAllocations[goal.id] ?? 0} onChange={(event) => updateCashFlowGoalAllocation(goal.id, Number(event.target.value))} /></label>)}
+          </div>
+        </div>
+      )}
       <div className="draft-actions"><button className="primary" disabled={!dirty} onClick={apply}>Apply assumptions</button><button disabled={!dirty} onClick={reset}>Reset draft</button><span>{dirty ? "Draft changes are not used by analytics until applied." : "Current assumptions are applied."}</span></div>
+    </div>
+  );
+}
+
+function CashFlowPlanCard({ plan, currency, usdSecondary }: { plan: CashFlowPlan; currency: string; usdSecondary: (value: number | undefined) => string | undefined }) {
+  const activeRows = plan.rows.filter((row) => row.allocatedMonthly > 0 || row.gapWithoutContributions > 0);
+  return (
+    <div className="card planning-card cash-flow-plan-card">
+      <h2>Monthly Cash-flow Plan</h2>
+      <p className="chart-note compact-note">Advisory projection from Settings. It uses manual investable surplus, goal allocation percentages, configured deployment mix, and existing goal targets. It does not create transactions.</p>
+      <div className="holding-command-strip compact-command-strip">
+        <MiniInsight label="Monthly surplus" value={formatMoney(plan.monthlySurplus, currency)} secondary={usdSecondary(plan.monthlySurplus)} detail="manual input in Settings" />
+        <MiniInsight label="Allocated monthly" value={formatMoney(plan.allocatedMonthlyTotal, currency)} secondary={usdSecondary(plan.allocatedMonthlyTotal)} detail={formatMoney(plan.unallocatedMonthly, currency) + " unallocated"} />
+        <MiniInsight label="Step-up" value={plan.annualStepUpPercent.toFixed(1) + "%"} detail="annual contribution increase" />
+        <MiniInsight label="Contribution window" value={plan.contributionYears > 0 ? plan.contributionYears.toFixed(0) + " years" : "Until goal"} detail="then corpus keeps compounding" />
+        <MiniInsight label="Next contribution" value={plan.currentMonthInvestedDone ? "Next month" : "This month"} detail={"projection starts " + plan.startDate} />
+        <MiniInsight label="Deployment return" value={plan.deploymentReturn.toFixed(1) + "%"} detail="from deployment mix" />
+      </div>
+      {activeRows.length === 0 ? <p className="message">Enter monthly investable surplus and goal allocation percentages in Settings to model contribution impact.</p> : <div className="table-wrap"><table><thead><tr><th>Goal</th><th>Allocated / month</th><th>Needed / month</th><th>Projected without</th><th>Projected with</th><th>Gap with plan</th><th>Funded with plan</th></tr></thead><tbody>{activeRows.map((row) => <tr key={row.goalId}><td>{row.goalName}</td><td>{formatMoney(row.allocatedMonthly, currency)}</td><td>{formatMoney(row.neededMonthly, currency)}</td><td>{formatMoney(row.projectedWithoutContributions, currency)}</td><td>{formatMoney(row.projectedWithContributions, currency)}</td><td>{formatMoney(row.gapWithContributions, currency)}</td><td>{row.fundedPercentWithContributions.toFixed(1)}%</td></tr>)}</tbody></table></div>}
     </div>
   );
 }
@@ -2470,6 +2549,7 @@ function ImportsView(props: {
   parseCasPdfInBrowser: () => void;
   restoreNativeBackup: () => void;
   parseManualNativeInBrowser: () => void;
+  parseIndianBrokerCsvInBrowser: () => void;
   parseIndMoneyXlsxInBrowser: () => void;
   parseEpfoPdfInBrowser: () => void;
   parseNpsCsvInBrowser: () => void;
@@ -2530,6 +2610,7 @@ function ImportsView(props: {
           {props.nativeDetection?.providerId === "canonical_json" && <div className="native-actions"><button className="primary" onClick={props.restoreNativeBackup}>Restore JSON Backup</button></div>}
           {props.nativeDetection?.providerId === "cas_pdf" && <div className="native-actions"><input type="password" placeholder="CAS PDF password" value={props.casPassword} onChange={(event) => props.setCasPassword(event.target.value)} /><button className="primary" onClick={props.parseCasPdfInBrowser}>Parse CAS PDF</button></div>}
           {props.nativeDetection?.providerId === "manual_csv" && props.nativeDetection.nativeInputType === "csv" && props.nativeDetection.confidence !== "low" && <div className="native-actions"><button className="primary" onClick={props.parseManualNativeInBrowser}>Parse Manual CSV</button></div>}
+          {(props.nativeDetection?.providerId === "zerodha_tradebook" || props.nativeDetection?.providerId === "groww_stock_orders") && <div className="native-actions"><button className="primary" onClick={props.parseIndianBrokerCsvInBrowser}>Parse Broker CSV</button></div>}
           {props.nativeDetection?.providerId === "unsupported" && <UnsupportedImportGuidance />}
           {props.nativeDetection?.providerId === "indmoney_export" && <div className="native-actions"><button className="primary" onClick={props.parseIndMoneyXlsxInBrowser}>Parse INDMoney XLSX</button></div>}
           {props.nativeDetection?.providerId === "epfo_passbook" && props.nativeDetection.nativeInputType === "pdf" && <div className="native-actions"><button className="primary" onClick={props.parseEpfoPdfInBrowser}>Parse PF PDF{props.nativeFileCount > 1 ? "s" : ""}</button></div>}
@@ -2570,7 +2651,7 @@ function ImportDetectionPanel({ detection, fileCount }: { detection: ImportDetec
 
 function UnsupportedImportGuidance() {
   const accepted = providerImportSpecs.filter((spec) => spec.status === "implemented" || spec.status === "parser_implemented").map((spec) => spec.label).join("; ");
-  return <div className="notice unsupported-import-guidance"><strong>Unsupported file format</strong><span>Upload a known supported file or use a manual CSV template. Accepted now: {accepted}. Provider-specific formats such as Zerodha, Groww, Kuvera, and bank FD statements need verified sample fixtures before they can be parsed safely.</span></div>;
+  return <div className="notice unsupported-import-guidance"><strong>Unsupported file format</strong><span>Upload a known supported file or use a manual CSV template. Accepted now: {accepted}. Provider-specific formats such as Kuvera and bank FD statements need verified sample fixtures before they can be parsed safely. Zerodha and Groww stock CSVs are supported when they match the known tradebook/order-history layouts.</span></div>;
 }
 
 function SupportedImportsMatrix() {
@@ -2821,7 +2902,7 @@ function ExpensesView({ goals, goalExpenses, currency }: { goals: Goal[]; goalEx
       <ExpensePayerTable rows={payerTotals} detailRows={payerSourceRows} currency={currency} expandedPayer={expandedExpensePayer} setExpandedPayer={setExpandedExpensePayer} />
       <ExpenseCurrentLinesTable rows={currentExpenseLineRows} currency={currency} />
 
-      <div className="card wide-card"><h2>Scenario Playbook</h2><p className="chart-note compact-note">Expense-to-goal link: each scenario shows monthly spend today, change from Current, first goal-year spend, and corpus implied by the goal multiple.</p>{scenarioRows.length === 0 ? <p className="message">No expense scenarios imported yet.</p> : <div className="table-wrap expense-compact-table"><table><thead><tr><th>Goal</th><th>Scenario</th><th>Rows</th><th>Monthly</th><th>Vs current</th><th>Goal-year annual</th><th>Corpus implied</th><th>Status</th></tr></thead><tbody>{scenarioRows.map((row) => <tr key={row.goal.id + row.scenario}><td>{row.goal.name}</td><td>{row.scenario}</td><td>{row.rows}</td><td>{formatMoney(row.monthly, currency)}</td><td>{row.scenario === "Current" ? "-" : formatMoney(row.deltaVsCurrent, currency)}</td><td>{formatMoney(row.annualAtGoal, currency)}</td><td>{formatMoney(row.corpus, currency)}</td><td><span className={"status-pill " + (row.active ? "implemented" : "partial")}>{row.active ? "active" : "compare"}</span></td></tr>)}</tbody></table></div>}</div>
+      <div className="card wide-card"><h2>Scenario Playbook</h2><p className="chart-note compact-note">Expense-to-goal link: each scenario shows monthly spend today, change from Current, first goal-year spend, and corpus implied by the goal multiple.</p>{scenarioRows.length === 0 ? <p className="message">No expense scenarios imported yet.</p> : <div className="table-wrap expense-compact-table"><table><thead><tr><th>Goal</th><th>Scenario</th><th>Rows</th><th>Monthly</th><th>Vs current</th><th>Goal-year annual</th><th>Corpus implied</th><th>Status</th></tr></thead><tbody>{scenarioRows.map((row) => <tr key={row.goal.id + row.scenario}><td>{row.goal.name}</td><td>{row.scenario}</td><td>{row.rows}</td><td>{formatMoney(row.monthly, currency)}</td><td>{row.scenario === "Current" ? "-" : formatMoney(row.deltaVsCurrent, currency)}</td><td>{formatMoney(row.annualAtGoal, currency)}</td><td>{formatMoney(row.corpus, currency)}</td><td><span className={"status-pill " + (row.active ? "implemented" : "partial")}>{row.active ? "Used for goal math" : "Comparison only"}</span></td></tr>)}</tbody></table></div>}</div>
 
       <DrilldownPanel title="Expense Line Audit" summary="Raw selected-scenario rows"><p className="chart-note compact-note">Verification drilldown only. Re-uploading an expense CSV replaces the affected goal ledger, and JSON export keeps all rows.</p><div className="table-wrap expense-audit-table"><table><thead><tr><th>Goal</th><th>Scenario</th><th>Category</th><th>Item</th><th>Frequency</th><th>Qty</th><th>Unit</th><th>Monthly</th><th>Payer</th><th>Notes</th></tr></thead><tbody>{auditRows.slice(0, 120).map(({ goal, row }) => <tr key={row.id}><td>{goal.name}</td><td>{row.scenario}</td><td>{row.category || "-"}</td><td>{row.subCategory ? row.subCategory + " · " + row.expense : row.expense}</td><td>{row.frequency}</td><td>{row.quantity ?? "-"}</td><td>{row.unitAmount != null ? formatMoney(row.unitAmount, row.currency) : "-"}</td><td>{formatMoney(row.amount, row.currency)}</td><td>{row.payer || "-"}</td><td>{row.notes || "-"}</td></tr>)}</tbody></table></div>{auditRows.length > 120 && <p className="helper">Showing first 120 active-scenario rows; export JSON keeps the full detail ledger.</p>}</DrilldownPanel>
     </section>
@@ -3015,7 +3096,7 @@ function SettingsView({ profile, updateTaxProfile, displaySettings, updateDispla
         <div className="settings-panel planning-settings-panel">
           <h3>Planning Assumptions</h3>
           <p className="message">These global values feed Scenario Planning and portfolio-level rebalancing. Goal-specific assumptions and expense rows are applied as drafts, so charts do not recalculate on every keystroke.</p>
-          <PlanningSettingsDraftEditor settings={planningSettings} onApply={updatePlanningSettings} mode="all" />
+          <PlanningSettingsDraftEditor settings={planningSettings} goals={goals} onApply={updatePlanningSettings} mode="all" />
           <GoalSettingsDraftEditor goals={goals} goalExpenses={goalExpenses} updateGoalSettings={updateGoalSettings} currency={currency} />
         </div>
         <p className="message">The Tax section intentionally estimates portfolio tax only. Salary, deductions, Form 16, full ITR schedules, and ESPP payroll/perquisite treatment stay outside this tracker unless explicitly added later.</p>

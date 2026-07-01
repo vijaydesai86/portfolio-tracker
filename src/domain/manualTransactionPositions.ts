@@ -1,7 +1,7 @@
 import { slugId, stableHash } from "@/src/domain/hash";
 import type { Account, AssetCategory, ManualBalance, PortfolioBackup, Transaction } from "@/src/schema/backup";
 
-const positionProviders = new Set(["manual_transactions"]);
+const positionProviders = new Set(["manual_transactions", "zerodha_tradebook", "groww_stock_orders"]);
 const derivedPositionProvider = "manual_positions";
 const dynamicTypes = new Set<Account["type"]>(["mutual_fund", "indian_stock", "us_stock", "gold"]);
 const cashInTypes = new Set<Transaction["type"]>(["buy", "sip", "switch_in", "contribution"]);
@@ -57,7 +57,7 @@ export function reconcileManualTransactionPositions(backup: PortfolioBackup, now
       taperFactor: existing?.taperFactor,
       source: {
         type: "import",
-        importId: existing?.source.importId ?? seed.latestTransactionImportId,
+        importId: seed.latestTransactionImportId ?? existing?.source.importId,
         provider: derivedPositionProvider,
         sourceRecordHash
       },

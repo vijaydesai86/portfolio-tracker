@@ -26,16 +26,56 @@ export type DrawdownSettings = {
   withdrawalTiming: "beginning" | "end";
 };
 
+export type CashFlowSettings = {
+  monthlySurplus: number;
+  annualStepUpPercent: number;
+  contributionYears: number;
+  currentMonthInvestedDone: boolean;
+  startDate: string;
+  deploymentAllocation: TargetAllocationSettings;
+  goalAllocations: Record<string, number>;
+};
+
 export type PlanningSettings = {
   scenario: ScenarioSettings;
   targetAllocation: TargetAllocationSettings;
   drawdown: DrawdownSettings;
+  cashFlow: CashFlowSettings;
 };
 
 export type PlanningSettingsPatch = {
   scenario?: Partial<ScenarioSettings>;
   targetAllocation?: Partial<TargetAllocationSettings>;
   drawdown?: Partial<DrawdownSettings>;
+  cashFlow?: Partial<CashFlowSettings>;
+};
+
+export type CashFlowGoalProjection = {
+  goalId: string;
+  goalName: string;
+  targetCorpus: number;
+  projectedWithoutContributions: number;
+  allocatedMonthly: number;
+  contributionFutureValue: number;
+  projectedWithContributions: number;
+  gapWithoutContributions: number;
+  gapWithContributions: number;
+  neededMonthly: number;
+  fundedPercentWithoutContributions: number;
+  fundedPercentWithContributions: number;
+  monthsToGoal: number;
+};
+
+export type CashFlowPlan = {
+  monthlySurplus: number;
+  allocatedMonthlyTotal: number;
+  unallocatedMonthly: number;
+  annualStepUpPercent: number;
+  contributionYears: number;
+  currentMonthInvestedDone: boolean;
+  deploymentReturn: number;
+  startDate: string;
+  rows: CashFlowGoalProjection[];
 };
 
 export type ScenarioCategoryRow = {
@@ -185,6 +225,21 @@ const defaultPlanningSettings: PlanningSettings = {
     annualSpendGrowth: 6,
     horizonYears: 45,
     withdrawalTiming: "beginning"
+  },
+  cashFlow: {
+    monthlySurplus: 0,
+    annualStepUpPercent: 0,
+    contributionYears: 0,
+    currentMonthInvestedDone: false,
+    startDate: "",
+    deploymentAllocation: {
+      Equity: 65,
+      Debt: 30,
+      Gold: 0,
+      Others: 0,
+      Cash: 5
+    },
+    goalAllocations: {}
   }
 };
 
@@ -193,6 +248,9 @@ export function getPlanningSettings(backup: PortfolioBackup): PlanningSettings {
   const scenario = isRecord(raw.scenario) ? raw.scenario : {};
   const targetAllocation = isRecord(raw.targetAllocation) ? raw.targetAllocation : {};
   const drawdown = isRecord(raw.drawdown) ? raw.drawdown : {};
+  const cashFlow = isRecord(raw.cashFlow) ? raw.cashFlow : {};
+  const cashFlowDeployment = isRecord(cashFlow.deploymentAllocation) ? cashFlow.deploymentAllocation : {};
+  const goalAllocations = isRecord(cashFlow.goalAllocations) ? Object.fromEntries(Object.entries(cashFlow.goalAllocations).map(([key, value]) => [key, Math.max(0, numberSetting(value, 0))])) : {};
   return {
     scenario: {
       equityReturn: numberSetting(scenario.equityReturn, defaultPlanningSettings.scenario.equityReturn),
@@ -215,6 +273,21 @@ export function getPlanningSettings(backup: PortfolioBackup): PlanningSettings {
       annualSpendGrowth: numberSetting(drawdown.annualSpendGrowth, defaultPlanningSettings.drawdown.annualSpendGrowth),
       horizonYears: Math.max(1, Math.min(100, Math.round(numberSetting(drawdown.horizonYears, defaultPlanningSettings.drawdown.horizonYears)))),
       withdrawalTiming: drawdown.withdrawalTiming === "end" ? "end" : "beginning"
+    },
+    cashFlow: {
+      monthlySurplus: Math.max(0, numberSetting(cashFlow.monthlySurplus, defaultPlanningSettings.cashFlow.monthlySurplus)),
+      annualStepUpPercent: Math.max(0, Math.min(100, numberSetting(cashFlow.annualStepUpPercent, defaultPlanningSettings.cashFlow.annualStepUpPercent))),
+      contributionYears: Math.max(0, Math.min(100, numberSetting(cashFlow.contributionYears, defaultPlanningSettings.cashFlow.contributionYears))),
+      currentMonthInvestedDone: cashFlow.currentMonthInvestedDone === true,
+      startDate: typeof cashFlow.startDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(cashFlow.startDate) ? cashFlow.startDate : defaultPlanningSettings.cashFlow.startDate,
+      deploymentAllocation: normalizeTargetAllocation({
+        Equity: numberSetting(cashFlowDeployment.Equity, defaultPlanningSettings.cashFlow.deploymentAllocation.Equity),
+        Debt: numberSetting(cashFlowDeployment.Debt, defaultPlanningSettings.cashFlow.deploymentAllocation.Debt),
+        Gold: numberSetting(cashFlowDeployment.Gold, defaultPlanningSettings.cashFlow.deploymentAllocation.Gold),
+        Others: numberSetting(cashFlowDeployment.Others, defaultPlanningSettings.cashFlow.deploymentAllocation.Others),
+        Cash: numberSetting(cashFlowDeployment.Cash, defaultPlanningSettings.cashFlow.deploymentAllocation.Cash)
+      }),
+      goalAllocations: normalizeGoalAllocations(goalAllocations)
     }
   };
 }
@@ -224,7 +297,13 @@ export function updatePlanningSettings(backup: PortfolioBackup, patch: PlanningS
   const next: PlanningSettings = {
     scenario: { ...current.scenario, ...(patch.scenario ?? {}) },
     targetAllocation: normalizeTargetAllocation({ ...current.targetAllocation, ...(patch.targetAllocation ?? {}) }),
-    drawdown: { ...current.drawdown, ...(patch.drawdown ?? {}) }
+    drawdown: { ...current.drawdown, ...(patch.drawdown ?? {}) },
+    cashFlow: {
+      ...current.cashFlow,
+      ...(patch.cashFlow ?? {}),
+      deploymentAllocation: patch.cashFlow?.deploymentAllocation ? normalizeTargetAllocation({ ...current.cashFlow.deploymentAllocation, ...patch.cashFlow.deploymentAllocation }) : current.cashFlow.deploymentAllocation,
+      goalAllocations: patch.cashFlow?.goalAllocations ? normalizeGoalAllocations({ ...patch.cashFlow.goalAllocations }) : current.cashFlow.goalAllocations
+    }
   };
   return {
     ...backup,
@@ -307,6 +386,53 @@ export function calculateGoalRebalancingPlans(goals: GoalProgress[], settings: P
     });
     return { goalId: goal.goal.id, goalName: goal.goal.name, currentValue: roundMoney(total), rows };
   });
+}
+
+export function calculateCashFlowPlan(goals: GoalProgress[], settings: PlanningSettings, today = new Date()): CashFlowPlan {
+  const cashFlow = settings.cashFlow;
+  const todayDate = today.toISOString().slice(0, 10);
+  const monthAwareStartDate = cashFlow.currentMonthInvestedDone ? firstDayOfNextMonth(todayDate) : todayDate;
+  const startDate = cashFlow.startDate && cashFlow.startDate > monthAwareStartDate ? cashFlow.startDate : monthAwareStartDate;
+  const deploymentReturn = weightedReturnForSettingsAllocation(settings.scenario, cashFlow.deploymentAllocation);
+  const monthlySurplus = Math.max(0, cashFlow.monthlySurplus);
+  const rows = goals.map((goal) => {
+    const allocationPercent = Math.max(0, Number(cashFlow.goalAllocations[goal.goal.id]) || 0);
+    const allocatedMonthly = roundMoney(monthlySurplus * allocationPercent / 100);
+    const monthsToGoal = Math.max(0, Math.ceil(monthsBetween(startDate, goal.goal.targetDate)));
+    const contributionMonths = cashFlow.contributionYears > 0 ? Math.min(monthsToGoal, Math.round(cashFlow.contributionYears * 12)) : monthsToGoal;
+    const contributionFutureValue = monthlyContributionFutureValue(allocatedMonthly, contributionMonths, monthsToGoal, deploymentReturn, cashFlow.annualStepUpPercent);
+    const projectedWithContributions = roundMoney(goal.projectedValue + contributionFutureValue);
+    const gapWithoutContributions = roundMoney(goal.targetCorpus - goal.projectedValue);
+    const gapWithContributions = roundMoney(goal.targetCorpus - projectedWithContributions);
+    const neededMonthly = gapWithoutContributions <= 0 ? 0 : solveNeededMonthly(gapWithoutContributions, contributionMonths, monthsToGoal, deploymentReturn, cashFlow.annualStepUpPercent);
+    return {
+      goalId: goal.goal.id,
+      goalName: goal.goal.name,
+      targetCorpus: goal.targetCorpus,
+      projectedWithoutContributions: goal.projectedValue,
+      allocatedMonthly,
+      contributionFutureValue: roundMoney(contributionFutureValue),
+      projectedWithContributions,
+      gapWithoutContributions,
+      gapWithContributions,
+      neededMonthly,
+      fundedPercentWithoutContributions: goal.targetCorpus <= 0 ? 0 : roundPercent((goal.projectedValue / goal.targetCorpus) * 100),
+      fundedPercentWithContributions: goal.targetCorpus <= 0 ? 0 : roundPercent((projectedWithContributions / goal.targetCorpus) * 100),
+      monthsToGoal
+    };
+  });
+  const allocatedMonthlyTotal = roundMoney(rows.reduce((sum, row) => sum + row.allocatedMonthly, 0));
+  return {
+    monthlySurplus,
+    allocatedMonthlyTotal,
+    unallocatedMonthly: roundMoney(Math.max(0, monthlySurplus - allocatedMonthlyTotal)),
+    annualStepUpPercent: cashFlow.annualStepUpPercent,
+    contributionYears: cashFlow.contributionYears,
+    currentMonthInvestedDone: cashFlow.currentMonthInvestedDone,
+    deploymentReturn: roundPercent(deploymentReturn),
+    startDate,
+    rows
+  };
 }
 
 export function calculateIncomeProjection(backup: PortfolioBackup): IncomeProjection {
@@ -457,6 +583,13 @@ export function calculatePerformanceAttribution(backup: PortfolioBackup): Perfor
   };
 }
 
+function normalizeGoalAllocations(input: Record<string, number>): Record<string, number> {
+  const cleaned = Object.fromEntries(Object.entries(input).map(([key, value]) => [key, Math.max(0, Number(value) || 0)]));
+  const total = Object.values(cleaned).reduce((sum, value) => sum + value, 0);
+  if (total <= 100) return cleaned;
+  return Object.fromEntries(Object.entries(cleaned).map(([key, value]) => [key, roundPercent((value / total) * 100)]));
+}
+
 function normalizeTargetAllocation(input: TargetAllocationSettings): TargetAllocationSettings {
   const cleaned = Object.fromEntries(categories.map((category) => [category, Math.max(0, Number(input[category]) || 0)])) as TargetAllocationSettings;
   const total = categories.reduce((sum, category) => sum + cleaned[category], 0);
@@ -516,6 +649,49 @@ function allocationFromValues(values: Record<AssetCategory, number>, total: numb
 
 function weightedReturnForAllocation(goal: GoalProgress, allocation: TargetAllocationSettings): number {
   return categories.reduce((sum, category) => sum + (allocation[category] / 100) * categoryReturnFromGoal(goal, category), 0);
+}
+
+function weightedReturnForSettingsAllocation(scenario: ScenarioSettings, allocation: TargetAllocationSettings): number {
+  return categories.reduce((sum, category) => sum + (allocation[category] / 100) * returnRateForCategory(scenario, category), 0);
+}
+
+function firstDayOfNextMonth(date: string): string {
+  const parsed = new Date(date + "T00:00:00.000Z");
+  if (!Number.isFinite(parsed.getTime())) return date;
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
+}
+
+function monthsBetween(fromDate: string, toDate: string): number {
+  const from = new Date(fromDate + "T00:00:00.000Z").getTime();
+  const to = new Date(toDate + "T00:00:00.000Z").getTime();
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return 0;
+  return (to - from) / (365.25 * 24 * 60 * 60 * 1000) * 12;
+}
+
+function monthlyContributionFutureValue(monthlyAmount: number, contributionMonths: number, growthMonths: number, annualReturn: number, annualStepUpPercent: number): number {
+  if (monthlyAmount <= 0 || contributionMonths <= 0 || growthMonths <= 0) return 0;
+  const monthlyReturn = Math.pow(1 + annualReturn / 100, 1 / 12) - 1;
+  let value = 0;
+  for (let month = 0; month < growthMonths; month += 1) {
+    if (month < contributionMonths) {
+      value += monthlyAmount * Math.pow(1 + annualStepUpPercent / 100, Math.floor(month / 12));
+    }
+    value *= 1 + monthlyReturn;
+  }
+  return roundMoney(value);
+}
+
+function solveNeededMonthly(targetFutureValue: number, contributionMonths: number, growthMonths: number, annualReturn: number, annualStepUpPercent: number): number {
+  if (targetFutureValue <= 0 || contributionMonths <= 0 || growthMonths <= 0) return 0;
+  let low = 0;
+  let high = Math.max(1000, targetFutureValue / Math.max(1, contributionMonths));
+  while (monthlyContributionFutureValue(high, contributionMonths, growthMonths, annualReturn, annualStepUpPercent) < targetFutureValue) high *= 2;
+  for (let index = 0; index < 30; index += 1) {
+    const mid = (low + high) / 2;
+    if (monthlyContributionFutureValue(mid, contributionMonths, growthMonths, annualReturn, annualStepUpPercent) >= targetFutureValue) high = mid;
+    else low = mid;
+  }
+  return roundMoney(high);
 }
 
 function categoryReturnFromGoal(goal: GoalProgress, category: AssetCategory): number {

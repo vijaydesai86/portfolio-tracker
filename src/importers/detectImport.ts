@@ -37,6 +37,14 @@ export function detectImportSource(input: ImportDetectionInput): ImportDetection
     return detection("canonical_json", "json", "high", "Matches canonical backup JSON markers.");
   }
 
+  if (extension === "csv" && isZerodhaTradebookCsv(text)) {
+    return detection("zerodha_tradebook", "csv", "high", "Matches Zerodha equity tradebook CSV headers.");
+  }
+
+  if (extension === "csv" && isGrowwStockOrdersCsv(text)) {
+    return detection("groww_stock_orders", "csv", "high", "Matches Groww executed stock order history headers.");
+  }
+
   if (extension === "csv" && hasCsvHeaders(text, manualTransactionHeaders) && hasAnyCsvHeader(text, ["symbol_or_isin", "symbol", "isin", "name", "asset_name"])) {
     return detection("manual_csv", "csv", "high", "Matches manual transaction CSV headers.");
   }
@@ -95,6 +103,25 @@ function hasCsvHeaders(text: string, requiredHeaders: string[]): boolean {
     const headers = line.split(",").map((header) => header.trim().toLowerCase().replace(/[ /-]/g, "_"));
     return requiredHeaders.every((header) => headers.includes(header));
   });
+}
+
+function isZerodhaTradebookCsv(text: string): boolean {
+  return text.split(/\r?\n/).slice(0, 5).some((line) => {
+    const headers = normalizedDelimitedHeaders(line);
+    return ["symbol", "isin", "trade_date", "trade_type", "quantity", "price", "trade_id", "order_id"].every((header) => headers.includes(header));
+  });
+}
+
+function isGrowwStockOrdersCsv(text: string): boolean {
+  return text.split(/\r?\n/).slice(0, 12).some((line) => {
+    const headers = normalizedDelimitedHeaders(line);
+    return ["stock_name", "symbol", "isin", "type", "quantity", "value", "execution_date_and_time", "order_status"].every((header) => headers.includes(header));
+  });
+}
+
+function normalizedDelimitedHeaders(line: string): string[] {
+  const delimiter = line.includes("\t") ? "\t" : ",";
+  return line.split(delimiter).map((header) => header.trim().toLowerCase().replace(/[ /$().-]/g, "_").replace(/^_+|_+$/g, ""));
 }
 
 function isFidelityCsv(text: string, fileName: string): boolean {

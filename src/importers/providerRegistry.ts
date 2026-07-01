@@ -4,6 +4,8 @@ export type ImportProviderId =
   | "cas_pdf"
   | "fidelity_csv"
   | "indmoney_export"
+  | "zerodha_tradebook"
+  | "groww_stock_orders"
   | "epfo_passbook"
   | "nps_statement"
   | "bank_small_savings";
@@ -67,6 +69,24 @@ export const providerImportSpecs: ProviderImportSpec[] = [
     assetTypes: ["us_stock", "mutual_fund", "indian_stock"],
     categories: ["Equity", "Debt", "Gold", "Others", "Cash"],
     implementation: "INDMoney Transactions Ledger XLSX parser is implemented for US stock transactions, dividends, taxes, cash movements, stock splits, and open-position balances."
+  },
+  {
+    id: "zerodha_tradebook",
+    label: "Zerodha tradebook CSV",
+    status: "implemented",
+    nativeInputTypes: ["csv"],
+    assetTypes: ["indian_stock"],
+    categories: ["Equity"],
+    implementation: "Zerodha equity tradebook CSV parser is implemented for Indian stock buy/sell rows. Open holdings derive from net quantity and market refresh updates current prices."
+  },
+  {
+    id: "groww_stock_orders",
+    label: "Groww stock order history CSV",
+    status: "implemented",
+    nativeInputTypes: ["csv"],
+    assetTypes: ["indian_stock"],
+    categories: ["Equity"],
+    implementation: "Groww executed stock order history parser is implemented for Indian stock buy/sell rows. Open holdings derive from net quantity and market refresh updates current prices."
   },
   {
     id: "epfo_passbook",
