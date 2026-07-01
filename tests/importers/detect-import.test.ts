@@ -94,4 +94,12 @@ describe("native import source detection", () => {
   it("detects EPFO text exports by content even when the filename is arbitrary", () => {
     expect(detectImportSource({ fileName: "download.html", textSample: "Member Passbook EPFO Closing Balance as on" })).toMatchObject({ providerId: "epfo_passbook", nativeInputType: "html" });
   });
+
+  it("returns an explicit unsupported detection for unknown files", () => {
+    expect(detectImportSource({ fileName: "random-broker-export.csv", textSample: "foo,bar\n1,2" })).toMatchObject({
+      providerId: "unsupported",
+      status: "unsupported",
+      confidence: "low"
+    });
+  });
 });

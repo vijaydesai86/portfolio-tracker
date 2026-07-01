@@ -1493,7 +1493,12 @@ textarea {
 
   .app-shell-v2 .sidebar {
     position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    max-width: 100vw;
     height: auto;
+    overflow-x: clip;
     padding: 16px;
   }
 
@@ -1507,12 +1512,23 @@ textarea {
   }
 
   .app-shell-v2 .nav {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    display: grid;
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
   }
 
   .app-shell-v2 .nav button {
-    justify-content: center;
-    padding: 0 8px;
+    width: max-content;
+    max-width: 72vw;
+    justify-content: flex-start;
+    padding: 0 12px;
+    white-space: nowrap;
     font-size: 12px;
   }
 
@@ -1544,7 +1560,9 @@ textarea {
   }
 
   .app-shell-v2 .nav {
-    grid-template-columns: 1fr;
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
   }
 
   .command-hero {
@@ -6701,19 +6719,6 @@ textarea {
   outline-offset: 2px;
 }
 
-.analytics-scope-control button.active,
-.analytics-tabs button.active {
-  border-color: #0e7490;
-  background: #0f172a;
-  color: #ffffff;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.22);
-}
-
-.analytics-scope-control button.active span,
-.analytics-tabs button.active span {
-  color: rgba(255, 255, 255, 0.78);
-}
-
 .goal-longevity-workspace .goal-drawdown-item {
   grid-column: 1 / -1;
 }
@@ -6973,53 +6978,6 @@ textarea {
   }
 }
 
-/* Absolute contrast guard for selected analytics tabs/scopes. Must remain after all overrides. */
-.app-shell-v2 .analytics-scope-control button.active,
-.app-shell-v2 .analytics-tabs button.active {
-  background: #0f172a !important;
-  border-color: #0e7490 !important;
-  color: #ffffff !important;
-  opacity: 1 !important;
-}
-
-.app-shell-v2 .analytics-scope-control button.active strong,
-.app-shell-v2 .analytics-tabs button.active strong,
-.app-shell-v2 .analytics-scope-control button.active em,
-.app-shell-v2 .analytics-tabs button.active em {
-  color: #ffffff !important;
-}
-
-.app-shell-v2 .analytics-scope-control button.active span,
-.app-shell-v2 .analytics-scope-control button.active small,
-.app-shell-v2 .analytics-tabs button.active span,
-.app-shell-v2 .analytics-tabs button.active small {
-  color: rgba(255, 255, 255, 0.86) !important;
-}
-
-
-/* Global final guard: selected analytics buttons must be readable in every shell/layout. */
-.analytics-scope-control button.active,
-.analytics-tabs button.active {
-  background: #0f172a !important;
-  border-color: #0e7490 !important;
-  color: #ffffff !important;
-  opacity: 1 !important;
-}
-
-.analytics-scope-control button.active strong,
-.analytics-tabs button.active strong,
-.analytics-scope-control button.active em,
-.analytics-tabs button.active em {
-  color: #ffffff !important;
-}
-
-.analytics-scope-control button.active span,
-.analytics-scope-control button.active small,
-.analytics-tabs button.active span,
-.analytics-tabs button.active small {
-  color: rgba(255, 255, 255, 0.88) !important;
-}
-
 /* Expense drilldown tables */
 .expense-analysis-table-card {
   align-self: stretch;
@@ -7090,17 +7048,6 @@ textarea {
   .expense-detail-panel {
     padding: 8px;
   }
-}
-
-/* Final disabled-state guard: an active selector can be disabled, but it must still read as selected. */
-.analytics-scope-control button.active:disabled,
-.analytics-tabs button.active:disabled,
-.app-shell-v2 .analytics-scope-control button.active:disabled,
-.app-shell-v2 .analytics-tabs button.active:disabled {
-  opacity: 1 !important;
-  background: #0f172a !important;
-  background-color: #0f172a !important;
-  color: #ffffff !important;
 }
 
 /* Compact expense overview tiles */
@@ -7277,163 +7224,6 @@ textarea {
   }
 }
 
-/* Final selected scope/tab contrast: light selected surface with dark readable text. */
-.analytics-scope-control button.active,
-.analytics-tabs button.active,
-.analytics-scope-control button.active:disabled,
-.analytics-tabs button.active:disabled,
-.app-shell-v2 .analytics-scope-control button.active,
-.app-shell-v2 .analytics-tabs button.active,
-.app-shell-v2 .analytics-scope-control button.active:disabled,
-.app-shell-v2 .analytics-tabs button.active:disabled {
-  background: #f2f7fb !important;
-  background-color: #f2f7fb !important;
-  border-color: #0e7490 !important;
-  color: #0f172a !important;
-  opacity: 1 !important;
-  box-shadow: 0 10px 24px rgba(14, 116, 144, 0.14) !important;
-}
-
-.analytics-scope-control button.active strong,
-.analytics-tabs button.active strong,
-.analytics-scope-control button.active em,
-.analytics-tabs button.active em,
-.app-shell-v2 .analytics-scope-control button.active strong,
-.app-shell-v2 .analytics-tabs button.active strong,
-.app-shell-v2 .analytics-scope-control button.active em,
-.app-shell-v2 .analytics-tabs button.active em {
-  color: #0f172a !important;
-}
-
-.analytics-scope-control button.active span,
-.analytics-scope-control button.active small,
-.analytics-tabs button.active span,
-.analytics-tabs button.active small,
-.app-shell-v2 .analytics-scope-control button.active span,
-.app-shell-v2 .analytics-scope-control button.active small,
-.app-shell-v2 .analytics-tabs button.active span,
-.app-shell-v2 .analytics-tabs button.active small {
-  color: #334155 !important;
-}
-
-/* Central selected-control state: match sidebar green selection everywhere. */
-.app-shell-v2 .analytics-scope-control button.active,
-.app-shell-v2 .analytics-tabs button.active,
-.analytics-scope-control button.active,
-.analytics-tabs button.active,
-.app-shell-v2 .analytics-scope-control button.active:disabled,
-.app-shell-v2 .analytics-tabs button.active:disabled,
-.analytics-scope-control button.active:disabled,
-.analytics-tabs button.active:disabled {
-  background: linear-gradient(180deg, #0f766e, #0e7490) !important;
-  background-color: #0f766e !important;
-  border-color: #0f766e !important;
-  color: #ffffff !important;
-  opacity: 1 !important;
-  box-shadow: 0 8px 18px rgba(14, 116, 144, 0.22) !important;
-}
-
-.app-shell-v2 .analytics-scope-control button.active strong,
-.app-shell-v2 .analytics-tabs button.active strong,
-.analytics-scope-control button.active strong,
-.analytics-tabs button.active strong,
-.app-shell-v2 .analytics-scope-control button.active em,
-.app-shell-v2 .analytics-tabs button.active em,
-.analytics-scope-control button.active em,
-.analytics-tabs button.active em {
-  color: #ffffff !important;
-}
-
-.app-shell-v2 .analytics-scope-control button.active span,
-.app-shell-v2 .analytics-scope-control button.active small,
-.app-shell-v2 .analytics-tabs button.active span,
-.app-shell-v2 .analytics-tabs button.active small,
-.analytics-scope-control button.active span,
-.analytics-scope-control button.active small,
-.analytics-tabs button.active span,
-.analytics-tabs button.active small {
-  color: rgba(255, 255, 255, 0.88) !important;
-}
-
-/* Final active selector contrast guard: computed background-color must remain dark for browser contrast checks. */
-.app-shell-v2 .analytics-scope-control button.active,
-.app-shell-v2 .analytics-tabs button.active,
-.analytics-scope-control button.active,
-.analytics-tabs button.active,
-.app-shell-v2 .analytics-scope-control button.active:disabled,
-.app-shell-v2 .analytics-tabs button.active:disabled,
-.analytics-scope-control button.active:disabled,
-.analytics-tabs button.active:disabled {
-  background: #0f766e !important;
-  background-color: #0f766e !important;
-  background-image: none !important;
-  border-color: #0f766e !important;
-  color: #ffffff !important;
-  opacity: 1 !important;
-}
-
-.app-shell-v2 .analytics-scope-control button.active strong,
-.app-shell-v2 .analytics-tabs button.active strong,
-.analytics-scope-control button.active strong,
-.analytics-tabs button.active strong,
-.app-shell-v2 .analytics-scope-control button.active em,
-.app-shell-v2 .analytics-tabs button.active em,
-.analytics-scope-control button.active em,
-.analytics-tabs button.active em {
-  color: #ffffff !important;
-}
-
-.app-shell-v2 .analytics-scope-control button.active span,
-.app-shell-v2 .analytics-scope-control button.active small,
-.app-shell-v2 .analytics-tabs button.active span,
-.app-shell-v2 .analytics-tabs button.active small,
-.analytics-scope-control button.active span,
-.analytics-scope-control button.active small,
-.analytics-tabs button.active span,
-.analytics-tabs button.active small {
-  color: rgba(255, 255, 255, 0.9) !important;
-}
-
-/* Final selected analytics control contrast: selected tabs use the same green language as the sidebar. */
-.app-shell-v2 .analytics-scope-control button.active,
-.app-shell-v2 .analytics-tabs button.active,
-.analytics-scope-control button.active,
-.analytics-tabs button.active,
-.app-shell-v2 .analytics-scope-control button.active:disabled,
-.app-shell-v2 .analytics-tabs button.active:disabled,
-.analytics-scope-control button.active:disabled,
-.analytics-tabs button.active:disabled {
-  background: #0f766e !important;
-  background-color: #0f766e !important;
-  background-image: none !important;
-  border-color: #0f766e !important;
-  color: #ffffff !important;
-  opacity: 1 !important;
-  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.24) !important;
-}
-
-.app-shell-v2 .analytics-scope-control button.active strong,
-.app-shell-v2 .analytics-tabs button.active strong,
-.analytics-scope-control button.active strong,
-.analytics-tabs button.active strong,
-.app-shell-v2 .analytics-scope-control button.active em,
-.app-shell-v2 .analytics-tabs button.active em,
-.analytics-scope-control button.active em,
-.analytics-tabs button.active em {
-  color: #ffffff !important;
-}
-
-.app-shell-v2 .analytics-scope-control button.active span,
-.app-shell-v2 .analytics-scope-control button.active small,
-.app-shell-v2 .analytics-tabs button.active span,
-.app-shell-v2 .analytics-tabs button.active small,
-.analytics-scope-control button.active span,
-.analytics-scope-control button.active small,
-.analytics-tabs button.active span,
-.analytics-tabs button.active small {
-  color: rgba(255, 255, 255, 0.9) !important;
-}
-
 /* Native holding detail disclosure keeps details accessible and reliable across browsers. */
 .holding-detail-summary {
   display: block;
@@ -7449,38 +7239,45 @@ textarea {
   content: "";
 }
 
-.summary-detail-button {
+.detail-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid #b9d6df;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+}
+
+.detail-button:hover,
+.detail-button:focus-visible {
+  border-color: #0f766e;
+  background: #ecfeff;
+  color: #0f5f59;
+  outline: 2px solid rgba(15, 118, 110, 0.16);
+  outline-offset: 2px;
+}
+
+.detail-button[aria-expanded="true"] {
+  border-color: #0f766e;
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.summary-detail-button {
+  cursor: default;
 }
 
 
-/* Contract cleanup: shared drilldowns, import support matrix, and green selected controls. */
-.app-shell-v2 .analytics-scope-control button.active,
-.app-shell-v2 .analytics-tabs button.active,
-.app-shell-v2 [role="tablist"] button.active,
-.app-shell-v2 .goal-longevity-selector button.active {
-  border-color: #0f766e !important;
-  background: linear-gradient(180deg, #0f766e, #0e7490) !important;
-  color: #ffffff !important;
-  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.24) !important;
-}
-
-.app-shell-v2 .analytics-scope-control button.active strong,
-.app-shell-v2 .analytics-tabs button.active strong,
-.app-shell-v2 [role="tablist"] button.active strong,
-.app-shell-v2 .goal-longevity-selector button.active strong,
-.app-shell-v2 .analytics-scope-control button.active span,
-.app-shell-v2 .analytics-tabs button.active span,
-.app-shell-v2 [role="tablist"] button.active span,
-.app-shell-v2 .goal-longevity-selector button.active span,
-.app-shell-v2 .analytics-scope-control button.active small,
-.app-shell-v2 .analytics-tabs button.active small,
-.app-shell-v2 [role="tablist"] button.active small,
-.app-shell-v2 .goal-longevity-selector button.active small {
-  color: rgba(255, 255, 255, 0.92) !important;
-}
+/* Contract cleanup: shared drilldowns and import support matrix. */
 
 .drilldown-panel {
   grid-column: 1 / -1;
@@ -7692,27 +7489,58 @@ textarea {
 
 
 
-/* Hard final guard for Selenium contrast: active selector button background-color itself must be green. */
+/* Central selected-control contract: selected tabs use the same green language as the sidebar. */
 html body .app-shell-v2 .analytics-scope-control button.active,
+html body .analytics-scope-control button.active,
 html body .app-shell-v2 .analytics-tabs button.active,
+html body .analytics-tabs button.active,
 html body .app-shell-v2 .goal-longevity-selector button.active,
-html body .app-shell-v2 [role="tablist"] button.active {
+html body .goal-longevity-selector button.active,
+html body .app-shell-v2 [role="tablist"] button.active,
+html body [role="tablist"] button.active,
+html body .app-shell-v2 .analytics-scope-control button.active:disabled,
+html body .analytics-scope-control button.active:disabled,
+html body .app-shell-v2 .analytics-tabs button.active:disabled,
+html body .analytics-tabs button.active:disabled,
+html body .app-shell-v2 .goal-longevity-selector button.active:disabled,
+html body .goal-longevity-selector button.active:disabled,
+html body .app-shell-v2 [role="tablist"] button.active:disabled,
+html body [role="tablist"] button.active:disabled {
   background: #0f766e !important;
   background-color: #0f766e !important;
   background-image: none !important;
+  border-color: #0f766e !important;
   color: #ffffff !important;
   opacity: 1 !important;
-  border-color: #0f766e !important;
+  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.24) !important;
+  transition: none !important;
 }
 
 html body .app-shell-v2 .analytics-scope-control button.active strong,
+html body .analytics-scope-control button.active strong,
 html body .app-shell-v2 .analytics-scope-control button.active span,
+html body .analytics-scope-control button.active span,
+html body .app-shell-v2 .analytics-scope-control button.active small,
+html body .analytics-scope-control button.active small,
 html body .app-shell-v2 .analytics-tabs button.active strong,
+html body .analytics-tabs button.active strong,
 html body .app-shell-v2 .analytics-tabs button.active span,
+html body .analytics-tabs button.active span,
+html body .app-shell-v2 .analytics-tabs button.active small,
+html body .analytics-tabs button.active small,
 html body .app-shell-v2 .goal-longevity-selector button.active strong,
+html body .goal-longevity-selector button.active strong,
 html body .app-shell-v2 .goal-longevity-selector button.active span,
+html body .goal-longevity-selector button.active span,
+html body .app-shell-v2 .goal-longevity-selector button.active small,
+html body .goal-longevity-selector button.active small,
 html body .app-shell-v2 [role="tablist"] button.active strong,
-html body .app-shell-v2 [role="tablist"] button.active span {
+html body [role="tablist"] button.active strong,
+html body .app-shell-v2 [role="tablist"] button.active span,
+html body [role="tablist"] button.active span,
+html body .app-shell-v2 [role="tablist"] button.active small,
+html body [role="tablist"] button.active small {
   color: #ffffff !important;
   background-color: transparent !important;
+  transition: none !important;
 }

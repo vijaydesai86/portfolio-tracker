@@ -18,7 +18,9 @@
     "test:ind:private": "vitest run tests/importers/indmoney-private.test.ts",
     "test:ui:ind": "node scripts/selenium-ind-import.mjs",
     "test:pf-nps:private": "vitest run tests/importers/pf-nps-private.test.ts",
-    "test:ui:pf-nps": "node scripts/selenium-pf-nps-import.mjs"
+    "test:ui:pf-nps": "node scripts/selenium-pf-nps-import.mjs",
+    "test:ui:server": "node scripts/run-ui-test-with-server.mjs",
+    "verify:full": "npm run verify && npm run test:ui:server"
   },
   "dependencies": {
     "@tanstack/react-table": "8.21.3",

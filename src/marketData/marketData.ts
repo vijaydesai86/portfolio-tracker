@@ -28,12 +28,22 @@ export type FxQuote = {
   source: string;
 };
 
+export type MarketDataIssue = {
+  kind: "nav" | "stock" | "fx" | "history" | "provider";
+  scope: "current" | "history";
+  source: string;
+  severity: "warning" | "blocking";
+  message: string;
+  retryable?: boolean;
+};
+
 export type MarketDataPayload = {
   navs: NavQuote[];
   stocks: StockQuote[];
   fx?: FxQuote;
   fxs?: FxQuote[];
   errors: string[];
+  issues?: MarketDataIssue[];
 };
 
 export function parseAmfiNavAll(text: string, requestedIsins = new Set<string>()): NavQuote[] {

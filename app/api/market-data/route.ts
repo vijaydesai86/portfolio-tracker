@@ -13,6 +13,7 @@ import {
   parseYahooChartQuote,
   parseYahooHistoricalPrices,
   type FxQuote,
+  type MarketDataIssue,
   type MarketDataPayload,
   type NavQuote,
   type StockQuote
@@ -52,6 +53,7 @@ export async function GET(request: NextRequest) {
   ]);
 
   payload.errors = compactMarketErrors(errors);
+  payload.issues = payload.errors.map(marketDataIssueFromError);
   return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -267,6 +269,20 @@ function compactHistoricalNavWarning(isins: string[], latestErrors: string[], mf
   if (timeoutCount > 0) parts.push(timeoutCount + " provider request(s) timed out.");
   if (amfiErrors.length > 0) parts.push("AMFI historical fallback was not usable.");
   return parts.join(" ");
+}
+
+function marketDataIssueFromError(message: string): MarketDataIssue {
+  const isHistory = /historical|scheme history|history charts|provider request|AMFI historical|MFapi/i.test(message);
+  const kind: MarketDataIssue["kind"] = /USD\/INR|fx|currency/i.test(message) ? "fx" : /quote|stock|symbol|Yahoo|Stooq/i.test(message) ? "stock" : /NAV|AMFI|mfapi|fund|ISIN/i.test(message) ? "nav" : isHistory ? "history" : "provider";
+  const source = /AMFI/i.test(message) ? "AMFI" : /MFapi/i.test(message) ? "MFapi" : /Yahoo/i.test(message) ? "Yahoo" : /Stooq/i.test(message) ? "Stooq" : /USD\/INR|Frankfurter|currency-api|ER API/i.test(message) ? "FX provider" : "Market provider";
+  return {
+    kind,
+    scope: isHistory ? "history" : "current",
+    source,
+    severity: isHistory ? "warning" : "blocking",
+    message,
+    retryable: /timed out|fetch failed|provider request|unavailable/i.test(message)
+  };
 }
 
 function compactMarketErrors(errors: string[]): string[] {

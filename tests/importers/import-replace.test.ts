@@ -83,4 +83,46 @@ describe("provider-wide import replacement", () => {
     expect(replaced.manualBalances[0]).toMatchObject({ id: "bal_keep", value: 250, taperMode: "medium", taperFactor: 0.05, userModified: false, source: { importId: "new" } });
     expect(replaced.goalMappings).toEqual([{ id: "map_keep", goalId: "goal_1", manualBalanceId: "bal_keep", percent: 75, createdAt: now, updatedAt: now }]);
   });
+
+  it("preserves overlays across native provider replacement families", () => {
+    const providers = [
+      { id: "cas_pdf", latestOnly: false },
+      { id: "indmoney_export", latestOnly: false },
+      { id: "epfo_passbook", latestOnly: true },
+      { id: "nps_statement", latestOnly: true }
+    ] as const;
+
+    for (const provider of providers) {
+      const base = createEmptyBackup("INR");
+      const oldImport = applyImportedRecordSet(base, {
+        accounts: [account("acc_" + provider.id)],
+        instruments: [instrument("inst_" + provider.id)],
+        transactions: [{ ...tx("tx_" + provider.id, "old_" + provider.id, "same-tx-" + provider.id, 100), accountId: "acc_" + provider.id, instrumentId: "inst_" + provider.id, source: { type: "import", importId: "old_" + provider.id, provider: provider.id, sourceRecordHash: "same-tx-" + provider.id } }],
+        manualBalances: [{ ...balance("bal_" + provider.id, "old_" + provider.id, "same-bal-" + provider.id, 100), accountId: "acc_" + provider.id, instrumentId: "inst_" + provider.id, source: { type: "import", importId: "old_" + provider.id, provider: provider.id, sourceRecordHash: "same-bal-" + provider.id } }],
+        importRun: importRun("old_" + provider.id, provider.id),
+        sourceDocument: { id: "doc_old_" + provider.id, importId: "old_" + provider.id, fileName: provider.id + ".fixture", addedAt: now }
+      }, { now, latestManualBalances: provider.latestOnly });
+      const edited: PortfolioBackup = {
+        ...oldImport,
+        transactions: oldImport.transactions.map((row) => ({ ...row, taxFmvPrice: 777, userModified: true })),
+        manualBalances: oldImport.manualBalances.map((row) => ({ ...row, taperMode: "medium" as const, taperFactor: 0.05 })),
+        goalMappings: [{ id: "map_" + provider.id, goalId: "goal_1", manualBalanceId: "bal_" + provider.id, percent: 50, createdAt: now, updatedAt: now }]
+      };
+
+      const replaced = applyImportedRecordSet(edited, {
+        accounts: [account("acc_" + provider.id)],
+        instruments: [instrument("inst_" + provider.id)],
+        transactions: [{ ...tx("tx_new_" + provider.id, "new_" + provider.id, "same-tx-" + provider.id, 250), accountId: "acc_" + provider.id, instrumentId: "inst_" + provider.id, taxFmvPrice: 888, source: { type: "import", importId: "new_" + provider.id, provider: provider.id, sourceRecordHash: "same-tx-" + provider.id } }],
+        manualBalances: [{ ...balance("bal_new_" + provider.id, "new_" + provider.id, "same-bal-" + provider.id, 300), accountId: "acc_" + provider.id, instrumentId: "inst_" + provider.id, source: { type: "import", importId: "new_" + provider.id, provider: provider.id, sourceRecordHash: "same-bal-" + provider.id } }],
+        importRun: importRun("new_" + provider.id, provider.id),
+        sourceDocument: { id: "doc_new_" + provider.id, importId: "new_" + provider.id, fileName: provider.id + ".fixture", addedAt: now }
+      }, { now, replaceImportId: "old_" + provider.id, latestManualBalances: provider.latestOnly });
+
+      expect(replaced.transactions).toHaveLength(1);
+      expect(replaced.transactions[0]).toMatchObject({ taxFmvPrice: 777, userModified: true, source: { importId: "new_" + provider.id, provider: provider.id } });
+      expect(replaced.manualBalances).toHaveLength(1);
+      expect(replaced.manualBalances[0]).toMatchObject({ id: "bal_" + provider.id, value: 300, taperMode: "medium", taperFactor: 0.05, source: { importId: "new_" + provider.id, provider: provider.id } });
+      expect(replaced.goalMappings).toEqual([{ id: "map_" + provider.id, goalId: "goal_1", manualBalanceId: "bal_" + provider.id, percent: 50, createdAt: now, updatedAt: now }]);
+    }
+  });
 });

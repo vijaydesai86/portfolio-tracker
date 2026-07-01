@@ -28,6 +28,8 @@ import { providerImportSpecs } from "@/src/importers/providerRegistry";
 import { applyMarketDataPayload, type MarketDataPayload } from "@/src/marketData/marketData";
 import { buildUsdInrSnapshot, mergePriceSnapshots, parseUsdInrFxCsv } from "@/src/marketData/manualFx";
 import { createEmptyBackup, parseBackup, type AssetCategory, type Goal, type GoalExpense, type ImportRun, type ManualBalance, type PortfolioBackup, type TaperMode, type Transaction } from "@/src/schema/backup";
+import { DrilldownPanel } from "@/components/DrilldownPanel";
+import { installCollapsibleSections, installInteractiveTables } from "@/components/uiEnhancements";
 
 const sampleTemplate = `balance_id,as_of_date,institution,asset_type,name,current_value,currency,category,invested_amount,invested_currency,invested_as_of_date,notes\ncash-main,2026-06-22,Manual,cash,Cash Wallet,10000,INR,Cash,,,,liquid cash\nespp-contribution,2026-06-22,Employer,espp,ESPP Contribution,2000,USD,Equity,2000,USD,2026-06-22,total contribution only\nppf-main,2026-06-22,Post Office,ppf,Public Provident Fund,300000,INR,Debt,250000,INR,2026-06-22,latest known balance`;
 
@@ -390,135 +392,6 @@ const goalTermHelp = {
   mappedNow: "Current value mapped to this goal today. If a mapped holding has taper enabled, this uses tracked conservative value.",
   projectedAtGoal: "Estimated goal-date value of the mapped assets using category return assumptions and any active taper setting."
 };
-
-function installCollapsibleSections(root: HTMLElement, view: string, subScope: string) {
-  const candidates = Array.from(root.querySelectorAll<HTMLElement>(".card, .chart-card, .cardless-panel, .command-hero, .analytics-scope-panel, .asset-class-card, .asset-type-hero, .asset-type-card, .asset-type-card-charts > div, .snapshot-command-panel, .goal-selector-panel, .goal-focus-panel, .goal-card, .goal-combined-panel, .goal-create-panel, .entry-selector-panel, .entry-form-panel"));
-  for (const card of candidates) {
-    const ownToggle = card.querySelector(":scope > .collapse-toggle, :scope > .collapsible-header > .collapse-toggle, :scope > .section-head > .collapse-toggle, :scope > .goal-card-head > .collapse-toggle");
-    if (card.dataset.collapseBound === "true" && ownToggle) continue;
-    if (card.closest(".mini-insight, .signal-item, .metric-card")) continue;
-    const header = card.querySelector<HTMLElement>(":scope > .section-head, :scope > .goal-card-head") ?? card.querySelector<HTMLElement>(":scope > h2, :scope > h3") ?? card.querySelector<HTMLElement>(":scope > div:first-child");
-    const titleSource = card.querySelector<HTMLElement>(":scope > .section-head h2, :scope > h2, :scope > h3, :scope > .goal-card-head input, :scope > .panel-heading span, :scope > .asset-type-card-head span, :scope > .hero-ledger .eyebrow, :scope > .asset-type-hero .eyebrow, :scope > div:first-child h2, :scope > div:first-child .eyebrow, :scope > div:first-child span");
-    const title = (titleSource instanceof HTMLInputElement ? titleSource.value : titleSource?.textContent ?? "Section").trim();
-    if (!header || !title || title.length > 80) continue;
-    card.dataset.collapseBound = "true";
-    card.classList.add("collapsible-section");
-    header.classList.add("collapsible-header");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "collapse-toggle";
-    button.setAttribute("aria-label", "Collapse " + title);
-    button.title = "Collapse or expand this section";
-    const storageKey = "portfolio-collapse:" + view + ":" + subScope + ":" + title;
-    const sync = () => {
-      const collapsed = card.classList.contains("is-collapsed");
-      button.dataset.state = collapsed ? "collapsed" : "expanded";
-      button.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      button.setAttribute("aria-label", (collapsed ? "Expand " : "Collapse ") + title);
-      button.title = (collapsed ? "Expand " : "Collapse ") + title;
-    };
-    if (localStorage.getItem(storageKey) === "collapsed") card.classList.add("is-collapsed");
-    sync();
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      card.classList.toggle("is-collapsed");
-      localStorage.setItem(storageKey, card.classList.contains("is-collapsed") ? "collapsed" : "expanded");
-      sync();
-    });
-    if (header.classList.contains("section-head") || header.classList.contains("goal-card-head")) {
-      header.appendChild(button);
-    } else if (header.tagName === "DIV") {
-      header.appendChild(button);
-    } else {
-      card.insertBefore(button, header.nextSibling);
-    }
-  }
-}
-
-function installInteractiveTables(root: HTMLElement): () => void {
-  const cleanups: Array<() => void> = [];
-  const tables = Array.from(root.querySelectorAll<HTMLTableElement>(".table-wrap table"));
-  for (const table of tables) {
-    const wrap = table.closest<HTMLElement>(".table-wrap");
-    if (!wrap || wrap.dataset.interactiveTable === "true") continue;
-    const body = table.tBodies.item(0);
-    const headerRow = table.tHead?.rows.item(0);
-    if (!body || !headerRow || body.rows.length < 2) continue;
-    wrap.dataset.interactiveTable = "true";
-    wrap.classList.add("interactive-table-wrap");
-    wrap.tabIndex = 0;
-    wrap.setAttribute("aria-label", "Scrollable sortable data table");
-    const hint = document.createElement("div");
-    hint.className = "table-interaction-hint";
-    hint.textContent = "Select a column header to sort. Wide tables scroll inside this panel.";
-    wrap.parentElement?.insertBefore(hint, wrap);
-    cleanups.push(() => hint.remove());
-    Array.from(headerRow.cells).forEach((cell, columnIndex) => {
-      const text = cell.textContent?.trim() ?? "Column";
-      if (!text || cell.querySelector("button, input, select")) return;
-      cell.classList.add("sortable-column");
-      cell.tabIndex = 0;
-      cell.setAttribute("role", "button");
-      cell.setAttribute("aria-sort", "none");
-      cell.title = "Sort by " + text;
-      const sort = () => {
-        const nextDirection = cell.dataset.sortDirection === "asc" ? "desc" : "asc";
-        for (const other of Array.from(headerRow.cells)) {
-          other.classList.remove("sort-asc", "sort-desc");
-          other.setAttribute("aria-sort", "none");
-          delete (other as HTMLElement).dataset.sortDirection;
-        }
-        cell.dataset.sortDirection = nextDirection;
-        cell.classList.add(nextDirection === "asc" ? "sort-asc" : "sort-desc");
-        cell.setAttribute("aria-sort", nextDirection === "asc" ? "ascending" : "descending");
-        const rows = Array.from(body.rows).map((row, originalIndex) => ({ row, originalIndex }));
-        rows.sort((left, right) => compareTableCellText(left.row.cells.item(columnIndex)?.textContent ?? "", right.row.cells.item(columnIndex)?.textContent ?? "", left.originalIndex, right.originalIndex) * (nextDirection === "asc" ? 1 : -1));
-        for (const item of rows) body.appendChild(item.row);
-      };
-      const onClick = () => sort();
-      const onKeyDown = (event: KeyboardEvent) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        sort();
-      };
-      cell.addEventListener("click", onClick);
-      cell.addEventListener("keydown", onKeyDown);
-      cleanups.push(() => {
-        cell.removeEventListener("click", onClick);
-        cell.removeEventListener("keydown", onKeyDown);
-      });
-    });
-    cleanups.push(() => {
-      wrap.classList.remove("interactive-table-wrap");
-      delete wrap.dataset.interactiveTable;
-      wrap.removeAttribute("tabindex");
-      wrap.removeAttribute("aria-label");
-    });
-  }
-  return () => cleanups.forEach((cleanup) => cleanup());
-}
-
-function compareTableCellText(left: string, right: string, leftIndex: number, rightIndex: number): number {
-  const leftNumber = tableSortNumber(left);
-  const rightNumber = tableSortNumber(right);
-  if (leftNumber !== undefined && rightNumber !== undefined && leftNumber !== rightNumber) return leftNumber - rightNumber;
-  const compared = left.trim().localeCompare(right.trim(), undefined, { numeric: true, sensitivity: "base" });
-  return compared === 0 ? leftIndex - rightIndex : compared;
-}
-
-function tableSortNumber(value: string): number | undefined {
-  const normalized = value.replace(/,/g, "").trim();
-  const match = normalized.match(/[-+]?\d*\.?\d+/);
-  if (!match) return undefined;
-  const parsed = Number(match[0]);
-  if (!Number.isFinite(parsed)) return undefined;
-  if (/cr/i.test(normalized)) return parsed * 10000000;
-  if (/l|lakh/i.test(normalized)) return parsed * 100000;
-  if (/%/.test(normalized)) return parsed;
-  return parsed;
-}
-
 
 function GoalTermLabel({ children, help }: { children: string; help: string }) {
   return <span className="term-label" title={help} aria-label={children + ": " + help} tabIndex={0}>{children}</span>;
@@ -890,7 +763,9 @@ export function TrackerApp() {
     const detection = detectImportSource({ fileName: file.name, mimeType: file.type, textSample });
     setNativeDetection(detection);
 
-    if (detection.providerId === "canonical_json") {
+    if (detection.providerId === "unsupported") {
+      setStatus(detection.label + ": no parser will run until the file matches a supported format.");
+    } else if (detection.providerId === "canonical_json") {
       setStatus(`${detection.label}: restore the backup in browser.`);
     } else if (detection.providerId === "cas_pdf") {
       setStatus(`${detection.label}: enter the PDF password and parse in browser.`);
@@ -1192,7 +1067,7 @@ export function TrackerApp() {
       const payload = (await response.json()) as MarketDataPayload;
       const refreshed = applyMarketDataPayload(portfolio, payload);
       const updatedValuations = countChangedCurrentValuations(portfolio, refreshed);
-      const refreshIssues = splitMarketRefreshErrors(payload.errors);
+      const refreshIssues = splitMarketRefreshIssues(payload.issues, payload.errors);
       const finalBackup = withMarketRefreshDiagnostics(refreshed, {
         refreshedAt: new Date().toISOString(),
         navSnapshots: payload.navs.length,
@@ -1370,7 +1245,13 @@ export function TrackerApp() {
     };
   }
 
-  function splitMarketRefreshErrors(errors: string[] = []): { blockingErrors: string[]; historyWarnings: string[] } {
+  function splitMarketRefreshIssues(issues: MarketDataPayload["issues"] = [], errors: string[] = []): { blockingErrors: string[]; historyWarnings: string[] } {
+    if (issues.length > 0) {
+      return {
+        blockingErrors: issues.filter((issue) => issue.severity === "blocking").map((issue) => issue.message),
+        historyWarnings: issues.filter((issue) => issue.severity === "warning").map((issue) => issue.message)
+      };
+    }
     const historyWarnings = errors.filter((error) => /historical|scheme history|provider request|timed out|AMFI historical/i.test(error));
     const blockingErrors = errors.filter((error) => !historyWarnings.includes(error));
     return { blockingErrors, historyWarnings };
@@ -1922,7 +1803,7 @@ function GoalLongevityView({ goalDrawdowns, currency, usdSecondary }: { goalDraw
           <div className="analytics-scope-panel goal-longevity-selector">
             <div><span className="eyebrow">Goal selector</span><p>Select one goal for the detailed longevity model. Summary cards above still reflect every modeled goal.</p></div>
             <div className="analytics-scope-control" role="tablist" aria-label="Goal longevity selector">
-              {goalDrawdowns.map((row) => <button key={row.goalId} className={selected?.goalId === row.goalId ? "active" : ""} style={selected?.goalId === row.goalId ? activeSelectorStyle : undefined} onClick={() => setSelectedGoalId(row.goalId)}><strong>{row.goalName}</strong><span>{row.depletionYear ? "depletes " + row.depletionYear : row.horizonYears + "+ years"}</span></button>)}
+              {goalDrawdowns.map((row) => <button key={row.goalId} className={selected?.goalId === row.goalId ? "active" : ""} onClick={() => setSelectedGoalId(row.goalId)}><strong>{row.goalName}</strong><span>{row.depletionYear ? "depletes " + row.depletionYear : row.horizonYears + "+ years"}</span></button>)}
             </div>
           </div>
           {selected && <GoalDrawdownCard report={selected} currency={currency} usdSecondary={usdSecondary} />}
@@ -2649,9 +2530,9 @@ function ImportsView(props: {
           {props.nativeDetection?.providerId === "canonical_json" && <div className="native-actions"><button className="primary" onClick={props.restoreNativeBackup}>Restore JSON Backup</button></div>}
           {props.nativeDetection?.providerId === "cas_pdf" && <div className="native-actions"><input type="password" placeholder="CAS PDF password" value={props.casPassword} onChange={(event) => props.setCasPassword(event.target.value)} /><button className="primary" onClick={props.parseCasPdfInBrowser}>Parse CAS PDF</button></div>}
           {props.nativeDetection?.providerId === "manual_csv" && props.nativeDetection.nativeInputType === "csv" && props.nativeDetection.confidence !== "low" && <div className="native-actions"><button className="primary" onClick={props.parseManualNativeInBrowser}>Parse Manual CSV</button></div>}
-          {props.nativeDetection?.providerId === "manual_csv" && props.nativeDetection.confidence === "low" && <UnsupportedImportGuidance />}
+          {props.nativeDetection?.providerId === "unsupported" && <UnsupportedImportGuidance />}
           {props.nativeDetection?.providerId === "indmoney_export" && <div className="native-actions"><button className="primary" onClick={props.parseIndMoneyXlsxInBrowser}>Parse INDMoney XLSX</button></div>}
-          {props.nativeDetection?.nativeInputType === "pdf" && props.nativeDetection.providerId !== "cas_pdf" && <div className="native-actions"><button className="primary" onClick={props.parseEpfoPdfInBrowser}>Parse PF PDF{props.nativeFileCount > 1 ? "s" : ""}</button></div>}
+          {props.nativeDetection?.providerId === "epfo_passbook" && props.nativeDetection.nativeInputType === "pdf" && <div className="native-actions"><button className="primary" onClick={props.parseEpfoPdfInBrowser}>Parse PF PDF{props.nativeFileCount > 1 ? "s" : ""}</button></div>}
           {props.nativeDetection?.providerId === "nps_statement" && props.nativeDetection.nativeInputType === "csv" && <div className="native-actions"><button className="primary" onClick={props.parseNpsCsvInBrowser}>Parse NPS CSV{props.nativeFileCount > 1 ? "s" : ""}</button></div>}
           {props.nativeDetection?.providerId === "nps_statement" && props.nativeDetection.nativeInputType !== "csv" && <p className="message">NPS file detected. The verified parser currently supports the yearly CSV statement format.</p>}
           {props.casParse && <div className="detection"><div><span>Schemes</span><strong>{props.casParse.schemes.length}</strong></div><div><span>Dated rows</span><strong>{props.casParse.datedRows}</strong></div><div><span>Financial rows</span><strong>{props.casParse.parsedFinancialRows}</strong></div><div><span>Warnings</span><strong>{props.casParse.warnings.length}</strong></div>{props.casParse.warnings.length > 0 && <p>{props.casParse.warnings.join("; ")}</p>}<button className="primary" onClick={props.commitStagedCas} disabled={!props.stagedCas || props.casParse.errors.length > 0}>Commit CAS Import</button></div>}
@@ -2672,14 +2553,9 @@ function ImportsView(props: {
   );
 }
 
-
-function DrilldownPanel({ title, summary, children, defaultOpen = false }: { title: string; summary?: string; children: React.ReactNode; defaultOpen?: boolean }) {
-  return <details className="drilldown-panel" open={defaultOpen}><summary><span>{title}</span>{summary && <small>{summary}</small>}</summary><div className="drilldown-body">{children}</div></details>;
-}
-
 function ImportDetectionPanel({ detection, fileCount }: { detection: ImportDetection; fileCount: number }) {
   const implemented = detection.status === "implemented" || detection.status === "parser_implemented";
-  const isUnknown = detection.providerId === "manual_csv" && detection.confidence === "low";
+  const isUnknown = detection.providerId === "unsupported";
   return (
     <div className={"detection import-detection-panel " + (implemented && !isUnknown ? "supported" : "needs-review")}>
       <div><span>Detected as</span><strong>{isUnknown ? "Unsupported / unknown file" : detection.label}</strong></div>
@@ -3048,7 +2924,7 @@ function ExpenseCategoryPlanTable({ rows, detailRows, currency, expandedCategory
               <td className={row.delta > 0 ? "negative" : row.delta < 0 ? "positive" : ""}>{formatMoney(row.delta, currency)}</td>
               <td>{row.share.toFixed(1)}%</td>
               <td>{row.rows}</td>
-              <td><button className="ghost detail-toggle-button" onClick={() => setExpandedCategory(isOpen ? null : row.label)}>{isOpen ? "Hide" : "Details"}</button></td>
+              <td><button className="detail-button detail-toggle-button" onClick={() => setExpandedCategory(isOpen ? null : row.label)}>{isOpen ? "Hide" : "Details"}</button></td>
             </tr>
             {isOpen && <tr className="expense-detail-row" key={row.label + "-details"}><td colSpan={7}><ExpenseDetailRows rows={details} currency={currency} /></td></tr>}
           </Fragment>
@@ -3073,7 +2949,7 @@ function ExpensePayerTable({ rows, detailRows, currency, expandedPayer, setExpan
               <td>{formatMoney(row.value, currency)}</td>
               <td>{total > 0 ? ((row.value / total) * 100).toFixed(1) : "0.0"}%</td>
               <td>{row.rows}</td>
-              <td><button className="ghost detail-toggle-button" onClick={() => setExpandedPayer(isOpen ? null : row.label)}>{isOpen ? "Hide" : "Details"}</button></td>
+              <td><button className="detail-button detail-toggle-button" onClick={() => setExpandedPayer(isOpen ? null : row.label)}>{isOpen ? "Hide" : "Details"}</button></td>
             </tr>
             {isOpen && <tr className="expense-detail-row" key={row.label + "-details"}><td colSpan={5}><ExpenseDetailRows rows={details.map((entry) => ({ ...entry, mode: "Current" as const }))} currency={currency} /></td></tr>}
           </Fragment>
@@ -3517,7 +3393,6 @@ function AssetClassCard({ insight, currency }: { insight: AssetClassInsight; cur
   );
 }
 
-const activeSelectorStyle: CSSProperties = { background: "#0f766e", backgroundColor: "#0f766e", backgroundImage: "none", borderColor: "#0f766e", color: "#ffffff", opacity: 1, filter: "none", boxShadow: "0 10px 22px rgba(15, 118, 110, 0.24)" };
 
 function AnalyticsScopeSelector({ scope, setScope, goals, combinedGoalCount }: { scope: AnalyticsScope; setScope: (scope: AnalyticsScope) => void; goals: GoalProgress[]; combinedGoalCount: number }) {
   return (
@@ -3527,11 +3402,11 @@ function AnalyticsScopeSelector({ scope, setScope, goals, combinedGoalCount }: {
         <p>Switch the entire analytics cockpit between the overall portfolio, combined goal funding, or one selected goal.</p>
       </div>
       <div className="analytics-scope-control" role="tablist" aria-label="Analytics scope">
-        <button className={scope === "portfolio" ? "active" : ""} style={scope === "portfolio" ? activeSelectorStyle : undefined} onClick={() => setScope("portfolio")}><strong>Overall</strong><span>full portfolio</span></button>
-        <button className={scope === "goals-combined" ? "active" : ""} style={scope === "goals-combined" ? activeSelectorStyle : undefined} onClick={() => setScope("goals-combined")} disabled={combinedGoalCount === 0}><strong>Combined Goals</strong><span>{combinedGoalCount} included goal(s)</span></button>
+        <button className={scope === "portfolio" ? "active" : ""} onClick={() => setScope("portfolio")}><strong>Overall</strong><span>full portfolio</span></button>
+        <button className={scope === "goals-combined" ? "active" : ""} onClick={() => setScope("goals-combined")} disabled={combinedGoalCount === 0}><strong>Combined Goals</strong><span>{combinedGoalCount} included goal(s)</span></button>
         {goals.map((goal) => {
           const id = `goal:${goal.goal.id}` as AnalyticsScope;
-          return <button key={goal.goal.id} className={scope === id ? "active" : ""} style={scope === id ? activeSelectorStyle : undefined} onClick={() => setScope(id)}><strong>{goal.goal.name}</strong><span>{goal.corpusTodayFundedPercent.toFixed(1)}% ready today</span></button>;
+          return <button key={goal.goal.id} className={scope === id ? "active" : ""} onClick={() => setScope(id)}><strong>{goal.goal.name}</strong><span>{goal.corpusTodayFundedPercent.toFixed(1)}% ready today</span></button>;
         })}
       </div>
     </div>
@@ -3546,7 +3421,7 @@ function AnalyticsTabs({ active, setActive }: { active: AnalyticsTab; setActive:
     { id: "risk", label: "Risk", detail: "concentration and gaps" },
     { id: "history", label: "History", detail: "market-data dependent" }
   ];
-  return <div className="analytics-tabs" role="tablist">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} style={active === tab.id ? activeSelectorStyle : undefined} onClick={() => setActive(tab.id)}><strong>{tab.label}</strong><span>{tab.detail}</span></button>)}</div>;
+  return <div className="analytics-tabs" role="tablist">{tabs.map((tab) => <button key={tab.id} className={active === tab.id ? "active" : ""} onClick={() => setActive(tab.id)}><strong>{tab.label}</strong><span>{tab.detail}</span></button>)}</div>;
 }
 
 function Metric({ label, value, secondary }: { label: string; value: string; secondary?: string }) {

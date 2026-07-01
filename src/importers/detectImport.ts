@@ -7,9 +7,9 @@ export type ImportDetectionInput = {
 };
 
 export type ImportDetection = {
-  providerId: ImportProviderId;
+  providerId: ImportProviderId | "unsupported";
   label: string;
-  status: ImportSupportStatus;
+  status: ImportSupportStatus | "unsupported";
   nativeInputType: NativeInputType;
   confidence: "high" | "medium" | "low";
   reason: string;
@@ -69,13 +69,17 @@ export function detectImportSource(input: ImportDetectionInput): ImportDetection
     return detection("bank_small_savings", extension as NativeInputType, "low", "Looks like a PPF/SSY/FD statement.");
   }
 
-  return detection("manual_csv", extension || "unknown", "low", "Unknown format. Use the manual transactions or manual balances CSV template, or add a verified provider fixture.");
+  return unsupportedDetection(extension || "unknown", "Unknown format. Use a supported native import or manual CSV template, or add a verified provider fixture.");
 }
 
 function detection(providerId: ImportProviderId, nativeInputType: NativeInputType, confidence: ImportDetection["confidence"], reason: string): ImportDetection {
   const spec = providerImportSpecs.find((provider) => provider.id === providerId);
   if (!spec) throw new Error(`Unknown provider: ${providerId}`);
   return { providerId, label: spec.label, status: spec.status, nativeInputType, confidence, reason };
+}
+
+function unsupportedDetection(nativeInputType: NativeInputType, reason: string): ImportDetection {
+  return { providerId: "unsupported", label: "Unsupported file", status: "unsupported", nativeInputType, confidence: "low", reason };
 }
 
 function extensionOf(fileName: string): NativeInputType {
