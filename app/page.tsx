@@ -1,5 +1,5 @@
-import { TrackerApp } from "@/components/TrackerApp";
+import { PortfolioLanding } from "@/components/PortfolioLanding";
 
 export default function Home() {
-  return <TrackerApp />;
+  return <PortfolioLanding />;
 }
