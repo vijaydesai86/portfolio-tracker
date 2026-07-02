@@ -32,7 +32,6 @@ export type GoalDraft = {
   accumulationGlideShiftPercent?: number;
   accumulationGlideFrom?: AssetCategory;
   accumulationGlideTo?: AssetCategory;
-  accumulationGlideFloorPercent?: number;
 };
 
 export type GoalProgress = {
@@ -132,7 +131,6 @@ export function buildGoal(input: GoalDraft, now = new Date().toISOString()): Goa
     accumulationGlideShiftPercent: input.accumulationGlideShiftPercent ?? 0,
     accumulationGlideFrom: input.accumulationGlideFrom ?? "Equity",
     accumulationGlideTo: input.accumulationGlideTo ?? "Debt",
-    accumulationGlideFloorPercent: input.accumulationGlideFloorPercent ?? 20,
     includeInCombinedGoals: true,
     includeInExpenseTotals: true,
     createdAt: now,
@@ -443,7 +441,7 @@ function projectMappedValueWithAccumulationGlide(goal: Goal, category: AssetCate
     categoryValues[category] = projectedValue;
     return { projectedValue, categoryValues };
   }
-  const floorPercent = Math.min(clampPercent(goal.accumulationGlideFloorPercent ?? 20), startingSourcePercent);
+  const targetSourcePercent = accumulationGlideTargetSourcePercent(goal, from, startingSourcePercent);
   let sourceAllocationPercent = startingSourcePercent;
   let projectedValue = value;
   let elapsed = 0;
@@ -455,7 +453,7 @@ function projectMappedValueWithAccumulationGlide(goal: Goal, category: AssetCate
     if (yearsUntilGoalAtStepStart <= startYearsBeforeGoal) {
       const completedGlideYears = startYearsBeforeGoal - yearsUntilGoalAtStepStart;
       const shifts = Math.floor(completedGlideYears / intervalYears) + 1;
-      sourceAllocationPercent = Math.max(floorPercent, startingSourcePercent - shifts * shiftPercent);
+      sourceAllocationPercent = Math.max(targetSourcePercent, startingSourcePercent - shifts * shiftPercent);
     }
     const sourceShare = Math.max(0, Math.min(1, sourceAllocationPercent / startingSourcePercent));
     const weightedReturn = sourceShare * returnRateForCategory(goal, from) + (1 - sourceShare) * returnRateForCategory(goal, to);
@@ -475,6 +473,12 @@ function accumulationGlideStartingSourcePercent(goal: Goal, baselineCategoryValu
   if (explicit !== undefined && explicit > 0) return explicit;
   if (baselineTotal > 0) return clampPercent((baselineCategoryValues[from] / baselineTotal) * 100);
   return 100;
+}
+
+function accumulationGlideTargetSourcePercent(goal: Goal, from: AssetCategory, startingSourcePercent: number): number {
+  const explicit = normalizedAllocationPercent(goal.consumptionTargetAllocation, from);
+  if (explicit === undefined) return 0;
+  return Math.min(startingSourcePercent, explicit);
 }
 
 function normalizedAllocationPercent(allocation: Partial<Record<AssetCategory, number>> | undefined, category: AssetCategory): number | undefined {

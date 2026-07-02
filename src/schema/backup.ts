@@ -167,7 +167,6 @@ export const goalSchema = z.object({
   accumulationGlideShiftPercent: z.number().min(0).max(100).optional(),
   accumulationGlideFrom: categorySchema.optional(),
   accumulationGlideTo: categorySchema.optional(),
-  accumulationGlideFloorPercent: z.number().min(0).max(100).optional(),
   includeInCombinedGoals: z.boolean().default(true),
   includeInExpenseTotals: z.boolean().optional().default(true),
   expenseScenario: z.string().optional(),

@@ -3202,17 +3202,24 @@ function GoalSettingsDraftCard({ goal, goalExpenses, updateDraftGoal, currency }
         </div>
       </details>
 
+
       <details className="goal-settings-subsection">
-        <summary><span>Accumulation glidepath</span><small>Optional pre-goal shift from one asset class to another; planning-only, not tax or actual net worth.</small></summary>
+        <summary><span>Phase allocation targets</span><small>Optional target mixes for accumulation/rebalancing and consumption start.</small></summary>
+        <div className="goal-settings-phase-grid">
+          <GoalSettingsAllocationBlock title="Accumulation target" detail="Used for goal rebalance before the goal year. Accumulation glide starts from this planning mix when configured." goal={goal} phase="accumulation" updateAllocation={updateAllocation} />
+          <GoalSettingsAllocationBlock title="Consumption start target" detail="Landing mix at the goal date. Accumulation glide targets this mix, and drawdown starts from it." goal={goal} phase="consumption" updateAllocation={updateAllocation} />
+        </div>
+      </details>
+      <details className="goal-settings-subsection">
+        <summary><span>Accumulation glidepath</span><small>Optional pre-goal shift that lands on the consumption-start target; planning-only, not tax or actual net worth.</small></summary>
         <div className="settings-grid compact-settings-grid goal-settings-fields">
-          <label><FieldLabel label="Start before goal (years)" help="How many years before the goal date this pre-goal glidepath starts. Set shift amount to 0 to disable it." /><input type="number" min="0" max="100" value={goal.accumulationGlideStartYearsBeforeGoal ?? 5} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideStartYearsBeforeGoal: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Start before goal (years)" help="How many years before the goal date this pre-goal glidepath starts. It moves toward the consumption-start target. Set shift amount to 0 to disable it." /><input type="number" min="0" max="100" value={goal.accumulationGlideStartYearsBeforeGoal ?? 5} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideStartYearsBeforeGoal: Number(event.target.value) })} /></label>
           <label><FieldLabel label="Shift every N years" help="How often the accumulation glide moves allocation from the source class to the destination class." /><input type="number" min="1" max="50" value={goal.accumulationGlideIntervalYears ?? 1} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideIntervalYears: Number(event.target.value) })} /></label>
           <label><FieldLabel label="Shift amount %" help="Percentage points moved at each accumulation interval. Example: 5 moves equity from 60% to 55%." /><input type="number" min="0" max="100" step="1" value={goal.accumulationGlideShiftPercent ?? 0} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideShiftPercent: Number(event.target.value) })} /></label>
           <label><FieldLabel label="Shift from" help="Asset class reduced by the accumulation glidepath." /><select value={goal.accumulationGlideFrom ?? "Equity"} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideFrom: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
           <label><FieldLabel label="Shift to" help="Asset class increased by the accumulation glidepath." /><select value={goal.accumulationGlideTo ?? "Debt"} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideTo: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
-          <label><FieldLabel label="Minimum source %" help="Floor for the source asset class before the goal date. Example: keep equity from going below 20%." /><input type="number" min="0" max="100" step="1" value={goal.accumulationGlideFloorPercent ?? 20} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideFloorPercent: Number(event.target.value) })} /></label>
         </div>
-        <p className="settings-section-note">This affects goal projected corpus, needed-today corpus, goal analytics, and planning views. It does not change holdings, actual net worth, transactions, or tax lots.</p>
+        <p className="settings-section-note">This affects goal projected corpus, needed-today corpus, goal analytics, and planning views. It glides toward the Consumption start target for the selected source asset. It does not change holdings, actual net worth, transactions, or tax lots.</p>
       </details>
 
       <details className="goal-settings-subsection">
@@ -3226,14 +3233,6 @@ function GoalSettingsDraftCard({ goal, goalExpenses, updateDraftGoal, currency }
           <label><FieldLabel label="Shift from" help="Asset class reduced by the consumption glidepath." /><select value={goal.consumptionGlideFrom ?? "Equity"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFrom: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
           <label><FieldLabel label="Shift to" help="Asset class increased by the consumption glidepath." /><select value={goal.consumptionGlideTo ?? "Debt"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideTo: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
           <label><FieldLabel label="Minimum source %" help="Floor for the source asset class after glidepath shifts. Example: keep equity from going below 20%." /><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideFloorPercent ?? 20} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFloorPercent: Number(event.target.value) })} /></label>
-        </div>
-      </details>
-
-      <details className="goal-settings-subsection">
-        <summary><span>Phase allocation targets</span><small>Optional target mixes for accumulation/rebalancing and consumption start.</small></summary>
-        <div className="goal-settings-phase-grid">
-          <GoalSettingsAllocationBlock title="Accumulation target" detail="Used for goal rebalance before the goal year. Accumulation glide starts from this planning mix when configured." goal={goal} phase="accumulation" updateAllocation={updateAllocation} />
-          <GoalSettingsAllocationBlock title="Consumption start target" detail="Starting mix at the goal date; consumption glidepath shifts this mix during drawdown." goal={goal} phase="consumption" updateAllocation={updateAllocation} />
         </div>
       </details>
     </div>

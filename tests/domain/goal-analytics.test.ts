@@ -110,7 +110,7 @@ describe("goal analytics", () => {
       accumulationGlideShiftPercent: 20,
       accumulationGlideFrom: "Equity",
       accumulationGlideTo: "Debt",
-      accumulationGlideFloorPercent: 40
+    consumptionTargetAllocation: { Equity: 40, Debt: 60 }
     });
     backup.accounts.push({ id: "acct_eq", name: "Equity", institution: "Manual", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
     backup.instruments.push({ id: "inst_eq", name: "Equity Holding", type: "mutual_fund", currency: "INR", country: "IN", category: "Equity", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
@@ -142,7 +142,7 @@ describe("goal analytics", () => {
         accumulationGlideShiftPercent: 10,
         accumulationGlideFrom: "Equity",
         accumulationGlideTo: "Debt",
-        accumulationGlideFloorPercent: 20
+    consumptionTargetAllocation: { Equity: 20, Debt: 80 }
       });
       backup.accounts.push({ id: "acct_eq", name: "Equity", institution: "Manual", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
       backup.instruments.push({ id: "inst_eq", name: "Equity Holding", type: "mutual_fund", currency: "INR", country: "IN", category: "Equity", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
