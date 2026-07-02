@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
   const historyStart = normalizeDate(searchParams.get("historyStart"));
   const historyEnd = normalizeDate(searchParams.get("historyEnd")) ?? todayIso();
   const includeNavHistory = searchParams.get("navHistory") !== "0";
+  const latestFxRequested = searchParams.get("latestFx") === "1";
   const errors: string[] = [];
   const payload: MarketDataPayload = { navs: [], stocks: [], fxs: [], errors };
 
@@ -48,7 +49,7 @@ export async function GET(request: NextRequest) {
     symbols.length > 0 && historyStart ? loadHistoricalStockQuotes([...new Set(symbols)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
     indianSymbols.length > 0 ? loadIndianStockQuotes([...new Set(indianSymbols)], payload, errors) : Promise.resolve(),
     indianSymbols.length > 0 && historyStart ? loadHistoricalIndianStockQuotes([...new Set(indianSymbols)], historyStart, historyEnd, payload, errors) : Promise.resolve(),
-    symbols.length > 0 || fxStart ? loadLatestUsdInr(payload, errors) : Promise.resolve(),
+    symbols.length > 0 || latestFxRequested || fxStart ? loadLatestUsdInr(payload, errors) : Promise.resolve(),
     fxStart ? loadHistoricalUsdInr(fxStart, fxEnd, payload, errors) : Promise.resolve()
   ]);
 

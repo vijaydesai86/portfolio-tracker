@@ -16,6 +16,7 @@ import { calculatePortfolioTaxReport, getTaxProfile, updateTaxProfile, type TaxP
 import { formatUsdEquivalent, getDisplayCurrencySettings, updateDisplayCurrencySettings, type DisplayCurrencySettings } from "@/src/domain/displayCurrency";
 import { taperPresets } from "@/src/domain/tapering";
 import { buildReconciliationReport } from "@/src/domain/reconciliation";
+import { buildMarketRefreshRequest, type MarketRefreshMode } from "@/src/domain/marketRefresh";
 import { calculateCashFlowPlan, calculateGoalDrawdowns, calculateGoalRebalancingPlans, calculateIncomeProjection, calculatePerformanceAttribution, calculateRebalancingPlan, calculateScenarioPlan, compareSnapshots, getPlanningSettings, updatePlanningSettings, type CashFlowPlan, type GoalDrawdownReport, type GoalRebalancePlan, type IncomeProjection, type PerformanceAttribution, type PlanningSettings, type PlanningSettingsPatch, type RebalanceRow, type ScenarioPlan, type SnapshotComparison } from "@/src/domain/planning";
 import { detectImportSource, type ImportDetection } from "@/src/importers/detectImport";
 import { extractPdfTextInBrowser } from "@/src/importers/browserPdfText";
@@ -596,6 +597,7 @@ export function TrackerApp({ onReturnHome }: { onReturnHome?: () => void } = {})
     { name: "Total P/L", value: performance.totalProfit }
   ].filter((item) => item.value !== 0);
   const valuationCoveragePercent = timeline.coverage.totalDates === 0 ? 100 : (timeline.coverage.pricedDates / timeline.coverage.totalDates) * 100;
+  const historyCoverage = { pricedDates: timeline.coverage.pricedDates, totalDates: timeline.coverage.totalDates, percent: valuationCoveragePercent };
   const xirrCoverageCount = scopedAnalytics.holdings.filter((holding) => typeof holdingReturns.get(holding.id)?.xirr === "number").length;
   const goalFundedPercent = scopedAnalytics.scopeKind === "portfolio"
     ? goalSummary.requiredCorpusToday > 0 ? goalSummary.corpusTodayFundedPercent : undefined
@@ -1065,52 +1067,32 @@ export function TrackerApp({ onReturnHome }: { onReturnHome?: () => void } = {})
 
   async function refreshMarketData() {
     if (blockIfDraftEditing("refreshing market data")) return;
-    await refreshMarketDataFor(backup);
+    await refreshMarketDataFor(backup, undefined, "current");
   }
 
-  async function refreshMarketDataFor(portfolio: PortfolioBackup, prefix?: string) {
-    const isins = portfolio.instruments.map((instrument) => instrument.isin).filter((isin): isin is string => Boolean(isin));
-    const symbols = portfolio.instruments
-      .filter((instrument) => instrument.type === "us_stock" && instrument.symbol)
-      .map((instrument) => instrument.symbol as string);
-    const indianSymbols = portfolio.instruments
-      .filter((instrument) => instrument.type === "indian_stock" && instrument.symbol)
-      .map((instrument) => instrument.symbol as string);
-    const fxDates = [
-      ...portfolio.transactions.filter((tx) => tx.currency === "USD").map((tx) => tx.date),
-      ...portfolio.manualBalances.filter((balance) => balance.currency === "USD").map((balance) => balance.asOfDate)
-    ].filter(Boolean).sort();
-    const historyDates = [
-      ...portfolio.transactions.map((tx) => tx.date),
-      ...portfolio.manualBalances.map((balance) => balance.asOfDate)
-    ].filter(Boolean).sort();
+  async function repairHistoricalMarketData() {
+    if (blockIfDraftEditing("repairing historical market data")) return;
+    await refreshMarketDataFor(backup, "History repair", "history");
+  }
 
-    if (isins.length === 0 && symbols.length === 0 && indianSymbols.length === 0 && fxDates.length === 0) {
+  async function refreshMarketDataFor(portfolio: PortfolioBackup, prefix?: string, mode: MarketRefreshMode = "current") {
+    const request = buildMarketRefreshRequest(portfolio, mode);
+
+    if (!request.hasRefreshTargets) {
       setStatus(prefix ?? "No mutual fund ISINs, stock symbols, or USD cash flows available for market refresh.");
       return;
     }
 
-    setStatus(prefix ? prefix + " Refreshing live and historical market data..." : "Refreshing live and historical market data...");
-    setErrors([]);
-    const params = new URLSearchParams();
-    if (isins.length > 0) params.set("isins", [...new Set(isins)].join(","));
-    if (symbols.length > 0) params.set("symbols", [...new Set(symbols)].join(","));
-    if (indianSymbols.length > 0) params.set("indianSymbols", [...new Set(indianSymbols)].join(","));
-    const today = new Date().toISOString().slice(0, 10);
-    const mfInstruments = portfolio.instruments.filter((instrument) => instrument.isin);
-    const hasExistingNavHistory = mfInstruments.length > 0 && mfInstruments.every((instrument) => portfolio.priceSnapshots.some((snapshot) => snapshot.instrumentId === instrument.id && snapshot.currency === "INR" && snapshot.asOfDate < today));
-    if (fxDates.length > 0) {
-      params.set("fxStart", fxDates[0]);
-      params.set("fxEnd", today);
-    }
-    if (historyDates.length > 0 && (isins.length > 0 || symbols.length > 0 || indianSymbols.length > 0)) {
-      params.set("historyStart", historyDates[0]);
-      params.set("historyEnd", today);
-      if (isins.length > 0 && hasExistingNavHistory) params.set("navHistory", "0");
+    if (mode === "history" && !request.requestsHistory) {
+      setStatus(prefix ? prefix + ": no historical NAV, quote, or FX ranges need repair." : "No historical NAV, quote, or FX ranges need repair.");
+      return;
     }
 
+    setStatus(prefix ? prefix + (mode === "history" ? " repairing historical NAV, quote, and FX coverage..." : " refreshing current NAV, quotes, and FX...") : mode === "history" ? "Repairing historical NAV, quote, and FX coverage..." : "Refreshing current NAV, quotes, and FX...");
+    setErrors([]);
+
     try {
-      const response = await fetch("/api/market-data?" + params.toString());
+      const response = await fetch("/api/market-data?" + request.params.toString());
       const payload = (await response.json()) as MarketDataPayload;
       const refreshed = applyMarketDataPayload(portfolio, payload);
       const updatedValuations = countChangedCurrentValuations(portfolio, refreshed);
@@ -1128,7 +1110,7 @@ export function TrackerApp({ onReturnHome }: { onReturnHome?: () => void } = {})
       setErrors(refreshIssues.blockingErrors);
       setStatus(
         (prefix ? prefix + " " : "") +
-          `Market refresh complete: ${payload.navs.length} NAV snapshot(s), ${payload.stocks.length} stock price snapshot(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s), ${updatedValuations} holding valuation(s) updated.` +
+          `${mode === "history" ? "History repair complete" : "Current refresh complete"}: ${payload.navs.length} NAV snapshot(s), ${payload.stocks.length} stock price snapshot(s), ${(payload.fxs?.length ?? 0) + (payload.fx ? 1 : 0)} USD/INR rate(s), ${updatedValuations} holding valuation(s) updated.` +
           (refreshIssues.historyWarnings.length > 0 ? ` Historical chart coverage warning: ${refreshIssues.historyWarnings.length} non-blocking provider issue(s); current valuations are unaffected.` : "")
       );
     } catch (error) {
@@ -1607,7 +1589,7 @@ export function TrackerApp({ onReturnHome }: { onReturnHome?: () => void } = {})
             <p>{status}</p>
           </div>
           <div className="actions">
-            <button onClick={refreshMarketData} disabled={editSessionActive} title={editSessionActive ? "Finish or cancel draft editing before refreshing." : "Refresh live and historical NAV, quotes, and FX"}><RefreshCw size={16} /> Refresh</button>
+            <button onClick={refreshMarketData} disabled={editSessionActive} title={editSessionActive ? "Finish or cancel draft editing before refreshing." : "Refresh latest NAV, quotes, and FX. Historical repair appears in Data Quality when needed."}><RefreshCw size={16} /> Refresh</button>
             <button onClick={exportBackup} disabled={editSessionActive} title={editSessionActive ? "Finish or cancel draft editing before exporting." : "Export canonical JSON backup"}><Download size={16} /> Export</button>
             <button onClick={resetPortfolio} disabled={editSessionActive} title={editSessionActive ? "Finish or cancel draft editing before resetting." : "Reset local portfolio"}><RotateCcw size={16} /> Reset</button>
           </div>
@@ -1812,7 +1794,7 @@ export function TrackerApp({ onReturnHome }: { onReturnHome?: () => void } = {})
 
         {view === "imports" && <ImportsView {...{ backup, csv, setCsv, manualImportPreview, previewManualCsv, importCsv, importLabel, setImportLabel, replaceImportId, setReplaceImportId, deleteImport, nativeDetection, nativeFileCount: nativeFiles.length, inspectNativeFile, casPassword, setCasPassword, parseCasPdfInBrowser, restoreNativeBackup, parseManualNativeInBrowser, parseIndianBrokerCsvInBrowser, parseIndMoneyXlsxInBrowser, parseEpfoPdfInBrowser, parseNpsCsvInBrowser, casParse, stagedCas, commitStagedCas, indParse, stagedInd, commitStagedIndMoney, epfoParse, stagedEpfo, commitStagedEpfo, npsParse, stagedNps, commitStagedNps, fxRate, setFxRate, fxDate, setFxDate, applyManualFxRate, importFxCsvFile, fxCsv, setFxCsv, importFxCsvText, goalExpenseCsv, setGoalExpenseCsv, goalExpenseGoalId: goalExpenseGoalId || backup.goals[0]?.id || "", setGoalExpenseGoalId, goalExpenseBaseDate, setGoalExpenseBaseDate, importGoalExpensesFromText, importGoalExpensesFromFile, editSessionActive }} />}
 
-        {view === "data" && <DataAuditView report={reconciliationReport} taxReport={taxReport} currency={backup.baseCurrency} />}
+        {view === "data" && <DataAuditView report={reconciliationReport} taxReport={taxReport} currency={backup.baseCurrency} historyCoverage={historyCoverage} onRepairHistory={repairHistoricalMarketData} repairDisabled={editSessionActive} />}
 
         {view === "settings" && <SettingsView profile={taxProfile} updateTaxProfile={updateTaxProfileFromForm} displaySettings={displayCurrencySettings} updateDisplaySettings={updateDisplayCurrencyFromForm} planningSettings={planningSettings} updatePlanningSettings={updatePlanningSettingsFromForm} goals={backup.goals} goalExpenses={backup.goalExpenses ?? []} updateGoalSettings={updateGoalSettingsFromForm} currency={backup.baseCurrency} />}
 
@@ -2774,7 +2756,8 @@ function TaxView({ report, currency, financialYears, selectedFinancialYear, setS
   );
 }
 
-function DataAuditView({ report, taxReport, currency }: { report: ReturnType<typeof buildReconciliationReport>; taxReport: ReturnType<typeof calculatePortfolioTaxReport>; currency: string }) {
+function DataAuditView({ report, taxReport, currency, historyCoverage, onRepairHistory, repairDisabled }: { report: ReturnType<typeof buildReconciliationReport>; taxReport: ReturnType<typeof calculatePortfolioTaxReport>; currency: string; historyCoverage: { pricedDates: number; totalDates: number; percent: number }; onRepairHistory: () => void; repairDisabled: boolean }) {
+  const historyNeedsRepair = historyCoverage.totalDates > 0 && historyCoverage.pricedDates < historyCoverage.totalDates;
   const actionRows = [
     ...report.marketDataGaps.slice(0, 8).map((gap) => ({ area: gap.kind, item: gap.label, severity: gap.severity, action: gap.kind.toLowerCase().includes("fx") ? "Add/import FX rate or refresh market data." : "Refresh market data; if still missing, add a manual price/NAV override." })),
     ...report.validationRows.filter((row) => row.status !== "ok").slice(0, 8).map((row) => ({ area: row.label, item: row.detail, severity: row.status, action: "Review the source import and parser output before relying on affected analytics." }))
@@ -2794,6 +2777,7 @@ function DataAuditView({ report, taxReport, currency }: { report: ReturnType<typ
       <div className="analytics-grid">
         <TaxDataChecksCard report={taxReport} currency={currency} />
         {report.refreshDiagnostics && <MarketRefreshDiagnosticsCard diagnostic={report.refreshDiagnostics} />}
+        {historyNeedsRepair && <div className="card wide-card refresh-diagnostics-card"><div className="section-head compact-section-head"><div><h2>History Coverage Repair</h2><p>Normal Refresh updates current NAV, quotes, and FX only. Use this slower repair only when historical charts have missing valuation dates.</p></div><span className="status-pill planned">{historyCoverage.pricedDates}/{historyCoverage.totalDates}</span></div><div className="holding-command-strip compact-command-strip"><MiniInsight label="Coverage" value={historyCoverage.percent.toFixed(1) + "%"} detail="complete historical valuation dates" /><MiniInsight label="Missing dates" value={String(Math.max(0, historyCoverage.totalDates - historyCoverage.pricedDates))} detail="repair fetches historical NAV, quotes, and FX" /><MiniInsight label="Daily Refresh" value="Current only" detail="keeps JSON restore refresh fast" /></div><div className="actions"><button className="primary" onClick={onRepairHistory} disabled={repairDisabled}><RefreshCw size={16} /> Repair History</button></div></div>}
         <div className="card wide-card data-action-card"><h2>Review Queue</h2><p className="chart-note compact-note">Actionable items only. Fix these before trusting affected history, tax, XIRR, or INR conversions.</p>{actionRows.length === 0 ? <p className="message">No immediate data actions. Current data quality checks are clean.</p> : <div className="table-wrap"><table><thead><tr><th>Area</th><th>Item</th><th>Severity</th><th>Suggested action</th></tr></thead><tbody>{actionRows.map((row, index) => <tr key={row.area + row.item + index}><td>{row.area}</td><td>{row.item}</td><td><span className={"status-pill " + (row.severity === "critical" || row.severity === "warn" ? "planned" : "partial")}>{row.severity}</span></td><td>{row.action}</td></tr>)}</tbody></table></div>}</div>
         <ChartCard title="Source Value Mix"><HorizontalBar data={report.sourceTotals.map((row) => ({ name: row.source, value: row.value }))} currency={currency} /></ChartCard>
         <div className="card"><h2>Data Quality Matrix</h2><p className="chart-note compact-note">Trust score for the data layer only. Analytics stays in the dashboard; this matrix explains whether inputs, market data, cost basis, XIRR, and freshness are ready.</p><div className="quality-row-list">{report.dataQuality.rows.map((row) => <div className={"quality-row status-" + row.status} key={row.area}><div><span>{row.area}</span><strong>{row.status.toUpperCase()}</strong></div><em>{row.score}%</em><small>{row.detail}</small></div>)}</div></div>
