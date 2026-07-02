@@ -27,6 +27,12 @@ export type GoalDraft = {
   consumptionGlideFrom?: AssetCategory;
   consumptionGlideTo?: AssetCategory;
   consumptionGlideFloorPercent?: number;
+  accumulationGlideStartYearsBeforeGoal?: number;
+  accumulationGlideIntervalYears?: number;
+  accumulationGlideShiftPercent?: number;
+  accumulationGlideFrom?: AssetCategory;
+  accumulationGlideTo?: AssetCategory;
+  accumulationGlideFloorPercent?: number;
 };
 
 export type GoalProgress = {
@@ -121,6 +127,12 @@ export function buildGoal(input: GoalDraft, now = new Date().toISOString()): Goa
     consumptionGlideFrom: input.consumptionGlideFrom ?? "Equity",
     consumptionGlideTo: input.consumptionGlideTo ?? "Debt",
     consumptionGlideFloorPercent: input.consumptionGlideFloorPercent ?? 20,
+    accumulationGlideStartYearsBeforeGoal: input.accumulationGlideStartYearsBeforeGoal ?? 5,
+    accumulationGlideIntervalYears: input.accumulationGlideIntervalYears ?? 1,
+    accumulationGlideShiftPercent: input.accumulationGlideShiftPercent ?? 0,
+    accumulationGlideFrom: input.accumulationGlideFrom ?? "Equity",
+    accumulationGlideTo: input.accumulationGlideTo ?? "Debt",
+    accumulationGlideFloorPercent: input.accumulationGlideFloorPercent ?? 20,
     includeInCombinedGoals: true,
     includeInExpenseTotals: true,
     createdAt: now,
@@ -144,6 +156,18 @@ export function calculateGoalProgress(backup: PortfolioBackup): GoalProgress[] {
     const expenseSummary = summarizeGoalExpenses(goal, expenseRows);
     const recalculated = recalculateGoalTarget(goal, expenseRows);
     const years = yearsUntil(recalculated.targetDate);
+    const baselineCategoryValues = emptyCategoryRecord();
+    for (const balance of backup.manualBalances) {
+      const percent = mappingPercentForBalance(backup.goalMappings, recalculated.id, balance);
+      if (percent <= 0) continue;
+      const returns = holdingReturns.get(balance.id);
+      const actualCurrent = returns?.currentValue ?? tryConvertToBase(balance.value, balance.currency, backup) ?? 0;
+      const tracked = calculateTrackedLocalValue(balance);
+      const trackedCurrent = tryConvertToBase(tracked.trackedLocalValue, balance.currency, backup) ?? actualCurrent;
+      const current = tracked.applied ? trackedCurrent : actualCurrent;
+      baselineCategoryValues[balance.category] += current * (percent / 100);
+    }
+    const baselineMappedCurrentValue = sumCategories(baselineCategoryValues);
     const categoryValues = emptyCategoryRecord();
     const projectedCategoryValues = emptyCategoryRecord();
     const mappedHoldings: GoalProgress["mappedHoldings"] = [];
@@ -162,7 +186,8 @@ export function calculateGoalProgress(backup: PortfolioBackup): GoalProgress[] {
       const current = tracked.applied ? trackedCurrent : actualCurrent;
       const mappedValue = current * (percent / 100);
       const mappedActualValue = actualCurrent * (percent / 100);
-      const projectedValue = mappedValue * Math.pow(1 + returnRateForCategory(recalculated, balance.category) / 100, years);
+      const projection = projectMappedValueWithAccumulationGlide(recalculated, balance.category, mappedValue, years, baselineCategoryValues, baselineMappedCurrentValue);
+      const projectedValue = projection.projectedValue;
       const invested = returns?.costBasisKnown ? returns.netInvested * (percent / 100) : undefined;
       const profit = invested === undefined ? undefined : mappedValue - invested;
       if (invested !== undefined) mappedInvested += invested;
@@ -172,7 +197,7 @@ export function calculateGoalProgress(backup: PortfolioBackup): GoalProgress[] {
         if (typeof returns.xirr === "number") xirrAvailable += 1;
       }
       categoryValues[balance.category] += mappedValue;
-      projectedCategoryValues[balance.category] += projectedValue;
+      for (const category of categories) projectedCategoryValues[category] += projection.categoryValues[category];
       mappedHoldings.push({ balance, mappedPercent: percent, value: roundMoney(mappedValue), actualValue: roundMoney(mappedActualValue), trackedDiscount: roundMoney(mappedActualValue - mappedValue), projectedValue: roundMoney(projectedValue), invested: invested === undefined ? undefined : roundMoney(invested), profit: profit === undefined ? undefined : roundMoney(profit), xirr: returns?.xirr, taperApplied: tracked.applied });
     }
 
@@ -396,6 +421,67 @@ function normalizeTargetYear(value: number): number {
 
 function futureValue(value: number, annualRate: number, years: number): number {
   return Math.max(0, value) * Math.pow(1 + Math.max(0, annualRate) / 100, Math.max(0, years));
+}
+
+function projectMappedValueWithAccumulationGlide(goal: Goal, category: AssetCategory, value: number, years: number, baselineCategoryValues: Record<AssetCategory, number>, baselineTotal: number): { projectedValue: number; categoryValues: Record<AssetCategory, number> } {
+  const categoryValues = emptyCategoryRecord();
+  const safeYears = Math.max(0, years);
+  const shiftPercent = clampPercent(goal.accumulationGlideShiftPercent ?? 0);
+  const from = goal.accumulationGlideFrom ?? "Equity";
+  const to = goal.accumulationGlideTo ?? "Debt";
+  if (value <= 0 || safeYears <= 0 || shiftPercent <= 0 || from === to || category !== from) {
+    const projectedValue = value * Math.pow(1 + returnRateForCategory(goal, category) / 100, safeYears);
+    categoryValues[category] = projectedValue;
+    return { projectedValue, categoryValues };
+  }
+
+  const startYearsBeforeGoal = Math.max(0, Math.min(100, Math.round(goal.accumulationGlideStartYearsBeforeGoal ?? 5)));
+  const intervalYears = Math.max(1, Math.min(50, Math.round(goal.accumulationGlideIntervalYears ?? 1)));
+  const startingSourcePercent = accumulationGlideStartingSourcePercent(goal, baselineCategoryValues, baselineTotal, from);
+  if (startYearsBeforeGoal <= 0 || startingSourcePercent <= 0) {
+    const projectedValue = value * Math.pow(1 + returnRateForCategory(goal, category) / 100, safeYears);
+    categoryValues[category] = projectedValue;
+    return { projectedValue, categoryValues };
+  }
+  const floorPercent = Math.min(clampPercent(goal.accumulationGlideFloorPercent ?? 20), startingSourcePercent);
+  let sourceAllocationPercent = startingSourcePercent;
+  let projectedValue = value;
+  let elapsed = 0;
+
+  while (elapsed < safeYears - 0.000001) {
+    const stepYears = Math.min(1, safeYears - elapsed);
+    const yearsRemainingAfterStep = Math.max(0, safeYears - elapsed - stepYears);
+    const yearsUntilGoalAtStepStart = Math.max(0, safeYears - elapsed);
+    if (yearsUntilGoalAtStepStart <= startYearsBeforeGoal) {
+      const completedGlideYears = startYearsBeforeGoal - yearsUntilGoalAtStepStart;
+      const shifts = Math.floor(completedGlideYears / intervalYears) + 1;
+      sourceAllocationPercent = Math.max(floorPercent, startingSourcePercent - shifts * shiftPercent);
+    }
+    const sourceShare = Math.max(0, Math.min(1, sourceAllocationPercent / startingSourcePercent));
+    const weightedReturn = sourceShare * returnRateForCategory(goal, from) + (1 - sourceShare) * returnRateForCategory(goal, to);
+    projectedValue *= Math.pow(1 + weightedReturn / 100, stepYears);
+    elapsed += stepYears;
+    if (yearsRemainingAfterStep <= 0) break;
+  }
+
+  const sourceShareAtGoal = Math.max(0, Math.min(1, sourceAllocationPercent / startingSourcePercent));
+  categoryValues[from] = projectedValue * sourceShareAtGoal;
+  categoryValues[to] += projectedValue * (1 - sourceShareAtGoal);
+  return { projectedValue, categoryValues };
+}
+
+function accumulationGlideStartingSourcePercent(goal: Goal, baselineCategoryValues: Record<AssetCategory, number>, baselineTotal: number, from: AssetCategory): number {
+  const explicit = normalizedAllocationPercent(goal.accumulationTargetAllocation, from);
+  if (explicit !== undefined && explicit > 0) return explicit;
+  if (baselineTotal > 0) return clampPercent((baselineCategoryValues[from] / baselineTotal) * 100);
+  return 100;
+}
+
+function normalizedAllocationPercent(allocation: Partial<Record<AssetCategory, number>> | undefined, category: AssetCategory): number | undefined {
+  if (!allocation) return undefined;
+  const total = categories.reduce((sum, item) => sum + Math.max(0, allocation[item] ?? 0), 0);
+  if (total <= 0) return undefined;
+  return clampPercent((Math.max(0, allocation[category] ?? 0) / total) * 100);
 }
 
 function fallbackGrowthMultiplier(goal: Goal, years: number): number {

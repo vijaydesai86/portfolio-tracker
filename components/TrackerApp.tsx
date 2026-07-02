@@ -2357,7 +2357,7 @@ function GoalCard({ progress, currency, usdSecondary, selected, setSelectedGoalI
         <MiniInsight label="Invested" value={formatMoney(progress.mappedInvested, currency)} secondary={usdSecondary(progress.mappedInvested)} detail="mapped cost basis" />
         <MiniInsight label="P/L" value={formatMoney(progress.mappedProfit, currency)} secondary={usdSecondary(progress.mappedProfit)} detail={progress.mappedReturnPercent === undefined ? "cost basis unavailable" : progress.mappedReturnPercent.toFixed(1) + "% simple"} />
       </div>
-      <p className="message compact-note">Goal assumptions, returns, accumulation targets, consumption targets, and glidepath are edited in Settings. This page focuses on readiness and asset mapping.</p>
+      <p className="message compact-note">Goal assumptions, returns, accumulation targets, pre-goal glidepath, consumption targets, and drawdown glidepath are edited in Settings. This page focuses on readiness and asset mapping.</p>
       <GoalCategoryStack progressLike={progress} currency={currency} />
     </div>
   );
@@ -3079,27 +3079,47 @@ function SettingsView({ profile, updateTaxProfile, displaySettings, updateDispla
   };
   return (
     <section className="grid settings-workspace">
-      <div className="card wide-card">
-        <div className="section-head"><div><h2>Settings</h2><p>Configure assumptions used by portfolio estimates. Settings are stored in the canonical JSON backup and restored across browsers.</p></div><div className="draft-actions compact-draft-actions"><button className="primary" disabled={!settingsDirty} onClick={applySettings}>Done editing settings</button><button disabled={!settingsDirty} onClick={resetSettings}>Reset draft</button></div></div>
-        <p className="message">Tax and display settings are edited as drafts here. Portfolio analytics refresh once when you press Done editing settings.</p>
-        <div className="settings-grid">
-          <label><FieldLabel label="Taxpayer" help="Fixed to resident Indian individual. Tax estimates assume Indian resident rules for Indian and foreign assets." /><select value={draftProfile.residency} disabled><option value="resident_individual">Resident Indian individual</option></select></label>
-          <label><FieldLabel label="Tax regime" help="Chooses old/new regime label for the tax estimate. This tracker does not calculate full salary or deduction schedules." /><select value={draftProfile.regime} onChange={(event) => setDraftProfile((current) => ({ ...current, regime: event.target.value as TaxProfile["regime"] }))}><option value="new">New regime</option><option value="old">Old regime</option></select></label>
-          <label><FieldLabel label="Slab / marginal rate" help="Used for slab-taxed income and foreign/debt taxable gains. Keep this aligned with your marginal tax slab." /><select value={String(draftProfile.slabRate)} onChange={(event) => setDraftProfile((current) => ({ ...current, slabRate: Number(event.target.value) }))}>{[0, 5, 10, 15, 20, 25, 30].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
-          <label><FieldLabel label="Surcharge" help="Additional surcharge applied to the estimated portfolio tax. Configure it to test your expected income level." /><select value={String(draftProfile.surchargeRate)} onChange={(event) => setDraftProfile((current) => ({ ...current, surchargeRate: Number(event.target.value) }))}>{[0, 10, 15, 25, 37].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
-          <label><FieldLabel label="Cess" help="Health and education cess applied on tax plus surcharge in the estimate." /><input type="number" step="0.1" value={draftProfile.cessRate} onChange={(event) => setDraftProfile((current) => ({ ...current, cessRate: Number(event.target.value) }))} /></label>
-          <label><FieldLabel label="Tax mode" help="Portfolio estimate mode only. It is not a full ITR engine and excludes salary/Form 16/deductions." /><select value={draftProfile.mode} disabled><option value="estimate">Portfolio tax estimate</option></select></label>
+      <div className="card wide-card settings-command-card">
+        <div className="section-head"><div><h2>Settings</h2><p>Central place for assumptions and preferences. These values are stored in the canonical JSON backup and restored across browsers.</p></div><div className="draft-actions compact-draft-actions"><button className="primary" disabled={!settingsDirty} onClick={applySettings}>Done editing settings</button><button disabled={!settingsDirty} onClick={resetSettings}>Reset draft</button></div></div>
+        <div className="holding-command-strip compact-command-strip">
+          <MiniInsight label="Base currency" value={currency} detail="all calculations stay in INR base" />
+          <MiniInsight label="Tax slab" value={(draftProfile.slabRate ?? 0) + "%"} detail="portfolio tax estimate" />
+          <MiniInsight label="USD display" value={draftDisplaySettings.showUsdEquivalent ? "On" : "Off"} detail="display-only secondary values" />
+          <MiniInsight label="Goals" value={String(goals.length)} detail="goal assumptions below" />
         </div>
-        <div className="settings-panel">
-          <label className="toggle-row"><input type="checkbox" checked={draftDisplaySettings.showUsdEquivalent} onChange={(event) => setDraftDisplaySettings((current) => ({ ...current, showUsdEquivalent: event.target.checked }))} /><span><strong>Show USD equivalents <HelpBubble>Display-only secondary USD values under INR amounts. INR remains the base calculation currency.</HelpBubble></strong><small>Display-only secondary USD values under INR portfolio, holding, and goal amounts when a real USD/INR snapshot exists.</small></span></label>
-        </div>
-        <div className="settings-panel planning-settings-panel">
-          <h3>Planning Assumptions</h3>
-          <p className="message">These global values feed Scenario Planning and portfolio-level rebalancing. Goal-specific assumptions and expense rows are applied as drafts, so charts do not recalculate on every keystroke.</p>
+        <p className="message compact-note">Most users only need Imports, Holdings, Analytics, and Backup. Use Settings when you want to tune tax estimates, display preferences, planning scenarios, goal assumptions, glidepaths, and contribution planning.</p>
+      </div>
+
+      <div className="settings-section-list">
+        <details className="settings-section-card">
+          <summary><span>Tax estimate inputs</span><small>Resident Indian portfolio-tax assumptions. This is not a salary or ITR engine.</small></summary>
+          <div className="settings-grid">
+            <label><FieldLabel label="Taxpayer" help="Fixed to resident Indian individual. Tax estimates assume Indian resident rules for Indian and foreign assets." /><select value={draftProfile.residency} disabled><option value="resident_individual">Resident Indian individual</option></select></label>
+            <label><FieldLabel label="Tax regime" help="Chooses old/new regime label for the tax estimate. This tracker does not calculate full salary or deduction schedules." /><select value={draftProfile.regime} onChange={(event) => setDraftProfile((current) => ({ ...current, regime: event.target.value as TaxProfile["regime"] }))}><option value="new">New regime</option><option value="old">Old regime</option></select></label>
+            <label><FieldLabel label="Slab / marginal rate" help="Used for slab-taxed income and foreign/debt taxable gains. Keep this aligned with your marginal tax slab." /><select value={String(draftProfile.slabRate)} onChange={(event) => setDraftProfile((current) => ({ ...current, slabRate: Number(event.target.value) }))}>{[0, 5, 10, 15, 20, 25, 30].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
+            <label><FieldLabel label="Surcharge" help="Additional surcharge applied to the estimated portfolio tax. Configure it to test your expected income level." /><select value={String(draftProfile.surchargeRate)} onChange={(event) => setDraftProfile((current) => ({ ...current, surchargeRate: Number(event.target.value) }))}>{[0, 10, 15, 25, 37].map((rate) => <option value={rate} key={rate}>{rate}%</option>)}</select></label>
+            <label><FieldLabel label="Cess" help="Health and education cess applied on tax plus surcharge in the estimate." /><input type="number" step="0.1" value={draftProfile.cessRate} onChange={(event) => setDraftProfile((current) => ({ ...current, cessRate: Number(event.target.value) }))} /></label>
+            <label><FieldLabel label="Tax mode" help="Portfolio estimate mode only. It is not a full ITR engine and excludes salary/Form 16/deductions." /><select value={draftProfile.mode} disabled><option value="estimate">Portfolio tax estimate</option></select></label>
+          </div>
+          <p className="message compact-note">The Tax section estimates portfolio tax only. Salary, deductions, Form 16, full ITR schedules, and ESPP payroll/perquisite treatment stay outside this tracker unless explicitly added later.</p>
+        </details>
+
+        <details className="settings-section-card" open>
+          <summary><span>Display preferences</span><small>Cosmetic options that do not change the calculation base.</small></summary>
+          <div className="settings-panel">
+            <label className="toggle-row"><input type="checkbox" checked={draftDisplaySettings.showUsdEquivalent} onChange={(event) => setDraftDisplaySettings((current) => ({ ...current, showUsdEquivalent: event.target.checked }))} /><span><strong>Show USD equivalents <HelpBubble>Display-only secondary USD values under INR amounts. INR remains the base calculation currency.</HelpBubble></strong><small>Display-only secondary USD values under INR portfolio, holding, and goal amounts when a real USD/INR snapshot exists.</small></span></label>
+          </div>
+        </details>
+
+        <details className="settings-section-card">
+          <summary><span>Portfolio planning assumptions</span><small>Scenario, target allocation, contribution planning, and advisory rebalancing inputs.</small></summary>
           <PlanningSettingsDraftEditor settings={planningSettings} goals={goals} onApply={updatePlanningSettings} mode="all" />
+        </details>
+
+        <details className="settings-section-card" open>
+          <summary><span>Goal assumptions and glidepaths</span><small>Goal-level expense source, return assumptions, accumulation glidepath, drawdown, and target allocations.</small></summary>
           <GoalSettingsDraftEditor goals={goals} goalExpenses={goalExpenses} updateGoalSettings={updateGoalSettings} currency={currency} />
-        </div>
-        <p className="message">The Tax section intentionally estimates portfolio tax only. Salary, deductions, Form 16, full ITR schedules, and ESPP payroll/perquisite treatment stay outside this tracker unless explicitly added later.</p>
+        </details>
       </div>
     </section>
   );
@@ -3135,7 +3155,7 @@ function GoalSettingsDraftEditor({ goals, goalExpenses, updateGoalSettings, curr
   const reset = () => setDraftGoals(goals);
   return (
     <div className="goal-settings-draft-editor">
-      <div className="goal-settings-header"><div><h3>Goal Assumptions</h3><p>Central place for goal inputs, expense-derived monthly spend, phase allocations, drawdown, and consumption glidepath. Goal and Planning pages read these values.</p></div><div className="draft-actions compact-draft-actions"><button className="primary" disabled={!dirty} onClick={apply}>Done editing goals</button><button disabled={!dirty} onClick={reset}>Reset draft</button></div></div>
+      <div className="goal-settings-header"><div><h3>Goal Assumptions</h3><p>Central place for goal inputs, expense-derived monthly spend, phase allocations, accumulation glidepath, drawdown, and consumption glidepath. Goal and Planning pages read these values.</p></div><div className="draft-actions compact-draft-actions"><button className="primary" disabled={!dirty} onClick={apply}>Done editing goals</button><button disabled={!dirty} onClick={reset}>Reset draft</button></div></div>
       {draftGoals.length === 0 ? <p className="message">No goals yet. Add a goal from Add Entry, then configure assumptions here.</p> : <div className="goal-settings-list">{draftGoals.map((goal) => <GoalSettingsDraftCard key={goal.id} goal={goal} goalExpenses={goalExpenses.filter((row) => row.goalId === goal.id)} updateDraftGoal={updateDraftGoal} currency={currency} />)}</div>}
     </div>
   );
@@ -3152,31 +3172,70 @@ function GoalSettingsDraftCard({ goal, goalExpenses, updateDraftGoal, currency }
   };
   return (
     <div className="goal-settings-card">
-      <div className="goal-settings-card-head"><div><strong>{goal.name}</strong><span>{goal.type === "retirement" ? "Retirement" : "Custom"} · target {targetYear}</span></div><div className="goal-settings-toggle-cluster"><label className="goal-include-toggle" title="Excluded goals remain visible individually but are not counted in Combined Goals totals."><input type="checkbox" checked={goal.includeInCombinedGoals !== false} onChange={(event) => updateDraftGoal(goal.id, { includeInCombinedGoals: event.target.checked })} /><span>Combined goals</span></label><label className="goal-include-toggle" title="Excluded goals remain visible individually but are not counted in the Expenses page rollups."><input type="checkbox" checked={goal.includeInExpenseTotals !== false} onChange={(event) => updateDraftGoal(goal.id, { includeInExpenseTotals: event.target.checked })} /><span>Expense totals</span></label></div></div>
-      <div className="settings-grid compact-settings-grid goal-settings-fields">
-        <label><FieldLabel label="Goal name" help="Display name used in Goals, Planning, Analytics, Expenses, and mappings." /><input value={goal.name} onChange={(event) => updateDraftGoal(goal.id, { name: event.target.value })} /></label>
-        <label><FieldLabel label="Type" help="Retirement uses the retirement defaults; Custom is for any other target corpus goal." /><select value={goal.type} onChange={(event) => updateDraftGoal(goal.id, { type: event.target.value as Goal["type"] })}><option value="retirement">Retirement</option><option value="custom">Custom</option></select></label>
-        <label title={expenseDerived ? "Derived from goal expense rows. Edit the expense CSV above to change this value." : "Manual monthly expense used when no expense rows exist."}><FieldLabel label={expenseDerived ? "Monthly expense (derived)" : "Monthly expense"} help={expenseDerived ? "Computed from imported expense rows and active scenario. Edit the expense CSV to change it." : "Manual monthly expense used only when no expense rows exist for this goal."} /><input type="number" value={expenseDerived ? expenseSummary.currentMonthlyExpense : goal.currentMonthlyExpense} disabled={expenseDerived} onChange={(event) => updateDraftGoal(goal.id, { currentMonthlyExpense: Number(event.target.value) })} /><small>{expenseDerived ? String(expenseSummary.rows.length) + " rows · base " + formatMoney(expenseSummary.baseMonthlyExpense, currency) : "manual fallback"}</small></label>
-        <label><FieldLabel label="Pre-goal inflation %" help="Inflates today's monthly expense from the base date to the goal year before computing target corpus." /><input type="number" step="0.1" value={goal.inflationRate} onChange={(event) => updateDraftGoal(goal.id, { inflationRate: Number(event.target.value) })} /></label>
-        <label><FieldLabel label="Target year" help="Year when the goal is needed. Goal readiness, needed-today corpus, and projections use this date." /><input type="number" value={targetYear} onChange={(event) => updateDraftGoal(goal.id, { targetDate: normalizeGoalYearInput(event.target.value) + "-01-01" })} /></label>
-        <label><FieldLabel label="Corpus multiple" help="Target corpus equals first goal-year annual expense times this multiple." /><input type="number" step="0.1" value={goal.corpusMultiple} onChange={(event) => updateDraftGoal(goal.id, { corpusMultiple: Number(event.target.value) })} /></label>
-        <label><FieldLabel label="Equity return %" help="Expected annual return for equity-mapped assets in goal projections and needed-today math." /><input type="number" step="0.1" value={goal.equityReturn} onChange={(event) => updateDraftGoal(goal.id, { equityReturn: Number(event.target.value) })} /></label>
-        <label><FieldLabel label="Debt return %" help="Expected annual return for debt-mapped assets in goal projections and drawdown models." /><input type="number" step="0.1" value={goal.debtReturn} onChange={(event) => updateDraftGoal(goal.id, { debtReturn: Number(event.target.value) })} /></label>
-        <label><FieldLabel label="Gold return %" help="Expected annual return for gold assets if mapped to this goal." /><input type="number" step="0.1" value={goal.goldReturn} onChange={(event) => updateDraftGoal(goal.id, { goldReturn: Number(event.target.value) })} /></label>
-        <label><FieldLabel label="Cash return %" help="Expected annual return for cash assets in goal projections and drawdown models." /><input type="number" step="0.1" value={goal.cashReturn} onChange={(event) => updateDraftGoal(goal.id, { cashReturn: Number(event.target.value) })} /></label>
-        <label><FieldLabel label="Spend growth %" help="Annual expense growth during the consumption/drawdown phase after the goal starts." /><input type="number" step="0.1" value={goal.drawdownSpendGrowth ?? 6} onChange={(event) => updateDraftGoal(goal.id, { drawdownSpendGrowth: Number(event.target.value) })} /></label>
-        <label><FieldLabel label="Corpus consumption years" help="Number of years to model withdrawals after the goal starts. Longevity tables and charts run to this horizon." /><input type="number" min="1" max="100" value={goal.drawdownHorizonYears ?? 45} onChange={(event) => updateDraftGoal(goal.id, { drawdownHorizonYears: Number(event.target.value) })} /></label>
-        <label><FieldLabel label="Withdrawal timing" help="Beginning-of-year withdraws before growth; end-of-year withdraws after growth. This affects corpus longevity." /><select value={goal.drawdownWithdrawalTiming ?? "beginning"} onChange={(event) => updateDraftGoal(goal.id, { drawdownWithdrawalTiming: event.target.value as Goal["drawdownWithdrawalTiming"] })}><option value="beginning">Beginning of year</option><option value="end">End of year</option></select></label>
-        <label title="How often the consumption allocation shifts from the source asset class to the destination asset class."><FieldLabel label="Shift every N years" help="How often the consumption allocation glides from one asset class to another." /><input type="number" min="1" max="50" value={goal.consumptionGlideIntervalYears ?? 5} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideIntervalYears: Number(event.target.value) })} /></label>
-        <label title="Percentage points moved each interval, for example 5 means equity can move from 50% to 45% at the next interval."><FieldLabel label="Shift amount %" help="Percentage points moved at each glide interval. Example: 5 moves equity from 50% to 45%." /><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideShiftPercent ?? 0} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideShiftPercent: Number(event.target.value) })} /></label>
-        <label><FieldLabel label="Shift from" help="Asset class reduced by the consumption glidepath." /><select value={goal.consumptionGlideFrom ?? "Equity"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFrom: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
-        <label><FieldLabel label="Shift to" help="Asset class increased by the consumption glidepath." /><select value={goal.consumptionGlideTo ?? "Debt"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideTo: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
-        <label title="Minimum allocation allowed for the source asset class after glidepath shifts. Example: 20 keeps equity from tapering below 20%."><FieldLabel label="Minimum source %" help="Floor for the source asset class after glidepath shifts. Example: keep equity from going below 20%." /><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideFloorPercent ?? 20} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFloorPercent: Number(event.target.value) })} /></label>
+      <div className="goal-settings-card-head">
+        <div><strong>{goal.name}</strong><span>{goal.type === "retirement" ? "Retirement" : "Custom"} · target {targetYear}</span></div>
+        <div className="goal-settings-toggle-cluster">
+          <label className="goal-include-toggle" title="Excluded goals remain visible individually but are not counted in Combined Goals totals."><input type="checkbox" checked={goal.includeInCombinedGoals !== false} onChange={(event) => updateDraftGoal(goal.id, { includeInCombinedGoals: event.target.checked })} /><span>Combined goals</span></label>
+          <label className="goal-include-toggle" title="Excluded goals remain visible individually but are not counted in the Expenses page rollups."><input type="checkbox" checked={goal.includeInExpenseTotals !== false} onChange={(event) => updateDraftGoal(goal.id, { includeInExpenseTotals: event.target.checked })} /><span>Expense totals</span></label>
+        </div>
       </div>
-      <div className="goal-settings-phase-grid">
-        <GoalSettingsAllocationBlock title="Accumulation target" detail="Used for goal rebalance before the goal year." goal={goal} phase="accumulation" updateAllocation={updateAllocation} />
-        <GoalSettingsAllocationBlock title="Consumption start target" detail="Starting mix at the goal date; glidepath shifts this mix during consumption." goal={goal} phase="consumption" updateAllocation={updateAllocation} />
-      </div>
+
+      <details className="goal-settings-subsection" open>
+        <summary><span>Goal basics</span><small>Name, goal year, expense source, and corpus target inputs.</small></summary>
+        <div className="settings-grid compact-settings-grid goal-settings-fields">
+          <label><FieldLabel label="Goal name" help="Display name used in Goals, Planning, Analytics, Expenses, and mappings." /><input value={goal.name} onChange={(event) => updateDraftGoal(goal.id, { name: event.target.value })} /></label>
+          <label><FieldLabel label="Type" help="Retirement uses the retirement defaults; Custom is for any other target corpus goal." /><select value={goal.type} onChange={(event) => updateDraftGoal(goal.id, { type: event.target.value as Goal["type"] })}><option value="retirement">Retirement</option><option value="custom">Custom</option></select></label>
+          <label title={expenseDerived ? "Derived from goal expense rows. Edit the expense CSV above to change this value." : "Manual monthly expense used when no expense rows exist."}><FieldLabel label={expenseDerived ? "Monthly expense (derived)" : "Monthly expense"} help={expenseDerived ? "Computed from imported expense rows and active scenario. Edit the expense CSV to change it." : "Manual monthly expense used only when no expense rows exist for this goal."} /><input type="number" value={expenseDerived ? expenseSummary.currentMonthlyExpense : goal.currentMonthlyExpense} disabled={expenseDerived} onChange={(event) => updateDraftGoal(goal.id, { currentMonthlyExpense: Number(event.target.value) })} /><small>{expenseDerived ? String(expenseSummary.rows.length) + " rows · base " + formatMoney(expenseSummary.baseMonthlyExpense, currency) : "manual fallback"}</small></label>
+          <label><FieldLabel label="Pre-goal inflation %" help="Inflates today's monthly expense from the base date to the goal year before computing target corpus." /><input type="number" step="0.1" value={goal.inflationRate} onChange={(event) => updateDraftGoal(goal.id, { inflationRate: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Target year" help="Year when the goal is needed. Goal readiness, needed-today corpus, and projections use this date." /><input type="number" value={targetYear} onChange={(event) => updateDraftGoal(goal.id, { targetDate: normalizeGoalYearInput(event.target.value) + "-01-01" })} /></label>
+          <label><FieldLabel label="Corpus multiple" help="Target corpus equals first goal-year annual expense times this multiple." /><input type="number" step="0.1" value={goal.corpusMultiple} onChange={(event) => updateDraftGoal(goal.id, { corpusMultiple: Number(event.target.value) })} /></label>
+        </div>
+      </details>
+
+      <details className="goal-settings-subsection">
+        <summary><span>Return assumptions</span><small>Annual category returns used for goal projections, readiness, and planning math.</small></summary>
+        <div className="settings-grid compact-settings-grid goal-settings-fields">
+          <label><FieldLabel label="Equity return %" help="Expected annual return for equity-mapped assets in goal projections and needed-today math." /><input type="number" step="0.1" value={goal.equityReturn} onChange={(event) => updateDraftGoal(goal.id, { equityReturn: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Debt return %" help="Expected annual return for debt-mapped assets in goal projections and drawdown models." /><input type="number" step="0.1" value={goal.debtReturn} onChange={(event) => updateDraftGoal(goal.id, { debtReturn: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Gold return %" help="Expected annual return for gold assets if mapped to this goal." /><input type="number" step="0.1" value={goal.goldReturn} onChange={(event) => updateDraftGoal(goal.id, { goldReturn: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Cash return %" help="Expected annual return for cash assets in goal projections and drawdown models." /><input type="number" step="0.1" value={goal.cashReturn} onChange={(event) => updateDraftGoal(goal.id, { cashReturn: Number(event.target.value) })} /></label>
+        </div>
+      </details>
+
+      <details className="goal-settings-subsection">
+        <summary><span>Accumulation glidepath</span><small>Optional pre-goal shift from one asset class to another; planning-only, not tax or actual net worth.</small></summary>
+        <div className="settings-grid compact-settings-grid goal-settings-fields">
+          <label><FieldLabel label="Start before goal (years)" help="How many years before the goal date this pre-goal glidepath starts. Set shift amount to 0 to disable it." /><input type="number" min="0" max="100" value={goal.accumulationGlideStartYearsBeforeGoal ?? 5} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideStartYearsBeforeGoal: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Shift every N years" help="How often the accumulation glide moves allocation from the source class to the destination class." /><input type="number" min="1" max="50" value={goal.accumulationGlideIntervalYears ?? 1} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideIntervalYears: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Shift amount %" help="Percentage points moved at each accumulation interval. Example: 5 moves equity from 60% to 55%." /><input type="number" min="0" max="100" step="1" value={goal.accumulationGlideShiftPercent ?? 0} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideShiftPercent: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Shift from" help="Asset class reduced by the accumulation glidepath." /><select value={goal.accumulationGlideFrom ?? "Equity"} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideFrom: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+          <label><FieldLabel label="Shift to" help="Asset class increased by the accumulation glidepath." /><select value={goal.accumulationGlideTo ?? "Debt"} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideTo: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+          <label><FieldLabel label="Minimum source %" help="Floor for the source asset class before the goal date. Example: keep equity from going below 20%." /><input type="number" min="0" max="100" step="1" value={goal.accumulationGlideFloorPercent ?? 20} onChange={(event) => updateDraftGoal(goal.id, { accumulationGlideFloorPercent: Number(event.target.value) })} /></label>
+        </div>
+        <p className="settings-section-note">This affects goal projected corpus, needed-today corpus, goal analytics, and planning views. It does not change holdings, actual net worth, transactions, or tax lots.</p>
+      </details>
+
+      <details className="goal-settings-subsection">
+        <summary><span>Drawdown and consumption glidepath</span><small>Post-goal withdrawal model and optional allocation glide after the goal starts.</small></summary>
+        <div className="settings-grid compact-settings-grid goal-settings-fields">
+          <label><FieldLabel label="Spend growth %" help="Annual expense growth during the consumption/drawdown phase after the goal starts." /><input type="number" step="0.1" value={goal.drawdownSpendGrowth ?? 6} onChange={(event) => updateDraftGoal(goal.id, { drawdownSpendGrowth: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Corpus consumption years" help="Number of years to model withdrawals after the goal starts. Longevity tables and charts run to this horizon." /><input type="number" min="1" max="100" value={goal.drawdownHorizonYears ?? 45} onChange={(event) => updateDraftGoal(goal.id, { drawdownHorizonYears: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Withdrawal timing" help="Beginning-of-year withdraws before growth; end-of-year withdraws after growth. This affects corpus longevity." /><select value={goal.drawdownWithdrawalTiming ?? "beginning"} onChange={(event) => updateDraftGoal(goal.id, { drawdownWithdrawalTiming: event.target.value as Goal["drawdownWithdrawalTiming"] })}><option value="beginning">Beginning of year</option><option value="end">End of year</option></select></label>
+          <label><FieldLabel label="Shift every N years" help="How often the consumption allocation glides from one asset class to another." /><input type="number" min="1" max="50" value={goal.consumptionGlideIntervalYears ?? 5} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideIntervalYears: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Shift amount %" help="Percentage points moved at each glide interval. Example: 5 moves equity from 50% to 45%." /><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideShiftPercent ?? 0} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideShiftPercent: Number(event.target.value) })} /></label>
+          <label><FieldLabel label="Shift from" help="Asset class reduced by the consumption glidepath." /><select value={goal.consumptionGlideFrom ?? "Equity"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFrom: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+          <label><FieldLabel label="Shift to" help="Asset class increased by the consumption glidepath." /><select value={goal.consumptionGlideTo ?? "Debt"} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideTo: event.target.value as AssetCategory })}>{categoryOrder.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+          <label><FieldLabel label="Minimum source %" help="Floor for the source asset class after glidepath shifts. Example: keep equity from going below 20%." /><input type="number" min="0" max="100" step="1" value={goal.consumptionGlideFloorPercent ?? 20} onChange={(event) => updateDraftGoal(goal.id, { consumptionGlideFloorPercent: Number(event.target.value) })} /></label>
+        </div>
+      </details>
+
+      <details className="goal-settings-subsection">
+        <summary><span>Phase allocation targets</span><small>Optional target mixes for accumulation/rebalancing and consumption start.</small></summary>
+        <div className="goal-settings-phase-grid">
+          <GoalSettingsAllocationBlock title="Accumulation target" detail="Used for goal rebalance before the goal year. Accumulation glide starts from this planning mix when configured." goal={goal} phase="accumulation" updateAllocation={updateAllocation} />
+          <GoalSettingsAllocationBlock title="Consumption start target" detail="Starting mix at the goal date; consumption glidepath shifts this mix during drawdown." goal={goal} phase="consumption" updateAllocation={updateAllocation} />
+        </div>
+      </details>
     </div>
   );
 }

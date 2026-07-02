@@ -80,6 +80,85 @@ describe("goal analytics", () => {
   });
 
 
+  it("keeps goal projection unchanged unless accumulation glide is enabled", () => {
+    const backup = createEmptyBackup("INR");
+    const baseGoal = buildGoal({ name: "Retirement", type: "retirement", currentMonthlyExpense: 10000, inflationRate: 0, targetYear: 2030, corpusMultiple: 10, equityReturn: 10, debtReturn: 6 }, "2026-01-01T00:00:00.000Z");
+    backup.goals.push({ ...baseGoal, id: "goal_retire", targetDate: "2030-01-01", targetAmount: 1200000, accumulationGlideShiftPercent: 0 });
+    backup.accounts.push({ id: "acct_eq", name: "Equity", institution: "Manual", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "inst_eq", name: "Equity Holding", type: "mutual_fund", currency: "INR", country: "IN", category: "Equity", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.manualBalances.push({ id: "bal_eq", accountId: "acct_eq", instrumentId: "inst_eq", label: "Equity Holding", category: "Equity", currency: "INR", value: 100000, investedAmount: 80000, investedCurrency: "INR", investedAsOfDate: "2026-01-01", asOfDate: "2026-01-01", source: { type: "manual" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.goalMappings.push(createGoalMapping("goal_retire", "bal_eq", 100, "2026-01-01T00:00:00.000Z"));
+
+    const progress = calculateGoalProgress(backup)[0];
+    const expected = 100000 * Math.pow(1.1, progress.yearsToGoal);
+
+    expect(progress.projectedValue).toBeCloseTo(expected, 2);
+    expect(progress.projectedCategoryValues.Equity).toBeCloseTo(progress.projectedValue, 2);
+    expect(progress.projectedCategoryValues.Debt).toBe(0);
+  });
+
+  it("applies accumulation glide to pre-goal projected category values", () => {
+    const backup = createEmptyBackup("INR");
+    const baseGoal = buildGoal({ name: "Retirement", type: "retirement", currentMonthlyExpense: 10000, inflationRate: 0, targetYear: 2030, corpusMultiple: 10, equityReturn: 10, debtReturn: 6 }, "2026-01-01T00:00:00.000Z");
+    backup.goals.push({
+      ...baseGoal,
+      id: "goal_retire",
+      targetDate: "2030-01-01",
+      targetAmount: 1200000,
+      accumulationGlideStartYearsBeforeGoal: 4,
+      accumulationGlideIntervalYears: 1,
+      accumulationGlideShiftPercent: 20,
+      accumulationGlideFrom: "Equity",
+      accumulationGlideTo: "Debt",
+      accumulationGlideFloorPercent: 40
+    });
+    backup.accounts.push({ id: "acct_eq", name: "Equity", institution: "Manual", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.instruments.push({ id: "inst_eq", name: "Equity Holding", type: "mutual_fund", currency: "INR", country: "IN", category: "Equity", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.manualBalances.push({ id: "bal_eq", accountId: "acct_eq", instrumentId: "inst_eq", label: "Equity Holding", category: "Equity", currency: "INR", value: 100000, investedAmount: 80000, investedCurrency: "INR", investedAsOfDate: "2026-01-01", asOfDate: "2026-01-01", source: { type: "manual" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+    backup.goalMappings.push(createGoalMapping("goal_retire", "bal_eq", 100, "2026-01-01T00:00:00.000Z"));
+
+    const progress = calculateGoalProgress(backup)[0];
+    const noGlideProjection = 100000 * Math.pow(1.1, progress.yearsToGoal);
+
+    expect(progress.projectedValue).toBeLessThan(noGlideProjection);
+    expect(progress.projectedValue).toBeGreaterThan(progress.mappedCurrentValue);
+    expect(progress.projectedCategoryValues.Equity).toBeGreaterThan(0);
+    expect(progress.projectedCategoryValues.Debt).toBeGreaterThan(0);
+    expect(progress.projectedCategoryValues.Equity + progress.projectedCategoryValues.Debt).toBeCloseTo(progress.projectedValue, 1);
+  });
+
+  it("uses accumulation target allocation as the glide starting mix when configured", () => {
+    const makeBackup = (allocation?: { Equity?: number; Debt?: number }) => {
+      const backup = createEmptyBackup("INR");
+      const goal = buildGoal({ name: "Retirement", type: "retirement", currentMonthlyExpense: 10000, inflationRate: 0, targetYear: 2030, corpusMultiple: 10, equityReturn: 10, debtReturn: 6 }, "2026-01-01T00:00:00.000Z");
+      backup.goals.push({
+        ...goal,
+        id: "goal_retire",
+        targetDate: "2030-01-01",
+        targetAmount: 1200000,
+        accumulationTargetAllocation: allocation,
+        accumulationGlideStartYearsBeforeGoal: 4,
+        accumulationGlideIntervalYears: 1,
+        accumulationGlideShiftPercent: 10,
+        accumulationGlideFrom: "Equity",
+        accumulationGlideTo: "Debt",
+        accumulationGlideFloorPercent: 20
+      });
+      backup.accounts.push({ id: "acct_eq", name: "Equity", institution: "Manual", type: "mutual_fund", currency: "INR", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+      backup.instruments.push({ id: "inst_eq", name: "Equity Holding", type: "mutual_fund", currency: "INR", country: "IN", category: "Equity", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+      backup.manualBalances.push({ id: "bal_eq", accountId: "acct_eq", instrumentId: "inst_eq", label: "Equity Holding", category: "Equity", currency: "INR", value: 100000, investedAmount: 80000, investedCurrency: "INR", investedAsOfDate: "2026-01-01", asOfDate: "2026-01-01", source: { type: "manual" }, userModified: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" });
+      backup.goalMappings.push(createGoalMapping("goal_retire", "bal_eq", 100, "2026-01-01T00:00:00.000Z"));
+      return backup;
+    };
+
+    const currentMixProgress = calculateGoalProgress(makeBackup())[0];
+    const targetMixProgress = calculateGoalProgress(makeBackup({ Equity: 50, Debt: 50 }))[0];
+
+    expect(targetMixProgress.projectedCategoryValues.Debt).toBeGreaterThan(currentMixProgress.projectedCategoryValues.Debt);
+    expect(targetMixProgress.projectedCategoryValues.Equity).toBeLessThan(currentMixProgress.projectedCategoryValues.Equity);
+    expect(targetMixProgress.projectedValue).toBeLessThan(currentMixProgress.projectedValue);
+  });
+
   it("uses per-holding taper only for goal planning and keeps actual portfolio value unchanged", () => {
     const backup = createEmptyBackup("INR");
     backup.goals.push({

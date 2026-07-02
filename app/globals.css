@@ -8609,3 +8609,222 @@ html {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Settings readability pass: progressive disclosure for advanced goal knobs. */
+.goal-settings-subsection {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid #dbe9ef;
+  border-radius: 12px;
+  background: #ffffff;
+  overflow: clip;
+}
+
+.goal-settings-subsection summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 12px 14px;
+  color: #0f172a;
+  cursor: pointer;
+  list-style: none;
+  background: linear-gradient(180deg, #f8fbfd 0%, #eef7f7 100%);
+  border-bottom: 1px solid transparent;
+}
+
+.goal-settings-subsection[open] summary {
+  border-bottom-color: #dbe9ef;
+}
+
+.goal-settings-subsection summary::-webkit-details-marker {
+  display: none;
+}
+
+.goal-settings-subsection summary::after {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid #0f766e;
+  border-bottom: 2px solid #0f766e;
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+  margin-right: 3px;
+}
+
+.goal-settings-subsection[open] summary::after {
+  transform: rotate(225deg);
+  margin-top: 5px;
+}
+
+.goal-settings-subsection summary span {
+  display: block;
+  min-width: 0;
+  color: #0f172a;
+  font-size: clamp(0.98rem, 1.2vw, 1.08rem);
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.goal-settings-subsection summary small {
+  display: block;
+  min-width: 0;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.goal-settings-subsection > .settings-grid,
+.goal-settings-subsection > .goal-settings-phase-grid,
+.goal-settings-subsection > .settings-section-note {
+  margin: 0 12px 12px;
+}
+
+.settings-section-note {
+  color: #475569;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  padding: 10px 12px;
+  border: 1px solid #dbe9ef;
+  border-radius: 10px;
+  background: #f8fbfd;
+}
+
+@media (max-width: 640px) {
+  .goal-settings-subsection summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 11px 12px;
+  }
+
+  .goal-settings-subsection > .settings-grid,
+  .goal-settings-subsection > .goal-settings-phase-grid,
+  .goal-settings-subsection > .settings-section-note {
+    margin: 0 10px 10px;
+  }
+}
+
+/* Settings page IA: group optional assumptions so the page is scan-first, edit-second. */
+.settings-section-list {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.settings-command-card {
+  gap: 12px;
+}
+
+.settings-section-card {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid #d8e8ee;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+  overflow: clip;
+}
+
+.settings-section-card summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 16px 18px;
+  cursor: pointer;
+  list-style: none;
+  background: linear-gradient(180deg, #ffffff 0%, #f0f8f8 100%);
+  border-bottom: 1px solid transparent;
+}
+
+.settings-section-card[open] summary {
+  border-bottom-color: #d8e8ee;
+}
+
+.settings-section-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-section-card summary::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid #0f766e;
+  border-bottom: 2px solid #0f766e;
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+  margin-right: 4px;
+}
+
+.settings-section-card[open] summary::after {
+  transform: rotate(225deg);
+  margin-top: 6px;
+}
+
+.settings-section-card summary span {
+  display: block;
+  color: #0f172a;
+  font-size: clamp(1.05rem, 1.35vw, 1.22rem);
+  font-weight: 950;
+  line-height: 1.15;
+}
+
+.settings-section-card summary small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.settings-section-card > .settings-grid,
+.settings-section-card > .settings-panel,
+.settings-section-card > .planning-draft-editor,
+.settings-section-card > .goal-settings-draft-editor,
+.settings-section-card > .message {
+  margin: 0 16px 16px;
+}
+
+.settings-section-card > .planning-draft-editor,
+.settings-section-card > .goal-settings-draft-editor {
+  margin-top: 0;
+}
+
+@media (max-width: 640px) {
+  .settings-section-card summary {
+    padding: 13px 14px;
+  }
+
+  .settings-section-card > .settings-grid,
+  .settings-section-card > .settings-panel,
+  .settings-section-card > .planning-draft-editor,
+  .settings-section-card > .goal-settings-draft-editor,
+  .settings-section-card > .message {
+    margin: 0 12px 12px;
+  }
+}
+
+/* Final sidebar selected-state contract: active page buttons are explicitly green, not image-only. */
+html body .app-shell-v2 .nav button.active,
+html body .app-shell-v2 .nav button.active:disabled {
+  background: #0f766e !important;
+  background-color: #0f766e !important;
+  background-image: none !important;
+  border-color: #0f766e !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 22px rgba(15, 118, 110, 0.24) !important;
+  opacity: 1 !important;
+}
+
+html body .app-shell-v2 .nav button.active svg,
+html body .app-shell-v2 .nav button.active span,
+html body .app-shell-v2 .nav button.active small {
+  color: #ffffff !important;
+  stroke: currentColor !important;
+}
